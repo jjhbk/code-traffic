@@ -1,0 +1,26 @@
+{
+  "name": "signal-box",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A desktop signal board for Claude Code sessions",
+  "main": "main.js",
+  "scripts": {
+    "hooks:print": "node hooks.js --print",
+    "start": "node launch-electron.js",
+    "install-hooks": "node hooks.js --install",
+    "install-codex-hooks": "node codex-hooks.js --install",
+    "postinstall": "electron-rebuild -f -w node-pty || true"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^44.3.0"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

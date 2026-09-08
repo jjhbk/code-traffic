@@ -1,0 +1,24 @@
+node_modules/
+dist/
+out/
+release/
+
+# Electron and native-module build output
+.webpack/
+.cache/
+build/
+
+# Runtime/session data and local logs
+*.log
+sessions.json
+
+# Local environment and editor files
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+
+# OS metadata
+.DS_Store
+Thumbs.db

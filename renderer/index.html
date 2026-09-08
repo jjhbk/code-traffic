@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';">
+    <title>Signal Box</title>
+    <link rel="stylesheet" href="styles.css?v=4">
+    <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css?v=3">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Signal Box</h1>
+          <p id="summary">No sessions</p>
+        </div>
+          <div class="actions">
+            <button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="false">Sound off</button>
+            <select id="agent-select" class="agent-select" aria-label="Agent">
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
+            </select>
+            <button id="clear-all" class="clear-all" type="button">Clear all</button>
+            <button id="new-session" class="new-session" type="button">+ New session</button>
+          </div>
+      </header>
+      <section id="board" class="board" aria-live="polite"></section>
+      <section id="terminal-view" class="terminal-view" hidden>
+        <div class="terminal-bar">
+          <button id="terminal-back" type="button">← Board</button>
+          <span id="terminal-title"></span>
+          <button id="terminal-close" class="danger" type="button">Close session</button>
+        </div>
+        <div id="terminal"></div>
+      </section>
+      <p id="error" class="error" role="alert" hidden></p>
+    </main>
+    <script src="../node_modules/@xterm/xterm/lib/xterm.js?v=3"></script>
+    <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js?v=3"></script>
+    <script src="audio.js?v=3"></script>
+    <script src="app.js?v=3"></script>
+  </body>
+</html>
