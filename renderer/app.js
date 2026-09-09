@@ -253,7 +253,7 @@ window.addEventListener('resize', () => {
 window.signalBox.onSessionsChanged(({ sessions: next, changed }) => {
   sessions = next;
   render();
-  if (changed && changed.state && !changed.navigation) audio.play(changed.state);
+  if (changed && changed.state && !changed.navigation && !changed.repeated) audio.play(changed.state);
 });
 window.signalBox.onPtyData(({ tile, data }) => {
   const entry = terminals.get(tile);

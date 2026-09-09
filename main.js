@@ -288,6 +288,9 @@ async function start() {
   wireIpc();
   createWindow();
   telegram.start();
+  for (const session of board.list()) {
+    if (session.state === 'approval') telegram.notifyState(session, 'approval');
+  }
 }
 
 app.whenReady().then(start).catch((error) => {

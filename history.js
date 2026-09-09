@@ -77,6 +77,34 @@ function parseCodexQuestions(file) {
   return [...pending.values()].at(-1) || [];
 }
 
+function parseClaudeQuestions(file) {
+  const pending = new Map();
+  for (const line of readLines(file)) {
+    let record;
+    try { record = JSON.parse(line); } catch (_) { continue; }
+    const content = record.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (record.type === 'assistant' && part?.type === 'tool_use' && part.name === 'AskUserQuestion') {
+        const questions = Array.isArray(part.input?.questions) ? part.input.questions : [];
+        pending.set(part.id, questions.map((question) => ({
+          id: question.id || null,
+          header: question.header || '',
+          question: question.question || '',
+          multiSelect: Boolean(question.multiSelect),
+          options: Array.isArray(question.options) ? question.options.map((option) => ({
+            label: option.label || '',
+            description: option.description || '',
+          })).filter((option) => option.label) : [],
+        })).filter((question) => question.question));
+      } else if (record.type === 'user' && part?.type === 'tool_result' && part.tool_use_id) {
+        pending.delete(part.tool_use_id);
+      }
+    }
+  }
+  return [...pending.values()].at(-1) || [];
+}
+
 function questionsFromText(value) {
   const text = String(value || '').trim();
   if (!text) return [];
@@ -130,9 +158,12 @@ function sessionHistory(session) {
       pairs = parseCodexHistory(found.path);
       pendingQuestions = parseCodexQuestions(found.path);
     }
-  } else {
+  } else if (session.agent === 'claude') {
     source = claudeSessionFile(sessionId, session.cwd);
-    if (source) pairs = parseClaudeHistory(source);
+    if (source) {
+      pairs = parseClaudeHistory(source);
+      pendingQuestions = parseClaudeQuestions(source);
+    }
   }
   if (session.state === 'approval' && !pendingQuestions.length) {
     pendingQuestions = questionsFromText(pairs.at(-1)?.output);
@@ -167,6 +198,7 @@ module.exports = {
   formatHistoryPairs,
   pairMessages,
   parseClaudeHistory,
+  parseClaudeQuestions,
   parseCodexHistory,
   parseCodexQuestions,
   questionsFromText,

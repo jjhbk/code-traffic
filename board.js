@@ -166,7 +166,7 @@ class Board extends EventEmitter {
         this.emit('change', { key, state: nextState });
       } else {
         if (metadataChanged) this.persist();
-        this.emit('change');
+        this.emit('change', nextState === 'approval' ? { key, state: nextState, repeated: true } : undefined);
       }
     }
   }

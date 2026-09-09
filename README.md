@@ -308,7 +308,10 @@ An amber session sends the actual pending question, including each option and
 its description. Tap an inline option button to submit that choice directly to
 the correct session; if a prompt has several questions, answer them from top to
 bottom. Prompts without structured options include the question plus `/use`
-and `/send` instructions as a text fallback.
+and `/send` instructions as a text fallback. Structured questions are read from
+both Codex `request_user_input` records and Claude Code `AskUserQuestion` tool
+calls. If Signal Box restarts while a session is already waiting, it sends that
+still-pending amber question again after Telegram starts.
 
 A session sends a completion message only when it actually enters the done
 state; a generic stop event cannot overwrite an outstanding approval state.

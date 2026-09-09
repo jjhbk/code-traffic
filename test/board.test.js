@@ -77,6 +77,9 @@ function waitFor(board, predicate) {
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'working');
   await post(port, 'state=approval&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'approval');
+  const repeatedApproval = new Promise((resolve) => board.once('change', resolve));
+  await post(port, 'state=approval&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
+  assert.deepStrictEqual(await repeatedApproval, { key: 'owned', state: 'approval', repeated: true });
   await post(port, 'state=done&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   assert.strictEqual(board.list().find((s) => s.key === 'owned').state, 'approval');
   await post(port, 'state=working&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));

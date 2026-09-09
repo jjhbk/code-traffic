@@ -5,6 +5,7 @@ const path = require('path');
 const {
   formatHistoryPairs,
   parseClaudeHistory,
+  parseClaudeQuestions,
   parseCodexHistory,
   parseCodexQuestions,
   questionsFromText,
@@ -25,10 +26,23 @@ fs.writeFileSync(codexFile, [
 fs.writeFileSync(claudeFile, [
   { timestamp: '2026-01-01', type: 'user', uuid: 'u1', message: { content: 'Fix it' } },
   { timestamp: '2026-01-01', type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'Fixed.' }] } },
+  { timestamp: '2026-01-01', type: 'assistant', uuid: 'a2', message: { content: [{ type: 'tool_use', id: 'old-question', name: 'AskUserQuestion', input: { questions: [{ header: 'Old', question: 'Resolved?', options: [{ label: 'Yes' }] }] } }] } },
+  { timestamp: '2026-01-01', type: 'user', uuid: 'u2', message: { content: [{ type: 'tool_result', tool_use_id: 'old-question', content: 'Answered' }] } },
+  { timestamp: '2026-01-01', type: 'assistant', uuid: 'a3', message: { content: [{ type: 'tool_use', id: 'pending-question', name: 'AskUserQuestion', input: { questions: [{ header: 'Deploy', question: 'Where should this deploy?', multiSelect: false, options: [{ label: 'Staging', description: 'Deploy to staging.' }, { label: 'Production', description: 'Deploy to production.' }] }] } }] } },
 ].map(JSON.stringify).join('\n'));
 
 assert.deepStrictEqual(parseCodexHistory(codexFile)[0], { prompt: 'Build it', output: 'Built.', timestamp: '2026-01-01' });
 assert.deepStrictEqual(parseClaudeHistory(claudeFile)[0], { prompt: 'Fix it', output: 'Fixed.', timestamp: '2026-01-01' });
+assert.deepStrictEqual(parseClaudeQuestions(claudeFile), [{
+  id: null,
+  header: 'Deploy',
+  question: 'Where should this deploy?',
+  multiSelect: false,
+  options: [
+    { label: 'Staging', description: 'Deploy to staging.' },
+    { label: 'Production', description: 'Deploy to production.' },
+  ],
+}]);
 assert.match(formatHistoryPairs(parseCodexHistory(codexFile)), /Input:\nBuild it\n\nOutput:\nBuilt\./);
 assert.deepStrictEqual(parseCodexQuestions(codexFile), [{
   id: 'runtime',
