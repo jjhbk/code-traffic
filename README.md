@@ -304,6 +304,13 @@ is still running. Each Telegram command uses a fresh non-interactive shell, so
 shell-only state such as `cd` or exported variables does not carry into the
 next command.
 
+For Claude Code sessions, Signal Box sends the prompt text and Enter as separate
+terminal events. Codex prompts use the CLI's purpose-built `codex queue`
+command with the saved thread ID, avoiding fragile terminal keystroke emulation.
+Signal Box also launches Codex with `disable_paste_burst=true` for other remote
+interactions. The override only applies to Codex processes launched inside
+Signal Box and does not modify the user's global Codex configuration.
+
 An amber session sends the actual pending question, including each option and
 its description. Tap an inline option button to submit that choice directly to
 the correct session; if a prompt has several questions, answer them from top to
@@ -432,6 +439,7 @@ node --check renderer/audio.js
 node test/board.test.js
 node test/codex-sessions.test.js
 node test/codex-notify.test.js
+node test/codex-control.test.js
 node test/history.test.js
 node test/session-command.test.js
 node test/terminal-command.test.js
@@ -447,6 +455,7 @@ board.js                    Session state and hook server
 hooks.js                    Claude settings installer
 codex-hooks.js              Codex config installer
 codex-notify.js             Codex notification adapter
+codex-control.js            Reliable Codex thread prompt submission
 codex-sessions.js           Codex resume-ID validation and recovery
 history.js                  Normalized Claude/Codex prompt-output history
 terminal-command.js         Clean Telegram command execution and output

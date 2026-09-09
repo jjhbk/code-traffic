@@ -8,6 +8,7 @@ const sessions = [
   { key: 'one', tile: 'one', project: 'alpha', agent: 'claude', state: 'working', owned: true },
   { key: 'two', project: 'beta', agent: 'codex', state: 'done', owned: false },
   { key: 'three', tile: 'three', project: 'utilities', agent: 'terminal', state: null, owned: true },
+  { key: 'four', tile: 'four', project: 'gamma', agent: 'codex', state: null, owned: true },
 ];
 assert.match(sessionListText(sessions, 'one'), /alpha.*selected/);
 assert.match(sessionListText(sessions, 'one'), /beta.*view only/);
@@ -17,6 +18,7 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   const sent = [];
   const writes = [];
   const ensured = [];
+  const queuedPrompts = [];
   const control = new TelegramControl({
     token: 'test-token',
     chatId: '42',
@@ -37,6 +39,8 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
     writeSession: (tile, data) => writes.push({ tile, data }),
     executeTerminal: async (_session, command) => ({ output: `/workspace\nreceived: ${command}`, code: 0, signal: null, truncated: false }),
     interruptTerminal: () => true,
+    sendPrompt: async (session, prompt) => queuedPrompts.push({ tile: session.tile, prompt }),
+    submitDelayMs: 0,
     fetchImpl: async (_url, options) => {
       sent.push(JSON.parse(options.body));
       return { ok: true, json: async () => ({ ok: true, result: {} }) };
@@ -54,13 +58,31 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   await control.handleUpdate({ message: { chat: { id: 42 }, text: '/use 1' } });
   await control.handleUpdate({ message: { chat: { id: 42 }, text: 'run the tests' } });
   assert.deepStrictEqual(ensured, ['one']);
-  assert.deepStrictEqual(writes, [{ tile: 'one', data: 'run the tests\r' }]);
+  assert.deepStrictEqual(writes, [
+    { tile: 'one', data: 'run the tests' },
+    { tile: 'one', data: '\r' },
+  ]);
   assert.match(sent.at(-1).text, /Prompt sent to alpha/);
+
+  await control.handleUpdate({ message: { chat: { id: 42 }, text: '/use 2' } });
+  assert.match(sent.at(-1).text, /external/i);
+
+  await control.handleUpdate({ message: { chat: { id: 42 }, text: '/use 4' } });
+  await control.handleUpdate({ message: { chat: { id: 42 }, text: 'run codex' } });
+  assert.deepStrictEqual(queuedPrompts, [{ tile: 'four', prompt: 'run codex' }]);
+  assert.deepStrictEqual(writes, [
+    { tile: 'one', data: 'run the tests' },
+    { tile: 'one', data: '\r' },
+  ]);
+  assert.match(sent.at(-1).text, /Prompt sent to gamma/);
 
   await control.handleUpdate({ message: { chat: { id: 42 }, text: '/use 3' } });
   await control.handleUpdate({ message: { chat: { id: 42 }, text: 'pwd' } });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepStrictEqual(writes, [{ tile: 'one', data: 'run the tests\r' }]);
+  assert.deepStrictEqual(writes, [
+    { tile: 'one', data: 'run the tests' },
+    { tile: 'one', data: '\r' },
+  ]);
   assert.match(sent.at(-1).text, /^\$ pwd/);
   assert.match(sent.at(-1).text, /received: pwd/);
 

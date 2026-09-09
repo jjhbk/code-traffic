@@ -10,6 +10,7 @@ const { sessionArgs } = require('./session-command');
 const { runTerminalCommand } = require('./terminal-command');
 const { TelegramControl } = require('./telegram');
 const { resolveCodexSessionId } = require('./codex-sessions');
+const { queuePrompt } = require('./codex-control');
 const { sessionHistory } = require('./history');
 
 // WSLg can expose a display while its GPU shared-image path is unavailable.
@@ -211,6 +212,22 @@ function interruptRemoteTerminal(session) {
   return true;
 }
 
+async function sendRemoteAgentPrompt(session, message) {
+  if (session.agent !== 'codex') return false;
+  const threadId = resolveCodexSessionId(session.sessionId, session.cwd);
+  if (!threadId) throw new Error('Could not resolve this Codex session ID. Open the session and submit one prompt locally first.');
+  const saved = board.sessions.get(session.tile || session.key);
+  if (saved && saved.sessionId !== threadId) {
+    saved.sessionId = threadId;
+    board.persist();
+  }
+  const binary = findAgent('codex');
+  if (!binary) throw new Error('Codex CLI was not found on PATH.');
+  await queuePrompt({ binary, threadId, message, cwd: session.cwd });
+  board.handleHook('working', session.tile || session.key, { session_id: threadId, cwd: session.cwd, submitted: true });
+  return true;
+}
+
 function notifyUser(changed) {
   const session = board.list().find((item) => item.key === changed.key);
   const labels = { working: 'Working', approval: 'Needs approval', done: 'Finished' };
@@ -260,6 +277,7 @@ async function start() {
     getHistory: sessionHistory,
     executeTerminal: executeRemoteTerminal,
     interruptTerminal: interruptRemoteTerminal,
+    sendPrompt: sendRemoteAgentPrompt,
     ensureSession: async (tile) => {
       const session = board.sessions.get(tile);
       if (!session || !session.owned) throw new Error('That session is not remotely controllable.');

@@ -25,7 +25,7 @@ function sessionListText(sessions, selectedTile) {
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, sendPrompt, submitDelayMs = 75, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
@@ -34,6 +34,8 @@ class TelegramControl {
     this.writeSession = writeSession;
     this.executeTerminal = executeTerminal;
     this.interruptTerminal = interruptTerminal;
+    this.sendPrompt = sendPrompt;
+    this.submitDelayMs = submitDelayMs;
     this.fetch = fetchImpl;
     this.selectedTile = null;
     this.offset = 0;
@@ -273,8 +275,18 @@ class TelegramControl {
           .catch((error) => console.error(`[telegram] terminal response failed: ${error.message}`));
         return;
       }
+      if (session.agent === 'codex' && this.sendPrompt) {
+        await this.sendPrompt(session, argument);
+        await this.send(`Prompt sent to ${session.project}.`);
+        return;
+      }
       await this.ensureSession(this.selectedTile);
-      this.writeSession(this.selectedTile, `${argument}\r`);
+      // Codex's TUI can classify text and Enter delivered in one PTY write as
+      // a paste, leaving the text in its composer. Match real keyboard input:
+      // type first, then deliver Enter as a separate event.
+      this.writeSession(this.selectedTile, argument);
+      await delay(this.submitDelayMs);
+      this.writeSession(this.selectedTile, '\r');
       await this.send(`Prompt sent to ${session.project}.`);
       return;
     }
