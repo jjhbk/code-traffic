@@ -8,10 +8,12 @@ assert.strictEqual(terminalQuestion.options[2].keys, '\x1b');
 const session = { key: 'codex-1', tile: 'codex-1', agent: 'codex', state: 'working' };
 let pending = [{ question: 'Which option?', options: [{ label: 'A' }] }];
 const approvals = [];
+const clears = [];
 const stop = startCodexMonitor({
   listSessions: () => [session],
   getHistory: () => ({ pendingQuestions: pending }),
   onApproval: (value) => approvals.push(value.tile),
+  onQuestionsCleared: (value) => clears.push(value.tile),
   intervalMs: 10,
 });
 
@@ -24,6 +26,7 @@ setTimeout(() => {
     setTimeout(() => {
       stop();
       assert.deepStrictEqual(approvals, ['codex-1', 'codex-1']);
+      assert.deepStrictEqual(clears, ['codex-1']);
       console.log('codex monitor tests passed');
     }, 25);
   }, 25);

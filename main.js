@@ -7,6 +7,7 @@ const { app, BrowserWindow, dialog, ipcMain, Notification, screen } = require('e
 const { Board } = require('./board');
 const { runningAgents } = require('./processes');
 const { sessionArgs } = require('./session-command');
+const { checkCodexSandbox } = require('./codex-sandbox');
 const { runTerminalCommand } = require('./terminal-command');
 const { TelegramControl } = require('./telegram');
 const { resolveCodexSessionId } = require('./codex-sessions');
@@ -105,7 +106,8 @@ function wireIpc() {
     if (!SESSION_TYPES.has(agent)) throw new Error('Choose Claude Code, Codex, or Terminal.');
     const tile = crypto.randomUUID();
     board.register(tile, cwd, agent);
-    await spawnSession(tile, cwd, agent, null, false);
+    try { await spawnSession(tile, cwd, agent, null, false); }
+    catch (error) { board.close(tile); throw error; }
     return tile;
   });
   ipcMain.handle('session:open', async (_event, { tile } = {}) => {
@@ -115,6 +117,7 @@ function wireIpc() {
     return true;
   });
   ipcMain.handle('session:close', (_event, { tile } = {}) => {
+    telegram?.clearApproval(tile);
     const child = terminals.get(tile);
     if (child) {
       child.kill();
@@ -147,11 +150,14 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
   if (!cwd || typeof cwd !== 'string') throw new Error('Choose a project folder first.');
   if (terminals.has(tile)) return;
   if (!SESSION_TYPES.has(agent)) throw new Error('Unsupported session type.');
+  const launchRecord = board.sessions.get(tile);
+  if (!launchRecord) throw new Error('This session was closed.');
   const binary = findAgent(agent);
   const displayName = agent === 'codex' ? 'Codex CLI' : agent === 'terminal' ? 'A system shell' : 'Claude Code';
   if (!binary) throw new Error(`${displayName} was not found. Install or configure it, then restart Signal Box.`);
   if (agent === 'codex' && reopening) {
     const resolvedId = resolveCodexSessionId(sessionId, cwd);
+    if (!resolvedId) throw new Error('Cannot identify this Codex thread safely. Create a new session instead.');
     sessionId = resolvedId;
     const saved = board?.sessions.get(tile);
     if (resolvedId && saved && saved.sessionId !== resolvedId) {
@@ -160,6 +166,10 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
     }
   }
   const args = sessionArgs(agent, sessionId, reopening);
+  const env = { ...process.env, SIGNAL_TILE: tile, SIGNAL_AGENT: agent };
+  if (agent === 'codex') await checkCodexSandbox(binary, cwd, env);
+  if (board.sessions.get(tile) !== launchRecord) throw new Error('This session was closed during startup.');
+  if (terminals.has(tile)) return;
   const child = pty.spawn(binary, args, {
     name: 'xterm-256color',
     // These are only safe startup values. The renderer immediately resizes
@@ -167,7 +177,7 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
     cols: 80,
     rows: 24,
     cwd,
-    env: { ...process.env, SIGNAL_TILE: tile, SIGNAL_AGENT: agent },
+    env,
   });
   terminals.set(tile, child);
   child.onData((data) => {
@@ -275,10 +285,19 @@ function xmlEscape(value) {
   return value.replace(/[<>&'"]/g, (character) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[character]));
 }
 
+function sessionHistoryWithTerminalQuestions(session) {
+  const history = sessionHistory(session);
+  const terminalQuestion = codexTerminalQuestions.get(session.tile || session.key)?.question;
+  if (session.agent === 'codex' && terminalQuestion && !history.pendingQuestions.length) {
+    history.pendingQuestions = [terminalQuestion];
+  }
+  return history;
+}
+
 async function start() {
   board = new Board({
     storagePath: path.join(app.getPath('userData'), 'sessions.json'),
-    historyProvider: sessionHistory,
+    historyProvider: sessionHistoryWithTerminalQuestions,
   });
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
   try {
@@ -293,14 +312,7 @@ async function start() {
     token: process.env.TELEGRAM_BOT_TOKEN,
     chatId: process.env.TELEGRAM_CHAT_ID,
     listSessions: () => board.list(),
-    getHistory: (session) => {
-      const history = sessionHistory(session);
-      const terminalQuestion = codexTerminalQuestions.get(session.tile || session.key)?.question;
-      if (session.agent === 'codex' && terminalQuestion && !history.pendingQuestions.length) {
-        history.pendingQuestions = [terminalQuestion];
-      }
-      return history;
-    },
+    getHistory: sessionHistoryWithTerminalQuestions,
     executeTerminal: executeRemoteTerminal,
     interruptTerminal: interruptRemoteTerminal,
     sendPrompt: sendRemoteAgentPrompt,
@@ -310,12 +322,13 @@ async function start() {
       await spawnSession(tile, session.cwd, session.agent || 'claude', session.sessionId, true);
       return session;
     },
-    writeSession: (tile, data) => {
+    writeSession: (tile, data, { approval = false } = {}) => {
       const child = terminals.get(tile);
       if (!child) throw new Error('That terminal is not running.');
-      child.write(data);
       const session = board.sessions.get(tile);
-      if (data.endsWith('\r') && session?.agent !== 'terminal') {
+      if ((approval || data.endsWith('\r')) && session?.agent === 'codex') codexTerminalQuestions.delete(tile);
+      child.write(data);
+      if (!approval && data.endsWith('\r') && session?.agent !== 'terminal') {
         board.handleHook('working', tile, { cwd: session?.cwd, submitted: true });
       }
     },
@@ -325,17 +338,19 @@ async function start() {
       windowRef.webContents.send('sessions:changed', { sessions: board.list(), changed });
     }
     if (desktopNotificationsEnabled && changed && changed.state && !changed.navigation) notifyUser(changed);
+    if (changed?.state && changed.state !== 'approval') telegram.clearApproval(changed.key);
     if (['approval', 'done'].includes(changed?.state) && !changed.navigation && !changed.repeated) {
       telegram.notifyState(board.list().find((session) => session.key === changed.key), changed.state);
     }
   });
   stopCodexMonitor = startCodexMonitor({
     listSessions: () => board.list(),
-    getHistory: sessionHistory,
+    getHistory: sessionHistoryWithTerminalQuestions,
     onApproval: (session) => board.handleHook('approval', session.tile || session.key, {
       session_id: session.sessionId,
       cwd: session.cwd,
     }),
+    onQuestionsCleared: (session) => board.completePendingDone(session.tile || session.key),
   });
   wireIpc();
   createWindow();

@@ -2,10 +2,13 @@ function questionSignature(questions) {
   return JSON.stringify(questions || []);
 }
 
-function startCodexMonitor({ listSessions, getHistory, onApproval, intervalMs = 500 }) {
+function startCodexMonitor({ listSessions, getHistory, onApproval, onQuestionsCleared, intervalMs = 500 }) {
   const seen = new Map();
   const check = () => {
-    for (const session of listSessions()) {
+    const sessions = listSessions();
+    const live = new Set(sessions.map((session) => session.tile || session.key));
+    for (const tile of seen.keys()) if (!live.has(tile)) seen.delete(tile);
+    for (const session of sessions) {
       if (session.agent !== 'codex') continue;
       let questions = [];
       try { questions = getHistory(session)?.pendingQuestions || []; } catch (_) { continue; }
@@ -17,6 +20,7 @@ function startCodexMonitor({ listSessions, getHistory, onApproval, intervalMs = 
           onApproval(session);
         }
       } else {
+        if (seen.has(tile)) onQuestionsCleared?.(session);
         seen.delete(tile);
       }
     }

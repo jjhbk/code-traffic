@@ -154,10 +154,18 @@ class Board extends EventEmitter {
         return;
       }
       if (state === 'done' && session.state === 'approval') {
-        if (metadataChanged) this.persist();
-        this.emit('change');
-        return;
+        let pendingQuestions;
+        try { pendingQuestions = this.historyProvider?.({ ...session })?.pendingQuestions; } catch (_) { pendingQuestions = null; }
+        // Ignore a stop while an approval is still pending, but allow a real
+        // completion after the question has already been answered.
+        if (!Array.isArray(pendingQuestions) || pendingQuestions.length) {
+          session.pendingDone = true;
+          if (metadataChanged) this.persist();
+          this.emit('change');
+          return;
+        }
       }
+      session.pendingDone = false;
       const nextState = state === 'closed' ? null : state;
       if (session.state !== nextState) {
         session.state = nextState;
@@ -171,9 +179,18 @@ class Board extends EventEmitter {
     }
   }
 
+  completePendingDone(tile) {
+    const session = this.sessions.get(tile);
+    if (!session?.pendingDone || session.state !== 'approval') return false;
+    this.handleHook('done', tile, { session_id: session.sessionId, cwd: session.cwd });
+    return true;
+  }
+
   listen(port = 4747, host = '127.0.0.1') {
     this.server = http.createServer((request, response) => {
-      const url = new URL(request.url, `http://${host}`);
+      let url;
+      try { url = new URL(request.url, `http://${host}`); }
+      catch (_) { sendJson(response, 400, { error: 'Invalid request URL.' }); return; }
       if (request.method === 'GET' && url.pathname === '/api/sessions') {
         const sessions = this.list().map((session) => ({
           ...session,
@@ -201,11 +218,22 @@ class Board extends EventEmitter {
       const state = url.searchParams.get('state');
       const tile = url.searchParams.get('tile') || null;
       let body = '';
+      let bytes = 0;
+      let tooLarge = false;
       request.setEncoding('utf8');
-      request.on('data', (chunk) => { body += chunk; });
-      response.writeHead(200);
-      response.end();
+      request.on('error', () => {});
+      request.on('data', (chunk) => {
+        bytes += Buffer.byteLength(chunk);
+        if (bytes > 1024 * 1024) {
+          if (!tooLarge) sendJson(response, 413, { error: 'Hook payload exceeds 1 MiB.' });
+          tooLarge = true;
+          body = '';
+          return;
+        }
+        body += chunk;
+      });
       request.on('end', () => {
+        if (tooLarge) return;
         let payload = {};
         if (body) {
           try {
@@ -216,6 +244,7 @@ class Board extends EventEmitter {
           }
         }
         this.handleHook(state, tile, payload);
+        sendJson(response, 200, { ok: true });
       });
     });
     return new Promise((resolve, reject) => {

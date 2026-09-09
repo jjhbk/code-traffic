@@ -36,11 +36,6 @@ function install() {
 
 function uninstall() {
   const target = paths();
-  if (fs.existsSync(target.backup)) {
-    fs.copyFileSync(target.backup, target.config);
-    fs.unlinkSync(target.backup);
-    return;
-  }
   if (!fs.existsSync(target.config)) return;
   const lines = fs.readFileSync(target.config, 'utf8').split(/\r?\n/).filter((line) => !line.includes(commandMarker));
   fs.writeFileSync(target.config, lines.join('\n'));

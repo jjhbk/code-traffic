@@ -5,6 +5,7 @@ const path = require('path');
 const electron = require('electron');
 const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
+delete environment.SIGNAL_BOX_NO_SANDBOX;
 
 const wsl = Boolean(environment.WSL_DISTRO_NAME);
 const sandboxHelperPath = path.join(path.dirname(electron), 'chrome-sandbox');
@@ -35,12 +36,17 @@ if (noSandbox) {
 const argumentsForElectron = [
   ...(noSandbox ? ['--no-sandbox'] : []),
   ...(wsl ? ['--disable-gpu', '--disable-gpu-compositing'] : []),
-  '.',
+  __dirname,
 ];
 const child = spawn(electron, argumentsForElectron, {
-  cwd: process.cwd(),
+  cwd: __dirname,
   env: environment,
   stdio: 'inherit',
+});
+
+child.on('error', (error) => {
+  console.error(`Could not launch Signal Box: ${error.message}`);
+  process.exitCode = 1;
 });
 
 child.on('exit', (code, signal) => {

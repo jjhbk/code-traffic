@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 const http = require('http');
-const { resolveCodexSessionId } = require('./codex-sessions');
 
 function port() {
   const value = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
@@ -38,7 +37,7 @@ function notify() {
   const cwd = payload.cwd || payload['working-directory'] || payload.working_directory || process.cwd();
   const reportedId = payload['thread-id'] || payload.thread_id || payload.threadId || payload.session_id || payload.sessionId
     || process.env.CODEX_THREAD_ID || process.env.CODEX_SESSION_ID || null;
-  const sessionId = resolveCodexSessionId(reportedId, cwd) || `codex:${cwd}`;
+  const sessionId = reportedId || `codex:${cwd}`;
   const query = new URLSearchParams({ state, tile: process.env.SIGNAL_TILE || '' });
   const request = http.request({ hostname: '127.0.0.1', port: port(), path: `/hook?${query}`, method: 'POST', headers: { 'Content-Type': 'application/json' } });
   request.on('error', () => {});

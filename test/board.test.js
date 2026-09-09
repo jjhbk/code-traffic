@@ -41,9 +41,10 @@ function waitFor(board, predicate) {
 }
 
 (async () => {
+  let pendingQuestions = [];
   const port = 4750 + Math.floor(Math.random() * 100);
   const board = new Board({
-    historyProvider: (session) => ({ session: { key: session.key }, pairs: [{ prompt: 'hello', output: 'hi' }], count: 1 }),
+    historyProvider: (session) => ({ session: { key: session.key }, pairs: [{ prompt: 'hello', output: 'hi' }], count: 1, pendingQuestions }),
   });
   await board.listen(port);
 
@@ -75,6 +76,7 @@ function waitFor(board, predicate) {
   board.register('owned', '/tmp/owned');
   await post(port, 'state=working&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'working');
+  pendingQuestions = [{ question: 'Choose an option.' }];
   await post(port, 'state=approval&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'approval');
   const repeatedApproval = new Promise((resolve) => board.once('change', resolve));
@@ -82,6 +84,9 @@ function waitFor(board, predicate) {
   assert.deepStrictEqual(await repeatedApproval, { key: 'owned', state: 'approval', repeated: true });
   await post(port, 'state=done&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   assert.strictEqual(board.list().find((s) => s.key === 'owned').state, 'approval');
+  pendingQuestions = [];
+  assert.strictEqual(board.completePendingDone('owned'), true);
+  await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'done');
   await post(port, 'state=working&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'working');
   await post(port, 'state=closed&tile=owned', JSON.stringify({ session_id: 's2' }));

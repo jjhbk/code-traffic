@@ -15,7 +15,9 @@ fs.utimesSync(first, now - 10, now - 10);
 fs.utimesSync(second, now, now);
 
 assert.strictEqual(resolveCodexSessionId('first-id', '/project', directory), 'first-id');
-assert.strictEqual(resolveCodexSessionId('missing-id', '/project', directory), 'second-id');
+assert.strictEqual(resolveCodexSessionId('missing-id', '/project', directory), null);
+assert.strictEqual(resolveCodexSessionId(null, '/project', directory), null);
+assert.strictEqual(resolveCodexSessionId('first-id', '/other-project', directory), null);
 assert.strictEqual(resolveCodexSessionId(null, '/unknown', directory), null);
 
 fs.rmSync(directory, { recursive: true });

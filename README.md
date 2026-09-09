@@ -217,7 +217,9 @@ curl -sS -X POST --data '{"session_id":"manual-test","cwd":"/tmp/demo"}' \
   'http://127.0.0.1:4747/hook?state=done'
 ```
 
-The server replies with HTTP 200 immediately, then processes the event.
+The server replies with HTTP 200 after receiving and processing the event.
+Hook bodies are limited to 1 MiB (larger requests receive HTTP 413); malformed
+request URLs receive HTTP 400.
 
 ## Custom port
 
@@ -284,6 +286,8 @@ TELEGRAM_CHAT_ID=123456789
 Remote control is disabled until the chat ID is configured; afterward, only
 messages from that chat are accepted. Signal Box loads `.env` from its project
 directory. Keep the bot token secret; `.env` is ignored by Git.
+
+Use `/sessions` once to open the session picker. Tap a session to select an owned session or view an external session, then use the inline **Recent**, **History**, **Status**, **Sessions**, and **Interrupt** buttons. Typed commands remain available for keyboard-oriented use.
 
 Available commands:
 
@@ -382,6 +386,27 @@ npm start
 
 Do not run `node main.js` directly.
 
+### Codex permission errors
+
+On Linux, Signal Box checks Codex's sandbox before opening its terminal. An
+error such as `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`
+means sandbox setup failed before the requested file command ran. Repeated
+approvals or `approval_policy = "never"` do not fix that failure.
+
+Install the distribution's `bubblewrap` package. On Ubuntu 24.04, if AppArmor
+denies `net_admin` or `setpcap` for `bwrap`, install `apparmor-profiles` and
+`apparmor-utils`, then load its provided profile:
+
+```bash
+sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+```
+
+Check for existing local profile customizations before replacing that file.
+This keeps system-wide AppArmor restrictions and Codex workspace isolation
+enabled. See [OpenAI's Linux sandbox guidance](https://learn.chatgpt.com/docs/sandboxing).
+Launch a Codex session again after correcting the host configuration.
+
 ### No tiles
 
 Confirm Signal Box is running and test the endpoint with the curl command above.
@@ -443,6 +468,7 @@ node --check preload.js
 node --check processes.js
 node --check renderer/app.js
 node --check renderer/audio.js
+node test/audit-regressions.test.js
 node test/board.test.js
 node test/codex-sessions.test.js
 node test/codex-notify.test.js
@@ -464,7 +490,7 @@ hooks.js                    Claude settings installer
 codex-hooks.js              Codex config installer
 codex-notify.js             Codex notification adapter
 codex-control.js            Reliable Codex thread prompt submission
-codex-sessions.js           Codex resume-ID validation and recovery
+codex-sessions.js           Exact Codex thread lookup and path cache
 history.js                  Normalized Claude/Codex prompt-output history
 terminal-command.js         Clean Telegram command execution and output
 processes.js                Linux/WSL process discovery

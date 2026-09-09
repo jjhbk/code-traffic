@@ -2,6 +2,21 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { findCodexSession } = require('./codex-sessions');
+const historyCache = new Map();
+
+function parsedHistory(file, agent) {
+  let stats;
+  try { stats = fs.statSync(file); } catch (_) { historyCache.delete(file); return { pairs: [], pendingQuestions: [] }; }
+  const version = `${agent}:${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
+  const cached = historyCache.get(file);
+  if (cached?.version === version) return cached.value;
+  const value = agent === 'codex'
+    ? { pairs: parseCodexHistory(file), pendingQuestions: parseCodexQuestions(file) }
+    : { pairs: parseClaudeHistory(file), pendingQuestions: parseClaudeQuestions(file) };
+  if (historyCache.size >= 64) historyCache.delete(historyCache.keys().next().value);
+  historyCache.set(file, { version, value });
+  return value;
+}
 
 function textFromContent(content) {
   if (typeof content === 'string') return content.trim();
@@ -173,14 +188,12 @@ function sessionHistory(session) {
     if (found) {
       source = found.path;
       sessionId = found.id;
-      pairs = parseCodexHistory(found.path);
-      pendingQuestions = parseCodexQuestions(found.path);
+      ({ pairs, pendingQuestions } = parsedHistory(found.path, 'codex'));
     }
   } else if (session.agent === 'claude') {
     source = claudeSessionFile(sessionId, session.cwd);
     if (source) {
-      pairs = parseClaudeHistory(source);
-      pendingQuestions = parseClaudeQuestions(source);
+      ({ pairs, pendingQuestions } = parsedHistory(source, 'claude'));
     }
   }
   if (session.state === 'approval' && !pendingQuestions.length) {

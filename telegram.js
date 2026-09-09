@@ -21,11 +21,11 @@ function sessionListText(sessions, selectedTile) {
     const type = { claude: 'Claude Code', codex: 'Codex', terminal: 'Terminal' }[session.agent] || 'Session';
     return `${index + 1}. ${symbol} ${session.project} · ${type} — ${session.state || 'idle'}${ownership}${selected}`;
   });
-  return `Sessions:\n${rows.join('\n')}\n\nUse /use <number> to select one.`;
+  return `Sessions:\n${rows.join('\n')}\n\nTap a session below to select or view it.`;
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, sendPrompt, submitDelayMs = 75, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, sendPrompt, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
@@ -36,12 +36,17 @@ class TelegramControl {
     this.interruptTerminal = interruptTerminal;
     this.sendPrompt = sendPrompt;
     this.submitDelayMs = submitDelayMs;
+    this.approvalRetryMs = approvalRetryMs;
     this.fetch = fetchImpl;
     this.selectedTile = null;
     this.offset = 0;
     this.stopped = true;
     this.abortControllers = new Set();
     this.actions = new Map();
+    this.approvalNotifications = new Map();
+    this.approvalSending = new Map();
+    this.approvalRetryTimers = new Map();
+    this.answeredApprovals = new Map();
   }
 
   get enabled() { return Boolean(this.token && this.fetch); }
@@ -59,6 +64,8 @@ class TelegramControl {
     this.stopped = true;
     for (const controller of this.abortControllers) controller.abort();
     this.abortControllers.clear();
+    for (const timer of this.approvalRetryTimers.values()) clearTimeout(timer);
+    this.approvalRetryTimers.clear();
   }
 
   async request(method, payload) {
@@ -93,7 +100,7 @@ class TelegramControl {
     await this.sendTo(this.chatId, text, extra);
   }
 
-  async sendLong(text) {
+  async sendLong(text, extra = {}) {
     let remaining = String(text);
     while (remaining) {
       let cut = Math.min(3900, remaining.length);
@@ -101,9 +108,62 @@ class TelegramControl {
         const paragraph = remaining.lastIndexOf('\n\n', cut);
         if (paragraph > 500) cut = paragraph;
       }
-      await this.send(remaining.slice(0, cut));
+      const chunk = remaining.slice(0, cut);
       remaining = remaining.slice(cut).trimStart();
+      await this.send(chunk, remaining ? {} : extra);
     }
+  }
+
+  addAction(action) {
+    const token = `action:${crypto.randomBytes(8).toString("hex")}`;
+    this.actions.set(token, action);
+    while (this.actions.size > 200) this.actions.delete(this.actions.keys().next().value);
+    return token;
+  }
+
+  sessionKeyboard(sessions = this.listSessions()) {
+    return sessions.map((session) => {
+      const tile = session.tile || session.key;
+      const label = `${session.owned ? "Select" : "View"} ${session.project}`.slice(0, 64);
+      return [{ text: label, callback_data: this.addAction({ type: "select", tile }) }];
+    });
+  }
+
+  sessionButtonMarkup(session) {
+    const tile = session.tile || session.key;
+    return { reply_markup: { inline_keyboard: [[{
+      text: `${session.owned ? 'Select' : 'View'} ${session.project}`.slice(0, 64),
+      callback_data: this.addAction({ type: 'select', tile }),
+    }]] } };
+  }
+
+  selectedKeyboard(session) {
+    const keyboard = [
+      [
+        { text: 'Recent', callback_data: this.addAction({ type: 'command', name: 'tail', tile: session.tile || session.key }) },
+        { text: 'History', callback_data: this.addAction({ type: 'command', name: 'history', tile: session.tile || session.key }) },
+      ],
+      [
+        { text: 'Status', callback_data: this.addAction({ type: 'command', name: 'status', tile: session.tile || session.key }) },
+        { text: "Sessions", callback_data: this.addAction({ type: "command", name: "sessions" }) },
+      ],
+    ];
+    if (session.owned) keyboard[1].unshift({ text: 'Interrupt', callback_data: this.addAction({ type: 'command', name: 'interrupt', tile: session.tile || session.key }) });
+    return keyboard;
+  }
+
+  async sendSessions() {
+    const sessions = this.listSessions();
+    await this.send(sessionListText(sessions, this.selectedTile), sessions.length
+      ? { reply_markup: { inline_keyboard: this.sessionKeyboard(sessions) } }
+      : {});
+  }
+
+  async sendSelectedMenu(session) {
+    const ownership = session.owned ? "You can send prompts to this session." : "This session is view only.";
+    await this.send(`Selected ${session.project}. ${ownership}\nUse the buttons below to inspect it.`, {
+      reply_markup: { inline_keyboard: this.selectedKeyboard(session) },
+    });
   }
 
   async poll() {
@@ -163,6 +223,48 @@ class TelegramControl {
     }
   }
 
+  async acknowledgeAnswer(query, label, questionSignature, answeredTokens = null) {
+    await this.request('answerCallbackQuery', {
+      callback_query_id: query.id,
+      text: `Sent: ${label}`.slice(0, 200),
+    });
+
+    const messageId = query.message?.message_id;
+    if (messageId === undefined) return;
+    const confirmation = `Response sent: ${label}`;
+    const original = String(query.message?.text || 'Approval request');
+    const suffix = `\n\n✅ ${confirmation}`;
+    const text = `${original.slice(0, Math.max(0, 4096 - suffix.length))}${suffix}`;
+    answeredTokens ||= new Set([...this.actions]
+      .filter(([, action]) => action.type === 'answer' && action.questionSignature === questionSignature)
+      .map(([token]) => token));
+    const inlineKeyboard = query.message?.reply_markup?.inline_keyboard
+      ?.map((row) => row.filter((button) => !answeredTokens.has(button.callback_data)))
+      .filter((row) => row.length);
+    try {
+      await this.request('editMessageText', {
+        chat_id: String(query.message.chat.id),
+        message_id: messageId,
+        text,
+        ...(inlineKeyboard ? { reply_markup: { inline_keyboard: inlineKeyboard } } : {}),
+      });
+    } catch (error) {
+      // Do not leave a button that has already submitted an answer active.
+      // This separate request also covers an edit rejected for message length.
+      try {
+        await this.request('editMessageReplyMarkup', {
+          chat_id: String(query.message.chat.id),
+          message_id: messageId,
+          reply_markup: { inline_keyboard: inlineKeyboard || [] },
+        });
+      } catch (_) {}
+      try {
+        await this.send(confirmation);
+      } catch (sendError) {
+        console.error(`[telegram] could not show approval confirmation: ${sendError.message}`);
+      }
+    }
+  }
   async handleCallback(query) {
     const incomingChatId = query.message?.chat?.id;
     if (!query.id || incomingChatId === undefined) return;
@@ -186,16 +288,62 @@ class TelegramControl {
     }
 
     try {
-      const session = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
-      if (!session?.owned) throw new Error('That session is no longer available for remote control.');
-      await this.ensureSession(action.tile);
-      this.writeSession(action.tile, action.keys);
-      this.selectedTile = action.tile;
+      if (action.type === 'answer') {
+        const session = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
+        if (!session?.owned) throw new Error('That session is no longer available for remote control.');
+        await this.ensureSession(action.tile);
+        const current = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
+        const pending = this.getHistory?.(current)?.pendingQuestions || [];
+        if (this.actions.get(query.data) !== action || !current?.owned
+          || !pending.some((question) => JSON.stringify(question) === action.questionSignature)) {
+          this.actions.delete(query.data);
+          throw new Error('This approval has expired. Wait for the current question.');
+        }
+        if (action.questionSignature) {
+          if (!this.answeredApprovals.has(action.tile)) this.answeredApprovals.set(action.tile, new Set());
+          this.answeredApprovals.get(action.tile).add(action.questionSignature);
+        }
+        const answeredTokens = new Set();
+        for (const [token, candidate] of this.actions) {
+          if (candidate.type === 'answer' && candidate.tile === action.tile
+            && candidate.questionSignature === action.questionSignature) {
+            answeredTokens.add(token);
+            this.actions.delete(token);
+          }
+        }
+        try {
+          this.writeSession(action.tile, action.keys, { approval: true });
+        } catch (error) {
+          this.answeredApprovals.get(action.tile)?.delete(action.questionSignature);
+          this.approvalNotifications.delete(action.tile);
+          this.notifyState(session, 'approval');
+          throw error;
+        }
+        this.selectedTile = action.tile;
+        await this.acknowledgeAnswer(query, action.label, action.questionSignature, answeredTokens);
+        this.approvalNotifications.delete(action.tile);
+        this.notifyState(session, 'approval');
+      } else if (action.type === 'select') {
+        const session = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
+        if (!session) throw new Error('That session is no longer available.');
+        this.selectedTile = action.tile;
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: `Opened ${session.project}`.slice(0, 200) });
+        await this.sendSelectedMenu(session);
+      } else if (action.type === 'command') {
+        if (action.tile) {
+          const session = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
+          if (!session) throw new Error('That session is no longer available.');
+          if (['interrupt', 'send'].includes(action.name) && !session.owned) {
+            throw new Error('External sessions are view only.');
+          }
+          this.selectedTile = action.tile;
+        }
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Loading...' });
+        await this.handleCommand({ name: action.name, argument: '' });
+      } else {
+        throw new Error('This option has expired.');
+      }
       this.actions.delete(query.data);
-      await this.request('answerCallbackQuery', {
-        callback_query_id: query.id,
-        text: `Sent: ${action.label}`.slice(0, 200),
-      });
     } catch (error) {
       await this.request('answerCallbackQuery', {
         callback_query_id: query.id,
@@ -215,7 +363,7 @@ class TelegramControl {
       return;
     }
     if (name === 'sessions') {
-      await this.send(sessionListText(this.listSessions(), this.selectedTile));
+      await this.sendSessions();
       return;
     }
     if (name === 'use') {
@@ -225,7 +373,7 @@ class TelegramControl {
       if (!session) throw new Error('Choose a session number from /sessions.');
       if (!session.owned) throw new Error('External sessions cannot be controlled because Signal Box does not own their terminal.');
       this.selectedTile = session.tile || session.key;
-      await this.send(`Selected ${session.project}. Send plain text or use /send <text>.`);
+      await this.sendSelectedMenu(session);
       return;
     }
     if (name === 'status') {
@@ -248,7 +396,7 @@ class TelegramControl {
       return;
     }
     if (name === 'interrupt') {
-      const session = this.requireSelected();
+      const session = this.requireControllableSession();
       if (session.agent === 'terminal') {
         if (!this.interruptTerminal?.(session)) throw new Error('No Telegram command is currently running in this terminal.');
         await this.send(`Interrupted: ${session.project}`);
@@ -261,7 +409,7 @@ class TelegramControl {
     }
     if (name === 'send') {
       if (!argument) throw new Error('Add text after /send.');
-      const session = this.requireSelected();
+      const session = this.requireControllableSession();
       if (session.agent === 'terminal') {
         if (!this.executeTerminal) throw new Error('Remote terminal execution is unavailable.');
         this.executeTerminal(session, argument).then((result) => {
@@ -299,12 +447,42 @@ class TelegramControl {
     return session;
   }
 
+  requireControllableSession() {
+    const session = this.requireSelected();
+    if (!session.owned) throw new Error('External sessions are view only.');
+    return session;
+  }
+
+  clearApproval(tile) {
+    for (const [token, action] of this.actions) {
+      if (action.tile === tile && action.type === 'answer') this.actions.delete(token);
+    }
+    this.approvalNotifications.delete(tile);
+    this.approvalSending.delete(tile);
+    this.answeredApprovals.delete(tile);
+    const timer = this.approvalRetryTimers.get(tile);
+    if (timer) clearTimeout(timer);
+    this.approvalRetryTimers.delete(tile);
+  }
+
+  scheduleApprovalRetry(tile) {
+    if (this.approvalRetryTimers.has(tile) || this.stopped) return;
+    const timer = setTimeout(() => {
+      this.approvalRetryTimers.delete(tile);
+      const session = this.listSessions().find((item) => (item.tile || item.key) === tile);
+      if (session?.state === 'approval') this.notifyState(session, 'approval');
+    }, this.approvalRetryMs);
+    timer.unref?.();
+    this.approvalRetryTimers.set(tile, timer);
+  }
+
   notifyState(session, state) {
     if (!this.enabled || !this.configured || this.stopped || !session) return;
     const tile = session.tile || session.key;
     const number = this.listSessions().findIndex((item) => (item.tile || item.key) === tile) + 1;
-    const select = number > 0 ? `\nUse /use ${number} to select it.` : '';
+    const select = number > 0 ? `\nTap the session button below to open it.` : '';
     if (state !== 'approval') {
+      this.clearApproval(tile);
       let latest = '';
       try {
         const history = this.getHistory?.(session);
@@ -312,7 +490,8 @@ class TelegramControl {
       } catch (error) {
         console.error(`[telegram] could not read completed session output: ${error.message}`);
       }
-      this.sendLong(`✅ ${session.project} completed.${latest}${select}`)
+      this.sendLong(`✅ ${session.project} completed.${latest}${select}`,
+        number > 0 ? this.sessionButtonMarkup(session) : {})
         .catch((error) => console.error(`[telegram] notification failed: ${error.message}`));
       return;
     }
@@ -323,6 +502,10 @@ class TelegramControl {
     } catch (error) {
       console.error(`[telegram] could not read pending question: ${error.message}`);
     }
+
+    const approvalSignature = JSON.stringify(questions);
+    if (this.approvalNotifications.get(tile) === approvalSignature
+      || this.approvalSending.get(tile) === approvalSignature) return;
 
     for (const [token, action] of this.actions) {
       if (action.tile === tile) this.actions.delete(token);
@@ -338,12 +521,19 @@ class TelegramControl {
 
     const inlineKeyboard = [];
     if (session.owned) {
-      questions.forEach((question, questionIndex) => {
+      const questionIndex = questions.findIndex((question) => {
+        const signature = JSON.stringify(question);
+        return !this.answeredApprovals.get(tile)?.has(signature);
+      });
+      if (questionIndex >= 0) {
+        const question = questions[questionIndex];
+        const questionSignature = JSON.stringify(question);
         (question.options || []).forEach((option, optionIndex) => {
-          const token = `answer:${crypto.randomBytes(8).toString('hex')}`;
-          this.actions.set(token, {
+          const token = this.addAction({
+            type: 'answer',
             tile,
             label: option.label,
+            questionSignature,
             keys: option.keys || `${'\x1b[B'.repeat(optionIndex)}${question.multiSelect ? ' \r' : '\r'}`,
           });
           const prefix = questions.length > 1 ? `${questionIndex + 1}. ` : '';
@@ -352,16 +542,33 @@ class TelegramControl {
             callback_data: token,
           }]);
         });
-      });
+      }
     }
-    while (this.actions.size > 200) this.actions.delete(this.actions.keys().next().value);
+
+    if (questions.length && session.owned && !inlineKeyboard.length
+      && questions.every((question) => this.answeredApprovals.get(tile)?.has(JSON.stringify(question)))) return;
 
     const instruction = inlineKeyboard.length
       ? `\n\nTap an option below${questions.length > 1 ? ', answering the questions from top to bottom' : ''}.`
-      : `${select}\nReply with /send <answer> after selecting the session.`;
+      : session.owned
+        ? `${select}\nReply with /send <answer> after selecting the session.`
+        : select;
     const message = `🟠 ${session.project} needs user input or permission.${details ? `\n\n${details}` : ''}${instruction}`;
-    const extra = inlineKeyboard.length ? { reply_markup: { inline_keyboard: inlineKeyboard } } : {};
-    this.send(message, extra).catch((error) => console.error(`[telegram] notification failed: ${error.message}`));
+    const extra = inlineKeyboard.length
+      ? { reply_markup: { inline_keyboard: inlineKeyboard } }
+      : number > 0 ? this.sessionButtonMarkup(session) : {};
+    this.approvalSending.set(tile, approvalSignature);
+    this.send(message, extra).then(() => {
+      if (this.approvalSending.get(tile) !== approvalSignature) return;
+      this.approvalSending.delete(tile);
+      this.approvalNotifications.set(tile, approvalSignature);
+    }).catch((error) => {
+      if (this.approvalSending.get(tile) === approvalSignature) {
+        this.approvalSending.delete(tile);
+        this.scheduleApprovalRetry(tile);
+      }
+      console.error(`[telegram] notification failed: ${error.message}`);
+    });
   }
 }
 

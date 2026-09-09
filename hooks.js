@@ -91,23 +91,18 @@ function install() {
     settings.hooks = {};
   }
   removeOurHooks(settings.hooks);
-  Object.assign(settings.hooks, ourHooks());
+  for (const [event, entries] of Object.entries(ourHooks())) {
+    settings.hooks[event] = [...(settings.hooks[event] || []), ...entries];
+  }
   fs.writeFileSync(paths.settings, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 function uninstall() {
   const paths = settingsPaths();
-  if (!fs.existsSync(paths.backup)) {
-    if (!fs.existsSync(paths.settings)) return;
-    const settings = readSettings(paths.settings);
-    if (settings.hooks) removeOurHooks(settings.hooks);
-    fs.writeFileSync(paths.settings, `${JSON.stringify(settings, null, 2)}\n`);
-    return;
-  }
-
-  fs.mkdirSync(paths.directory, { recursive: true });
-  fs.copyFileSync(paths.backup, paths.settings);
-  fs.unlinkSync(paths.backup);
+  if (!fs.existsSync(paths.settings)) return;
+  const settings = readSettings(paths.settings);
+  if (settings.hooks) removeOurHooks(settings.hooks);
+  fs.writeFileSync(paths.settings, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 function printHooks() {

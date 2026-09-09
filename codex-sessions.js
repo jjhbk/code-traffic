@@ -47,16 +47,27 @@ function sessionMetadata(file) {
   }
 }
 
+const resolvedFiles = new Map();
+
 function findCodexSession(candidate, cwd, directory = sessionsDirectory()) {
-  let latestForDirectory = null;
+  if (!candidate || candidate.startsWith('codex:')) return null;
+  const cacheKey = `${directory}\0${candidate}`;
+  const cached = resolvedFiles.get(cacheKey);
+  if (cached && fs.existsSync(cached.path)) {
+    return !cwd || cached.cwd === cwd ? { ...cached } : null;
+  }
+  resolvedFiles.delete(cacheKey);
   for (const file of sessionFiles(directory)) {
     const metadata = sessionMetadata(file.path);
     if (!metadata?.id) continue;
     const session = { ...metadata, path: file.path };
-    if (candidate && metadata.id === candidate) return session;
-    if (!latestForDirectory && cwd && metadata.cwd === cwd) latestForDirectory = session;
+    if (metadata.id === candidate && (!cwd || metadata.cwd === cwd)) {
+      if (resolvedFiles.size >= 256) resolvedFiles.delete(resolvedFiles.keys().next().value);
+      resolvedFiles.set(cacheKey, session);
+      return { ...session };
+    }
   }
-  return latestForDirectory;
+  return null;
 }
 
 function resolveCodexSessionId(candidate, cwd, directory = sessionsDirectory()) {
