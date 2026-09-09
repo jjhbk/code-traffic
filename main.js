@@ -1,4 +1,5 @@
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
@@ -6,6 +7,10 @@ const { app, BrowserWindow, dialog, ipcMain, Notification, screen } = require('e
 const { Board } = require('./board');
 const { runningAgents } = require('./processes');
 const { sessionArgs } = require('./session-command');
+const { runTerminalCommand } = require('./terminal-command');
+const { TelegramControl } = require('./telegram');
+const { resolveCodexSessionId } = require('./codex-sessions');
+const { sessionHistory } = require('./history');
 
 // WSLg can expose a display while its GPU shared-image path is unavailable.
 // Electron's software renderer is reliable for this small board and xterm view.
@@ -18,9 +23,12 @@ if (process.platform === 'linux' && (process.env.WSL_DISTRO_NAME || process.env.
 let windowRef;
 let board;
 let pty;
+let telegram;
 const terminals = new Map();
+const remoteCommands = new Map();
 const boardPort = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
 const desktopNotificationsEnabled = false;
+const SESSION_TYPES = new Set(['claude', 'codex', 'terminal']);
 
 try {
   pty = require('node-pty');
@@ -84,6 +92,7 @@ function saveWindowState(bounds) {
 function wireIpc() {
   ipcMain.handle('sessions:list', () => board.list());
   ipcMain.handle('session:create', async (_event, { cwd, agent = 'claude' } = {}) => {
+    if (!SESSION_TYPES.has(agent)) throw new Error('Choose Claude Code, Codex, or Terminal.');
     const tile = crypto.randomUUID();
     board.register(tile, cwd, agent);
     await spawnSession(tile, cwd, agent, null, false);
@@ -113,8 +122,9 @@ function wireIpc() {
     }
   });
   ipcMain.on('session:working', (_event, { tile } = {}) => {
-    if (tile && terminals.has(tile)) {
-      board.handleHook('working', tile, { cwd: board.sessions.get(tile)?.cwd, submitted: true });
+    const session = board.sessions.get(tile);
+    if (tile && terminals.has(tile) && session?.agent !== 'terminal') {
+      board.handleHook('working', tile, { cwd: session.cwd, submitted: true });
     }
   });
   ipcMain.on('pty:resize', (_event, { tile, cols, rows } = {}) => {
@@ -126,8 +136,19 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
   if (!pty) throw new Error('Embedded terminals are unavailable because node-pty could not be loaded.');
   if (!cwd || typeof cwd !== 'string') throw new Error('Choose a project folder first.');
   if (terminals.has(tile)) return;
+  if (!SESSION_TYPES.has(agent)) throw new Error('Unsupported session type.');
   const binary = findAgent(agent);
-  if (!binary) throw new Error(`${agent === 'codex' ? 'Codex CLI' : 'Claude Code'} was not found on PATH. Install it, then restart Signal Box.`);
+  const displayName = agent === 'codex' ? 'Codex CLI' : agent === 'terminal' ? 'A system shell' : 'Claude Code';
+  if (!binary) throw new Error(`${displayName} was not found. Install or configure it, then restart Signal Box.`);
+  if (agent === 'codex' && reopening) {
+    const resolvedId = resolveCodexSessionId(sessionId, cwd);
+    sessionId = resolvedId;
+    const saved = board?.sessions.get(tile);
+    if (resolvedId && saved && saved.sessionId !== resolvedId) {
+      saved.sessionId = resolvedId;
+      board.persist();
+    }
+  }
   const args = sessionArgs(agent, sessionId, reopening);
   const child = pty.spawn(binary, args, {
     name: 'xterm-256color',
@@ -146,10 +167,48 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
 }
 
 function findAgent(agent) {
+  if (agent === 'terminal') {
+    return process.platform === 'win32'
+      ? process.env.COMSPEC || 'powershell.exe'
+      : process.env.SHELL || '/bin/bash';
+  }
   const command = process.platform === 'win32' ? 'where' : 'which';
   const result = spawnSync(command, [agent === 'codex' ? 'codex' : 'claude'], { encoding: 'utf8' });
   if (result.status !== 0) return null;
   return result.stdout.trim().split(/\r?\n/)[0] || null;
+}
+
+async function executeRemoteTerminal(session, command) {
+  const tile = session.tile || session.key;
+  if (remoteCommands.has(tile)) throw new Error('A command is already running in this terminal. Use /interrupt first.');
+  const shell = findAgent('terminal');
+  let child;
+  try {
+    return await runTerminalCommand({
+      command,
+      cwd: session.cwd,
+      shell,
+      onSpawn: (spawned) => {
+        child = spawned;
+        remoteCommands.set(tile, spawned);
+      },
+    });
+  } finally {
+    if (remoteCommands.get(tile) === child) remoteCommands.delete(tile);
+  }
+}
+
+function interruptRemoteTerminal(session) {
+  const tile = session.tile || session.key;
+  const child = remoteCommands.get(tile);
+  if (!child) return false;
+  try {
+    if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGINT');
+    else child.kill('SIGINT');
+  } catch (_) {
+    try { child.kill('SIGINT'); } catch (_) { return false; }
+  }
+  return true;
 }
 
 function notifyUser(changed) {
@@ -181,7 +240,10 @@ function xmlEscape(value) {
 }
 
 async function start() {
-  board = new Board({ storagePath: path.join(app.getPath('userData'), 'sessions.json') });
+  board = new Board({
+    storagePath: path.join(app.getPath('userData'), 'sessions.json'),
+    historyProvider: sessionHistory,
+  });
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
   try {
     await board.listen(Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747);
@@ -191,14 +253,41 @@ async function start() {
     }
     throw error;
   }
+  telegram = new TelegramControl({
+    token: process.env.TELEGRAM_BOT_TOKEN,
+    chatId: process.env.TELEGRAM_CHAT_ID,
+    listSessions: () => board.list(),
+    getHistory: sessionHistory,
+    executeTerminal: executeRemoteTerminal,
+    interruptTerminal: interruptRemoteTerminal,
+    ensureSession: async (tile) => {
+      const session = board.sessions.get(tile);
+      if (!session || !session.owned) throw new Error('That session is not remotely controllable.');
+      await spawnSession(tile, session.cwd, session.agent || 'claude', session.sessionId, true);
+      return session;
+    },
+    writeSession: (tile, data) => {
+      const child = terminals.get(tile);
+      if (!child) throw new Error('That terminal is not running.');
+      child.write(data);
+      const session = board.sessions.get(tile);
+      if (data.endsWith('\r') && session?.agent !== 'terminal') {
+        board.handleHook('working', tile, { cwd: session?.cwd, submitted: true });
+      }
+    },
+  });
   board.on('change', (changed) => {
     if (windowRef && !windowRef.isDestroyed()) {
       windowRef.webContents.send('sessions:changed', { sessions: board.list(), changed });
     }
     if (desktopNotificationsEnabled && changed && changed.state && !changed.navigation) notifyUser(changed);
+    if (['approval', 'done'].includes(changed?.state) && !changed.navigation) {
+      telegram.notifyState(board.list().find((session) => session.key === changed.key), changed.state);
+    }
   });
   wireIpc();
   createWindow();
+  telegram.start();
 }
 
 app.whenReady().then(start).catch((error) => {
@@ -211,6 +300,11 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  telegram?.stop();
+  for (const child of remoteCommands.values()) {
+    try { child.kill(); } catch (_) { /* Process may already have exited. */ }
+  }
+  remoteCommands.clear();
   for (const child of terminals.values()) child.kill();
   terminals.clear();
   if (board) await board.closeServer();

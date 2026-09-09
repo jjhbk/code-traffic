@@ -38,7 +38,7 @@ button.tile:hover { border-color: #495766; transform: translateY(-1px); }
 .path { overflow: hidden; color: #768290; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .clock { position: absolute; right: 18px; bottom: 17px; color: #9ba6b2; font-size: 12px; }
 .tile.external .clock { right: 48px; }
-.external-mark { position: absolute; top: 19px; right: 18px; color: #596572; font-size: 11px; }
+.session-mark { position: absolute; top: 19px; right: 18px; color: #596572; font-size: 11px; }
 .tile-dismiss { position: absolute; right: 16px; bottom: 14px; border: 0; color: #6f7b87; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; }
 .tile-dismiss:hover { color: #e8534a; }
 .empty { grid-column: 1 / -1; padding: 80px 20px; color: #788492; text-align: center; }

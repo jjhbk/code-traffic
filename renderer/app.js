@@ -18,6 +18,9 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 const rank = { approval: 0, done: 1, working: 2, null: 3 };
+const agentLabels = { claude: 'Claude Code', codex: 'Codex', terminal: 'Terminal' };
+
+function agentLabel(agent) { return agentLabels[agent] || 'Session'; }
 
 function elapsed(since) {
   const seconds = Math.max(0, Math.floor((Date.now() - since) / 1000));
@@ -40,7 +43,7 @@ function render() {
   if (!ordered.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.innerHTML = '<strong>Your sessions will appear here</strong>Start Claude Code from Signal Box or leave the board open for sessions started elsewhere.';
+    empty.innerHTML = '<strong>Your sessions will appear here</strong>Start Claude Code, Codex, or a terminal from Signal Box.';
     board.append(empty);
     return;
   }
@@ -53,8 +56,11 @@ function render() {
     const pathText = document.createElement('div'); pathText.className = 'path'; pathText.textContent = session.path || 'Unknown location';
     const clock = document.createElement('div'); clock.className = 'clock'; clock.textContent = elapsed(session.since);
     tile.append(lamp, project, pathText, clock);
+    const sessionMark = document.createElement('span');
+    sessionMark.className = 'session-mark';
+    sessionMark.textContent = `${session.owned ? '' : 'external · '}${agentLabel(session.agent)}`;
+    tile.append(sessionMark);
     if (!session.owned) {
-      const mark = document.createElement('span'); mark.className = 'external-mark'; mark.textContent = 'external'; tile.append(mark);
       const dismiss = document.createElement('button');
       dismiss.className = 'tile-dismiss';
       dismiss.type = 'button';
@@ -84,7 +90,7 @@ function openTerminal(session) {
     if (!tile) throw new Error('This session does not have a terminal id.');
     activeTile = tile;
     terminalView.hidden = false;
-    terminalTitle.textContent = `${session.project} · ${session.path}`;
+    terminalTitle.textContent = `${agentLabel(session.agent)} · ${session.project} · ${session.path}`;
     for (const [entryTile, entry] of terminals) entry.container.hidden = entryTile !== tile;
 
     let entry = terminals.get(tile);
@@ -211,7 +217,8 @@ document.getElementById('new-session').addEventListener('click', async () => {
     if (cwd) {
       const agent = document.getElementById('agent-select').value;
       const tile = await window.signalBox.createSession({ cwd, agent });
-      const session = sessions.find((item) => item.tile === tile) || { tile, project: 'Claude Code', path: cwd };
+      const project = cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd;
+      const session = sessions.find((item) => item.tile === tile) || { tile, project, path: cwd, agent };
       openTerminal(session);
     }
   } catch (caught) { showError(caught.message || 'Could not create a session.'); }
@@ -229,7 +236,7 @@ document.getElementById('clear-all').addEventListener('click', async () => {
 
 document.getElementById('terminal-back').addEventListener('click', () => closeTerminalView());
 document.getElementById('terminal-close').addEventListener('click', async () => {
-  if (!activeTile || !window.confirm('Close this Claude Code session?')) return;
+  if (!activeTile || !window.confirm('Close this session?')) return;
   const tile = activeTile;
   await window.signalBox.closeSession({ tile });
   sessions = sessions.filter((session) => (session.tile || session.key) !== tile);

@@ -16,6 +16,17 @@ function post(port, query, body = '') {
   });
 }
 
+function get(port, pathname) {
+  return new Promise((resolve, reject) => {
+    http.get({ hostname: '127.0.0.1', port, path: pathname }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(body) }));
+    }).on('error', reject);
+  });
+}
+
 function waitFor(board, predicate) {
   return new Promise((resolve) => {
     const check = () => {
@@ -31,7 +42,9 @@ function waitFor(board, predicate) {
 
 (async () => {
   const port = 4750 + Math.floor(Math.random() * 100);
-  const board = new Board();
+  const board = new Board({
+    historyProvider: (session) => ({ session: { key: session.key }, pairs: [{ prompt: 'hello', output: 'hi' }], count: 1 }),
+  });
   await board.listen(port);
 
   await post(port, 'state=done', JSON.stringify({ session_id: 's1', cwd: '/tmp/project' }));
@@ -44,6 +57,13 @@ function waitFor(board, predicate) {
   await waitFor(board, () => board.list().some((s) => s.key === 'tile-1'));
   assert.strictEqual(board.list().find((s) => s.key === 'tile-1').sessionId, 's1');
 
+  const sessionIndex = await get(port, '/api/sessions');
+  assert.strictEqual(sessionIndex.status, 200);
+  assert.match(sessionIndex.body.sessions.find((s) => s.key === 'tile-1').historyUrl, /tile-1\/history$/);
+  const history = await get(port, '/api/sessions/tile-1/history');
+  assert.strictEqual(history.status, 200);
+  assert.deepStrictEqual(history.body.pairs[0], { prompt: 'hello', output: 'hi' });
+
   const before = board.list().find((s) => s.key === 'tile-1').since;
   await post(port, 'state=working&tile=tile-1', '{bad json');
   assert.strictEqual(board.list().find((s) => s.key === 'tile-1').since, before);
@@ -53,6 +73,12 @@ function waitFor(board, predicate) {
   assert.ok(!board.list().some((s) => s.key === 's1'));
 
   board.register('owned', '/tmp/owned');
+  await post(port, 'state=working&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
+  await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'working');
+  await post(port, 'state=approval&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
+  await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'approval');
+  await post(port, 'state=done&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
+  assert.strictEqual(board.list().find((s) => s.key === 'owned').state, 'approval');
   await post(port, 'state=working&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'working');
   await post(port, 'state=closed&tile=owned', JSON.stringify({ session_id: 's2' }));

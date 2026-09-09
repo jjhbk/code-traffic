@@ -29,9 +29,10 @@ function sessionDetails(key, tile, sessionId, cwd, owned, agent = null) {
 }
 
 class Board extends EventEmitter {
-  constructor({ storagePath = null } = {}) {
+  constructor({ storagePath = null, historyProvider = null } = {}) {
     super();
     this.storagePath = storagePath;
+    this.historyProvider = historyProvider;
     this.sessions = new Map();
     this.restore();
   }
@@ -152,6 +153,11 @@ class Board extends EventEmitter {
         this.emit('change', { key, state: null });
         return;
       }
+      if (state === 'done' && session.state === 'approval') {
+        if (metadataChanged) this.persist();
+        this.emit('change');
+        return;
+      }
       const nextState = state === 'closed' ? null : state;
       if (session.state !== nextState) {
         session.state = nextState;
@@ -167,13 +173,31 @@ class Board extends EventEmitter {
 
   listen(port = 4747, host = '127.0.0.1') {
     this.server = http.createServer((request, response) => {
-      if (request.method !== 'POST' || request.url.split('?')[0] !== '/hook') {
+      const url = new URL(request.url, `http://${host}`);
+      if (request.method === 'GET' && url.pathname === '/api/sessions') {
+        const sessions = this.list().map((session) => ({
+          ...session,
+          historyUrl: `/api/sessions/${encodeURIComponent(session.key)}/history`,
+        }));
+        sendJson(response, 200, { sessions });
+        return;
+      }
+      const historyMatch = request.method === 'GET' && url.pathname.match(/^\/api\/sessions\/([^/]+)\/history$/);
+      if (historyMatch) {
+        let key;
+        try { key = decodeURIComponent(historyMatch[1]); } catch (_) { sendJson(response, 400, { error: 'Invalid session key.' }); return; }
+        const session = this.sessions.get(key);
+        if (!session) { sendJson(response, 404, { error: 'Session not found.' }); return; }
+        if (!this.historyProvider) { sendJson(response, 503, { error: 'Session history is unavailable.' }); return; }
+        try { sendJson(response, 200, this.historyProvider({ ...session })); } catch (error) { sendJson(response, 500, { error: error.message }); }
+        return;
+      }
+      if (request.method !== 'POST' || url.pathname !== '/hook') {
         response.writeHead(404);
         response.end();
         return;
       }
 
-      const url = new URL(request.url, `http://${host}`);
       const state = url.searchParams.get('state');
       const tile = url.searchParams.get('tile') || null;
       let body = '';
@@ -203,6 +227,14 @@ class Board extends EventEmitter {
   closeServer() {
     return this.server ? new Promise((resolve) => this.server.close(resolve)) : Promise.resolve();
   }
+}
+
+function sendJson(response, status, payload) {
+  response.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  response.end(JSON.stringify(payload, null, 2));
 }
 
 module.exports = { Board, displayPath };

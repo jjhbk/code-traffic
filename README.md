@@ -1,7 +1,8 @@
 # Signal Box
 
 Signal Box is an Electron desktop board for monitoring Claude Code and Codex CLI
-sessions. Tiles represent persistent agent state:
+sessions and opening remotely controllable shell terminals. Agent tiles
+represent persistent lifecycle state:
 
 | Lamp | State | Meaning |
 | --- | --- | --- |
@@ -154,20 +155,23 @@ adapter. Use Codex from the VS Code integrated terminal for Signal Box
 integration, or use the Signal Box New Session control. Direct monitoring of
 the VS Code Codex panel requires a separate VS Code companion extension.
 
-## Spawn an agent from Signal Box
+## Start a session from Signal Box
 
 1. Start Signal Box.
-2. Select **Claude Code** or **Codex**.
+2. Select **Claude Code**, **Codex**, or **Terminal**.
 3. Click **+ New session**.
 4. Choose a project directory.
-5. The selected CLI starts in that directory.
+5. The selected CLI or system shell starts in that directory.
 6. The embedded terminal opens.
 
 Use **← Board** or Escape to leave the terminal view. The agent keeps running.
 Use **Close session** to kill a Signal Box-owned process after confirmation.
 
-The embedded view launches an agent directly. It is not a general shell for
-commands such as `npm run dev`.
+Terminal sessions launch the system shell (`$SHELL` on Linux/macOS or
+`%COMSPEC%` on Windows), so they can run ordinary commands such as
+`npm run dev`. They remain unlit because shells do not emit agent lifecycle
+events. After an app restart, reopening a terminal tile starts a fresh shell in
+the same saved directory.
 
 ## Start agents manually
 
@@ -239,14 +243,116 @@ Click **Sound off** once to enable audio. The choice is saved locally.
 
 Repeated events are silent; only real state changes play a sound.
 
-Signal Box also sends a native desktop notification for each real working,
-approval, or done transition. Native notification sounds depend on the desktop
-notification service. WSLg often does not provide the Linux
-`org.freedesktop.Notifications` service, so Signal Box uses a Windows system
-sound through `powershell.exe` there and avoids the failing libnotify path. The
-in-app WebAudio tone remains available as well.
+Native desktop notifications are currently disabled. The in-app WebAudio tones
+remain available.
+
+## Telegram remote control
+
+1. Open **@BotFather** in Telegram. Use `/newbot` to create a bot, or `/token`
+   to generate a token for an existing bot.
+2. Copy the example configuration:
+
+```bash
+cp .env.example .env
+```
+
+```dotenv
+TELEGRAM_BOT_TOKEN=PASTE_REAL_BOTFATHER_TOKEN_HERE
+TELEGRAM_CHAT_ID=
+```
+
+3. Paste the real BotFather token, leave `TELEGRAM_CHAT_ID` blank, and start
+   Signal Box:
+
+```bash
+npm start
+```
+
+4. Open your new bot in Telegram and send `/start`. In token-only pairing mode,
+   it replies with that conversation's numeric chat ID:
+
+```text
+Your Signal Box chat ID is 123456789.
+```
+
+5. Add the returned value to `.env` and restart Signal Box:
+
+```dotenv
+TELEGRAM_CHAT_ID=123456789
+```
+
+Remote control is disabled until the chat ID is configured; afterward, only
+messages from that chat are accepted. Signal Box loads `.env` from its project
+directory. Keep the bot token secret; `.env` is ignored by Git.
+
+Available commands:
+
+- `/sessions` lists all sessions and their state.
+- `/use <number>` selects an owned session.
+- `/status` shows the selected session.
+- `/send <text>` sends a prompt or terminal command; plain text does the same
+  after selection.
+- `/tail` returns the last three clean input/output pairs.
+- `/history` returns the full conversation as input/output pairs.
+- `/interrupt` sends Ctrl+C.
+
+For a Terminal session, `/send <text>` and plain text run the text as a shell
+command in the tile's saved directory. Telegram replies with the command's
+clean stdout and stderr, not a working/completed status update. A non-zero exit
+code is included only when the command fails. `/interrupt` stops a command that
+is still running. Each Telegram command uses a fresh non-interactive shell, so
+shell-only state such as `cd` or exported variables does not carry into the
+next command.
+
+An amber session sends the actual pending question, including each option and
+its description. Tap an inline option button to submit that choice directly to
+the correct session; if a prompt has several questions, answer them from top to
+bottom. Prompts without structured options include the question plus `/use`
+and `/send` instructions as a text fallback.
+
+A session sends a completion message only when it actually enters the done
+state; a generic stop event cannot overwrite an outstanding approval state.
+Signal Box discards Telegram control commands queued while the app was offline
+so stale instructions are not replayed on startup. External sessions are
+listed but cannot be controlled because Signal Box does not own their terminal.
+
+### Session history API
+
+The hook server also exposes a local, read-only JSON API. List sessions and
+their history URLs:
+
+```text
+GET http://127.0.0.1:4747/api/sessions
+```
+
+Retrieve the complete normalized conversation for one session:
+
+```text
+GET http://127.0.0.1:4747/api/sessions/<session-key>/history
+```
+
+The response contains `pairs`, where every item has `prompt`, `output`, and
+`timestamp` fields. While a session is amber, `pendingQuestions` contains any
+question and selectable options currently awaiting an answer. Use the
+`historyUrl` returned by the sessions endpoint so keys are encoded correctly.
+The API binds to localhost and uses the configured `SIGNAL_BOX_PORT` when it
+differs from `4747`.
 
 ## Troubleshooting
+
+### Telegram bot does not reply
+
+Confirm that Signal Box is running and that `.env` contains the real token from
+BotFather rather than the placeholder from `.env.example`. A Telegram
+`Unauthorized` error means the bot token is invalid or was revoked. Generate a
+fresh token with BotFather's `/token`, set `TELEGRAM_CHAT_ID=` to blank, restart
+Signal Box, and send `/start` to the bot again. After it returns the chat ID,
+save that value and restart once more.
+
+If `TELEGRAM_CHAT_ID` already contains an incorrect value, the bot is locked to
+that chat for control commands. `/start` remains available as a safe pairing
+command: send it to the running bot, replace `TELEGRAM_CHAT_ID` with the value
+it returns, and restart Signal Box.
 
 ### Electron does not start
 
@@ -312,6 +418,8 @@ Then restart Signal Box.
 node --check hooks.js
 node --check codex-hooks.js
 node --check codex-notify.js
+node --check codex-sessions.js
+node --check history.js
 node --check board.js
 node --check main.js
 node --check preload.js
@@ -319,6 +427,12 @@ node --check processes.js
 node --check renderer/app.js
 node --check renderer/audio.js
 node test/board.test.js
+node test/codex-sessions.test.js
+node test/codex-notify.test.js
+node test/history.test.js
+node test/session-command.test.js
+node test/terminal-command.test.js
+node test/telegram.test.js
 ```
 
 The board test needs permission to bind a loopback port.
@@ -330,12 +444,17 @@ board.js                    Session state and hook server
 hooks.js                    Claude settings installer
 codex-hooks.js              Codex config installer
 codex-notify.js             Codex notification adapter
+codex-sessions.js           Codex resume-ID validation and recovery
+history.js                  Normalized Claude/Codex prompt-output history
+terminal-command.js         Clean Telegram command execution and output
 processes.js                Linux/WSL process discovery
+telegram.js                 Authorized Telegram remote control
 main.js                     Electron main process and PTY manager
 launch-electron.js          WSL Electron launcher
 preload.js                  Restricted IPC bridge
 renderer/                   UI, xterm view, sound, and styling
 test/board.test.js          Board integration test
+test/telegram.test.js       Telegram command and routing test
 ```
 
 ## Current limitations

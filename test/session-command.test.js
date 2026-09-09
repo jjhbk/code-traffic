@@ -8,5 +8,7 @@ assert.deepStrictEqual(sessionArgs('codex', 'codex-id', true), ['resume', 'codex
 assert.deepStrictEqual(sessionArgs('claude', null, true), ['--continue']);
 assert.deepStrictEqual(sessionArgs('codex', null, true), ['resume', '--last']);
 assert.deepStrictEqual(sessionArgs('codex', 'codex:/tmp/project', true), ['resume', '--last']);
+assert.deepStrictEqual(sessionArgs('terminal', null, false), []);
+assert.deepStrictEqual(sessionArgs('terminal', 'ignored', true), []);
 
 console.log('session command tests passed');
