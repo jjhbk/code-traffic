@@ -12,6 +12,7 @@ const { TelegramControl } = require('./telegram');
 const { resolveCodexSessionId } = require('./codex-sessions');
 const { queuePrompt } = require('./codex-control');
 const { sessionHistory } = require('./history');
+const { startCodexMonitor } = require('./codex-monitor');
 
 // WSLg can expose a display while its GPU shared-image path is unavailable.
 // Electron's software renderer is reliable for this small board and xterm view.
@@ -25,6 +26,7 @@ let windowRef;
 let board;
 let pty;
 let telegram;
+let stopCodexMonitor;
 const terminals = new Map();
 const remoteCommands = new Map();
 const boardPort = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
@@ -303,6 +305,14 @@ async function start() {
       telegram.notifyState(board.list().find((session) => session.key === changed.key), changed.state);
     }
   });
+  stopCodexMonitor = startCodexMonitor({
+    listSessions: () => board.list(),
+    getHistory: sessionHistory,
+    onApproval: (session) => board.handleHook('approval', session.tile || session.key, {
+      session_id: session.sessionId,
+      cwd: session.cwd,
+    }),
+  });
   wireIpc();
   createWindow();
   telegram.start();
@@ -321,6 +331,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  stopCodexMonitor?.();
   telegram?.stop();
   for (const child of remoteCommands.values()) {
     try { child.kill(); } catch (_) { /* Process may already have exited. */ }

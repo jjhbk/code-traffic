@@ -14,6 +14,7 @@ const {
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-history-'));
 const codexFile = path.join(directory, 'codex.jsonl');
 const claudeFile = path.join(directory, 'claude.jsonl');
+const permissionFile = path.join(directory, 'codex-permission.jsonl');
 
 fs.writeFileSync(codexFile, [
   { timestamp: '2026-01-01', type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text: 'Build it' }] } } },
@@ -30,6 +31,11 @@ fs.writeFileSync(claudeFile, [
   { timestamp: '2026-01-01', type: 'user', uuid: 'u2', message: { content: [{ type: 'tool_result', tool_use_id: 'old-question', content: 'Answered' }] } },
   { timestamp: '2026-01-01', type: 'assistant', uuid: 'a3', message: { content: [{ type: 'tool_use', id: 'pending-question', name: 'AskUserQuestion', input: { questions: [{ header: 'Deploy', question: 'Where should this deploy?', multiSelect: false, options: [{ label: 'Staging', description: 'Deploy to staging.' }, { label: 'Production', description: 'Deploy to production.' }] }] } }] } },
 ].map(JSON.stringify).join('\n'));
+
+fs.writeFileSync(permissionFile, JSON.stringify({
+  type: 'response_item',
+  payload: { type: 'custom_tool_call', name: 'exec', call_id: 'permission-1', status: 'pending', input: { command: 'npm install' } },
+}));
 
 assert.deepStrictEqual(parseCodexHistory(codexFile)[0], { prompt: 'Build it', output: 'Built.', timestamp: '2026-01-01' });
 assert.deepStrictEqual(parseClaudeHistory(claudeFile)[0], { prompt: 'Fix it', output: 'Fixed.', timestamp: '2026-01-01' });
@@ -51,6 +57,14 @@ assert.deepStrictEqual(parseCodexQuestions(codexFile), [{
   options: [
     { label: 'Hybrid', description: 'Use local and remote workers.' },
     { label: 'Local', description: 'Stay on this machine.' },
+  ],
+}]);
+assert.deepStrictEqual(parseCodexQuestions(permissionFile), [{
+  header: 'Permission required',
+  question: 'Codex wants to run exec:\n{"command":"npm install"}',
+  options: [
+    { label: 'Allow', description: 'Approve this Codex action.' },
+    { label: 'Deny', description: 'Reject this Codex action.' },
   ],
 }]);
 assert.deepStrictEqual(questionsFromText('How should this run?\n1. Fast\n2. Safely'), [{

@@ -52,6 +52,18 @@ function parseCodexHistory(file) {
 
 function parseCodexQuestions(file) {
   const pending = new Map();
+  const permissionQuestion = (payload) => {
+    const type = String(payload.type || '').toLowerCase();
+    const name = String(payload.name || payload.item?.name || '').toLowerCase();
+    const status = String(payload.status || '').toLowerCase();
+    if (!type.includes('approval') && !type.includes('permission')
+      && !(type === 'custom_tool_call' && ['pending', 'started'].includes(status))) return null;
+    const raw = payload.command || payload.input || payload.arguments || payload.item?.input || '';
+    let command = typeof raw === 'string' ? raw : JSON.stringify(raw);
+    if (command.length > 700) command = `${command.slice(0, 697)}...`;
+    const operation = name || type.replace(/[_-]+/g, ' ');
+    return { header: 'Permission required', question: `Codex wants to run ${operation}${command ? `:\n${command}` : '.'}`, options: [{ label: 'Allow', description: 'Approve this Codex action.' }, { label: 'Deny', description: 'Reject this Codex action.' }] };
+  };
   for (const line of readLines(file)) {
     let record;
     try { record = JSON.parse(line); } catch (_) { continue; }
@@ -72,6 +84,12 @@ function parseCodexQuestions(file) {
       } catch (_) { /* Ignore malformed tool arguments. */ }
     } else if (record.type === 'response_item' && payload.type === 'function_call_output') {
       pending.delete(payload.call_id);
+    } else if (record.type === 'response_item') {
+      const question = permissionQuestion(payload);
+      if (question) pending.set(payload.call_id || payload.id || `${pending.size}`, [question]);
+      if (['completed', 'failed', 'cancelled'].includes(String(payload.status || '').toLowerCase())) {
+        pending.delete(payload.call_id || payload.id);
+      }
     }
   }
   return [...pending.values()].at(-1) || [];

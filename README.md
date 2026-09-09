@@ -307,6 +307,10 @@ next command.
 For Claude Code sessions, Signal Box sends the prompt text and Enter as separate
 terminal events. Codex prompts use the CLI's purpose-built `codex queue`
 command with the saved thread ID, avoiding fragile terminal keystroke emulation.
+Signal Box also polls Codex session logs for pending `request_user_input` calls,
+so Codex questions are promoted to amber and shown with the same Telegram option
+buttons as Claude questions. Pending Codex tool permission requests are surfaced
+the same way with Allow and Deny actions.
 Signal Box also launches Codex with `disable_paste_burst=true` for other remote
 interactions. The override only applies to Codex processes launched inside
 Signal Box and does not modify the user's global Codex configuration.
@@ -440,6 +444,7 @@ node test/board.test.js
 node test/codex-sessions.test.js
 node test/codex-notify.test.js
 node test/codex-control.test.js
+node test/codex-monitor.test.js
 node test/history.test.js
 node test/session-command.test.js
 node test/terminal-command.test.js
