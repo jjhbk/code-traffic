@@ -6,11 +6,9 @@ const terminalHost = document.getElementById('terminal');
 const terminalTitle = document.getElementById('terminal-title');
 let sessions = [];
 let activeTile = null;
-let terminal;
-let fitAddon;
 let fitTimer;
 let fitAttempts = 0;
-let terminalTile = null;
+const terminals = new Map();
 const pendingPty = new Map();
 window.addEventListener('error', (event) => {
   console.error(`[renderer-error] ${event.message}`, event.error);
@@ -82,36 +80,45 @@ function render() {
 
 function openTerminal(session) {
   try {
-    activeTile = session.tile;
+    const tile = session.tile || session.key;
+    if (!tile) throw new Error('This session does not have a terminal id.');
+    activeTile = tile;
     terminalView.hidden = false;
     terminalTitle.textContent = `${session.project} · ${session.path}`;
-    if (terminal && terminalTile !== session.tile) {
-      disposeTerminal();
-    }
-    if (!terminal) {
+    for (const [entryTile, entry] of terminals) entry.container.hidden = entryTile !== tile;
+
+    let entry = terminals.get(tile);
+    if (!entry) {
       if (!window.Terminal || !window.FitAddon || !window.signalBox) {
         throw new Error(`Terminal assets missing (Terminal=${Boolean(window.Terminal)}, FitAddon=${Boolean(window.FitAddon)}, IPC=${Boolean(window.signalBox)})`);
       }
-      terminal = new window.Terminal({
+      const container = document.createElement('div');
+      container.className = 'terminal-pane';
+      terminalHost.append(container);
+      const terminal = new window.Terminal({
         cursorBlink: true,
         scrollback: 5000,
         theme: { background: '#0d1117', foreground: '#d8e0e8' },
         fontSize: 13,
       });
-      fitAddon = new window.FitAddon.FitAddon();
+      const fitAddon = new window.FitAddon.FitAddon();
       terminal.loadAddon(fitAddon);
-      terminal.open(terminalHost);
-      terminal.onData((data) => window.signalBox.writePty({ tile: activeTile, data }));
+      terminal.open(container);
+      terminal.onData((data) => window.signalBox.writePty({ tile, data }));
       terminal.onKey(({ domEvent }) => {
-        if (domEvent.key === 'Enter' && activeTile) window.signalBox.markWorking({ tile: activeTile });
+        if (domEvent.key === 'Enter') window.signalBox.markWorking({ tile });
       });
-      terminalTile = session.tile;
-      fitAttempts = 0;
+      entry = { terminal, fitAddon, container };
+      terminals.set(tile, entry);
     }
-    const buffered = pendingPty.get(activeTile);
-    if (buffered) { terminal.write(buffered); pendingPty.delete(activeTile); }
+    fitAttempts = 0;
+    const buffered = pendingPty.get(tile);
+    if (buffered) {
+      pendingPty.delete(tile);
+      entry.terminal.write(buffered, scheduleFit);
+    }
     requestAnimationFrame(() => {
-      if (terminalView.hidden || !terminal || activeTile !== session.tile) return;
+      if (terminalView.hidden || activeTile !== tile) return;
       scheduleFit();
     });
   } catch (caught) {
@@ -121,28 +128,34 @@ function openTerminal(session) {
   }
 }
 
-function disposeTerminal() {
-  if (terminal) {
-    terminal.dispose();
-    terminal = null;
-    fitAddon = null;
-    terminalTile = null;
-    terminalHost.replaceChildren();
-  }
+function disposeTerminal(tile) {
+  const entry = terminals.get(tile);
+  if (!entry) return;
+  entry.terminal.dispose();
+  entry.container.remove();
+  terminals.delete(tile);
+  pendingPty.delete(tile);
+}
+
+function disposeAllTerminals() {
+  for (const tile of [...terminals.keys()]) disposeTerminal(tile);
 }
 
 function closeTerminalView({ dispose = false } = {}) {
   if (fitTimer) clearTimeout(fitTimer);
   fitTimer = null;
+  const tile = activeTile;
   terminalView.hidden = true;
   activeTile = null;
-  if (dispose) disposeTerminal();
+  if (dispose && tile) disposeTerminal(tile);
 }
 
 function fitTerminal() {
-  if (terminalView.hidden || !fitAddon || !terminal || !activeTile) return;
+  if (terminalView.hidden || !activeTile) return;
+  const entry = terminals.get(activeTile);
+  if (!entry) return;
   try {
-    const bounds = terminalHost.getBoundingClientRect();
+    const bounds = entry.container.getBoundingClientRect();
     if ((bounds.width < 40 || bounds.height < 40) && fitAttempts < 6) {
       fitAttempts += 1;
       fitTimer = setTimeout(() => {
@@ -151,10 +164,10 @@ function fitTerminal() {
       }, 100);
       return;
     }
-    fitAddon.fit();
-    terminal.refresh(0, Math.max(0, terminal.rows - 1));
-    terminal.focus();
-    window.signalBox.resizePty({ tile: activeTile, cols: terminal.cols, rows: terminal.rows });
+    entry.fitAddon.fit();
+    entry.terminal.refresh(0, Math.max(0, entry.terminal.rows - 1));
+    entry.terminal.focus();
+    window.signalBox.resizePty({ tile: activeTile, cols: entry.terminal.cols, rows: entry.terminal.rows });
   } catch (caught) {
     console.error('[terminal-resize]', caught);
   }
@@ -162,6 +175,7 @@ function fitTerminal() {
 
 function scheduleFit() {
   if (fitTimer) clearTimeout(fitTimer);
+  fitAttempts = 0;
   fitTimer = setTimeout(() => {
     fitTimer = null;
     fitTerminal();
@@ -209,7 +223,8 @@ document.getElementById('clear-all').addEventListener('click', async () => {
   await Promise.all(current.map((session) => window.signalBox.closeSession({ tile: session.tile || session.key })));
   sessions = [];
   render();
-  closeTerminalView({ dispose: true });
+  closeTerminalView();
+  disposeAllTerminals();
 });
 
 document.getElementById('terminal-back').addEventListener('click', () => closeTerminalView());
@@ -217,7 +232,7 @@ document.getElementById('terminal-close').addEventListener('click', async () => 
   if (!activeTile || !window.confirm('Close this Claude Code session?')) return;
   const tile = activeTile;
   await window.signalBox.closeSession({ tile });
-  sessions = sessions.filter((session) => session.tile !== tile);
+  sessions = sessions.filter((session) => (session.tile || session.key) !== tile);
   render();
   closeTerminalView({ dispose: true });
 });
@@ -225,8 +240,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !terminalView.hidden) closeTerminalView();
 });
 window.addEventListener('resize', () => {
-  if (navigator.userAgent.includes('Linux')) return;
-  if (!terminalView.hidden && fitAddon && activeTile) scheduleFit();
+  if (!terminalView.hidden && terminals.has(activeTile)) scheduleFit();
 });
 
 window.signalBox.onSessionsChanged(({ sessions: next, changed }) => {
@@ -235,7 +249,8 @@ window.signalBox.onSessionsChanged(({ sessions: next, changed }) => {
   if (changed && changed.state && !changed.navigation) audio.play(changed.state);
 });
 window.signalBox.onPtyData(({ tile, data }) => {
-  if (tile === activeTile && terminal) terminal.write(data);
+  const entry = terminals.get(tile);
+  if (entry) entry.terminal.write(data);
   else pendingPty.set(tile, `${pendingPty.get(tile) || ''}${data}`.slice(-1024 * 1024));
 });
 window.signalBox.listSessions().then((next) => { sessions = next; render(); }).catch((caught) => showError(caught.message));

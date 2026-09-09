@@ -51,5 +51,8 @@ button.tile:hover { border-color: #495766; transform: translateY(-1px); }
 .terminal-bar button:hover { border-color: #536273; }
 .terminal-bar .danger { margin-left: auto; color: #f0aaa5; }
 #terminal-title { overflow: hidden; color: #aeb8c3; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-#terminal { min-height: 0; flex: 1; padding: 8px; border: 1px solid #222b35; border-radius: 8px; background: #0d1117; }
+#terminal { position: relative; min-height: 0; flex: 1; padding: 8px; border: 1px solid #222b35; border-radius: 8px; background: #0d1117; }
+.terminal-pane { position: absolute; inset: 8px; }
+.terminal-pane[hidden] { display: none; }
+.terminal-pane .xterm { height: 100%; }
 @media (max-width: 600px) { .shell { padding: 22px 16px; } .topbar { align-items: flex-start; flex-direction: column; } .board[data-count] { grid-template-columns: minmax(0, 1fr); } }

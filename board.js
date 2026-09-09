@@ -135,11 +135,22 @@ class Board extends EventEmitter {
       this.persist();
       this.emit('change', { key, state });
     } else {
-      if (sessionId) session.sessionId = sessionId;
+      let metadataChanged = false;
+      if (sessionId && session.sessionId !== sessionId) {
+        session.sessionId = sessionId;
+        metadataChanged = true;
+      }
       if (cwd && !session.cwd) {
         session.cwd = cwd;
         session.project = path.basename(cwd);
         session.path = displayPath(cwd);
+        metadataChanged = true;
+      }
+      if (state === 'closed' && !session.owned) {
+        this.sessions.delete(key);
+        this.persist();
+        this.emit('change', { key, state: null });
+        return;
       }
       const nextState = state === 'closed' ? null : state;
       if (session.state !== nextState) {
@@ -148,6 +159,7 @@ class Board extends EventEmitter {
         this.persist();
         this.emit('change', { key, state: nextState });
       } else {
+        if (metadataChanged) this.persist();
         this.emit('change');
       }
     }

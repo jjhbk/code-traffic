@@ -1,6 +1,30 @@
 let context = null;
 let enabled = localStorage.getItem('signal-box-sound') === 'on';
 
+function audioContextClass() {
+  return window.AudioContext || window.webkitAudioContext;
+}
+
+function createContext() {
+  const AudioContextClass = audioContextClass();
+  if (!AudioContextClass) return null;
+  if (!context) context = new AudioContextClass();
+  return context;
+}
+
+async function resumeFromGesture() {
+  document.removeEventListener('pointerdown', resumeFromGesture, true);
+  document.removeEventListener('keydown', resumeFromGesture, true);
+  if (enabled && context?.state === 'suspended') {
+    try { await context.resume(); } catch (_) { /* The sound button can retry explicitly. */ }
+  }
+}
+
+function armResumeOnInteraction() {
+  document.addEventListener('pointerdown', resumeFromGesture, { capture: true, once: true });
+  document.addEventListener('keydown', resumeFromGesture, { capture: true, once: true });
+}
+
 function tone(frequency, start, duration, volume) {
   if (!context) return;
   const oscillator = context.createOscillator();
@@ -24,10 +48,9 @@ function play(state) {
 }
 
 async function toggle() {
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextClass) throw new Error('WebAudio is unavailable in this Electron runtime.');
+  if (!audioContextClass()) throw new Error('WebAudio is unavailable in this Electron runtime.');
   const wasUninitialized = !context;
-  if (!context) context = new AudioContextClass();
+  createContext();
   if (context.state === 'suspended') await context.resume();
   if (context.state !== 'running') throw new Error(`Audio context is ${context.state}; WSLg did not activate an audio output.`);
   if (wasUninitialized && enabled) {
@@ -38,6 +61,11 @@ async function toggle() {
   localStorage.setItem('signal-box-sound', enabled ? 'on' : 'off');
   if (enabled) tone(660, context.currentTime, .2, .16);
   return enabled;
+}
+
+if (enabled) {
+  createContext();
+  if (context?.state === 'suspended') armResumeOnInteraction();
 }
 
 window.signalBoxAudio = { toggle, play, isEnabled: () => enabled };

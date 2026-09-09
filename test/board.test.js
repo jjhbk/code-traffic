@@ -1,5 +1,8 @@
 const assert = require('assert');
+const fs = require('fs');
 const http = require('http');
+const os = require('os');
+const path = require('path');
 const { Board } = require('../board');
 
 function post(port, query, body = '') {
@@ -46,8 +49,7 @@ function waitFor(board, predicate) {
   assert.strictEqual(board.list().find((s) => s.key === 'tile-1').since, before);
 
   await post(port, 'state=closed', JSON.stringify({ session_id: 's1' }));
-  await waitFor(board, () => board.list().find((s) => s.key === 's1')?.state === null);
-  assert.strictEqual(board.list().find((s) => s.key === 's1')?.state, null);
+  await waitFor(board, () => !board.list().some((s) => s.key === 's1'));
   assert.ok(!board.list().some((s) => s.key === 's1'));
 
   board.register('owned', '/tmp/owned');
@@ -59,6 +61,16 @@ function waitFor(board, predicate) {
 
   assert.strictEqual(await post(port, 'state=working', ''), 200);
   await board.closeServer();
+
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-test-'));
+  const storagePath = path.join(temporaryDirectory, 'sessions.json');
+  const persistentBoard = new Board({ storagePath });
+  persistentBoard.register('persisted', '/tmp/persisted', 'claude');
+  persistentBoard.handleHook('working', 'persisted', { session_id: 'saved-id', cwd: '/tmp/persisted' });
+  persistentBoard.handleHook('working', 'persisted', { session_id: 'updated-id', cwd: '/tmp/persisted' });
+  assert.strictEqual(new Board({ storagePath }).list()[0].sessionId, 'updated-id');
+  fs.rmSync(temporaryDirectory, { recursive: true });
+
   console.log('board tests passed');
 })().catch((error) => {
   console.error(error);

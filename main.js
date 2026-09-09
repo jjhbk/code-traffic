@@ -5,6 +5,7 @@ const { spawn, spawnSync } = require('child_process');
 const { app, BrowserWindow, dialog, ipcMain, Notification, screen } = require('electron');
 const { Board } = require('./board');
 const { runningAgents } = require('./processes');
+const { sessionArgs } = require('./session-command');
 
 // WSLg can expose a display while its GPU shared-image path is unavailable.
 // Electron's software renderer is reliable for this small board and xterm view.
@@ -19,6 +20,7 @@ let board;
 let pty;
 const terminals = new Map();
 const boardPort = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
+const desktopNotificationsEnabled = false;
 
 try {
   pty = require('node-pty');
@@ -84,13 +86,13 @@ function wireIpc() {
   ipcMain.handle('session:create', async (_event, { cwd, agent = 'claude' } = {}) => {
     const tile = crypto.randomUUID();
     board.register(tile, cwd, agent);
-    await spawnSession(tile, cwd, agent, null);
+    await spawnSession(tile, cwd, agent, null, false);
     return tile;
   });
   ipcMain.handle('session:open', async (_event, { tile } = {}) => {
     const session = board.reopen(tile);
     if (!session) throw new Error('That session is no longer available.');
-    await spawnSession(tile, session.cwd, session.agent || 'claude', session.sessionId);
+    await spawnSession(tile, session.cwd, session.agent || 'claude', session.sessionId, true);
     return true;
   });
   ipcMain.handle('session:close', (_event, { tile } = {}) => {
@@ -120,16 +122,13 @@ function wireIpc() {
   });
 }
 
-async function spawnSession(tile, cwd, agent, sessionId) {
+async function spawnSession(tile, cwd, agent, sessionId, reopening) {
   if (!pty) throw new Error('Embedded terminals are unavailable because node-pty could not be loaded.');
   if (!cwd || typeof cwd !== 'string') throw new Error('Choose a project folder first.');
   if (terminals.has(tile)) return;
   const binary = findAgent(agent);
   if (!binary) throw new Error(`${agent === 'codex' ? 'Codex CLI' : 'Claude Code'} was not found on PATH. Install it, then restart Signal Box.`);
-  const resumableId = sessionId && !(agent === 'codex' && sessionId.startsWith('codex:')) ? sessionId : null;
-  const args = resumableId
-    ? (agent === 'codex' ? ['resume', resumableId] : ['--resume', resumableId])
-    : [];
+  const args = sessionArgs(agent, sessionId, reopening);
   const child = pty.spawn(binary, args, {
     name: 'xterm-256color',
     // These are only safe startup values. The renderer immediately resizes
@@ -196,7 +195,7 @@ async function start() {
     if (windowRef && !windowRef.isDestroyed()) {
       windowRef.webContents.send('sessions:changed', { sessions: board.list(), changed });
     }
-    if (changed && changed.state && !changed.navigation) notifyUser(changed);
+    if (desktopNotificationsEnabled && changed && changed.state && !changed.navigation) notifyUser(changed);
   });
   wireIpc();
   createWindow();
