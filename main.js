@@ -14,11 +14,16 @@ const { queuePrompt } = require('./codex-control');
 const { sessionHistory } = require('./history');
 const { startCodexMonitor, terminalApprovalQuestion } = require('./codex-monitor');
 
-// WSLg can expose a display while its GPU shared-image path is unavailable.
+const disableSandbox = process.env.SIGNAL_BOX_NO_SANDBOX === '1';
+
+if (disableSandbox) {
+  app.commandLine.appendSwitch('no-sandbox');
+}
+
+// WSLg/Wayland can expose a display while the GPU shared-image path is unavailable.
 // Electron's software renderer is reliable for this small board and xterm view.
 if (process.platform === 'linux' && (process.env.WSL_DISTRO_NAME || process.env.WAYLAND_DISPLAY)) {
   app.disableHardwareAcceleration();
-  app.commandLine.appendSwitch('no-sandbox');
   app.commandLine.appendSwitch('disable-gpu-compositing');
 }
 
@@ -64,6 +69,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: process.env.SIGNAL_BOX_NO_SANDBOX !== '1',
       preload: path.join(__dirname, 'preload.js'),
     },
   });
