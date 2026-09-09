@@ -305,7 +305,14 @@ class TelegramControl {
     const number = this.listSessions().findIndex((item) => (item.tile || item.key) === tile) + 1;
     const select = number > 0 ? `\nUse /use ${number} to select it.` : '';
     if (state !== 'approval') {
-      this.send(`✅ ${session.project} completed.${select}\nUse /tail to review the latest input/output pairs.`)
+      let latest = '';
+      try {
+        const history = this.getHistory?.(session);
+        latest = history?.pairs?.length ? `\n\nLatest input/output:\n${formatHistoryPairs(history.pairs, 1)}` : '';
+      } catch (error) {
+        console.error(`[telegram] could not read completed session output: ${error.message}`);
+      }
+      this.sendLong(`✅ ${session.project} completed.${latest}${select}`)
         .catch((error) => console.error(`[telegram] notification failed: ${error.message}`));
       return;
     }

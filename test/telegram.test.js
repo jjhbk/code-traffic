@@ -90,6 +90,11 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   assert.match(sent.at(-1).text, /Input:\nrun the tests/);
   assert.match(sent.at(-1).text, /Output:\nTests passed\./);
 
+  control.notifyState(sessions[0], 'done');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(sent.at(-1).text, /Latest input\/output/);
+  assert.match(sent.at(-1).text, /Output:\nTests passed\./);
+
   control.notifyState(sessions[0], 'approval');
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(sent.at(-1).text, /needs user input or permission/);

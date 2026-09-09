@@ -317,7 +317,8 @@ Signal Box also launches Codex with `disable_paste_burst=true` for other remote
 interactions. The override only applies to Codex processes launched inside
 Signal Box and does not modify the user's global Codex configuration.
 
-An amber session sends the actual pending question, including each option and
+Completion notifications include the latest input/output pair automatically;
+use `/tail` only when you need older pairs. An amber session sends the actual pending question, including each option and
 its description. Tap an inline option button to submit that choice directly to
 the correct session; if a prompt has several questions, answer them from top to
 bottom. Prompts without structured options include the question plus `/use`
