@@ -337,7 +337,7 @@ class TelegramControl {
           this.actions.set(token, {
             tile,
             label: option.label,
-            keys: `${'\x1b[B'.repeat(optionIndex)}${question.multiSelect ? ' \r' : '\r'}`,
+            keys: option.keys || `${'\x1b[B'.repeat(optionIndex)}${question.multiSelect ? ' \r' : '\r'}`,
           });
           const prefix = questions.length > 1 ? `${questionIndex + 1}. ` : '';
           inlineKeyboard.push([{

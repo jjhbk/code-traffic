@@ -1,5 +1,9 @@
 const assert = require('assert');
-const { startCodexMonitor } = require('../codex-monitor');
+const { startCodexMonitor, terminalApprovalQuestion } = require('../codex-monitor');
+
+const terminalQuestion = terminalApprovalQuestion('Would you like to run the following command?\n$ sudo apt-get install -y golang-go\nPress enter to confirm or esc to cancel');
+assert.strictEqual(terminalQuestion.options[0].keys, 'y\r');
+assert.strictEqual(terminalQuestion.options[2].keys, '\x1b');
 
 const session = { key: 'codex-1', tile: 'codex-1', agent: 'codex', state: 'working' };
 let pending = [{ question: 'Which option?', options: [{ label: 'A' }] }];

@@ -12,7 +12,7 @@ const { TelegramControl } = require('./telegram');
 const { resolveCodexSessionId } = require('./codex-sessions');
 const { queuePrompt } = require('./codex-control');
 const { sessionHistory } = require('./history');
-const { startCodexMonitor } = require('./codex-monitor');
+const { startCodexMonitor, terminalApprovalQuestion } = require('./codex-monitor');
 
 // WSLg can expose a display while its GPU shared-image path is unavailable.
 // Electron's software renderer is reliable for this small board and xterm view.
@@ -27,6 +27,7 @@ let board;
 let pty;
 let telegram;
 let stopCodexMonitor;
+const codexTerminalQuestions = new Map();
 const terminals = new Map();
 const remoteCommands = new Map();
 const boardPort = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
@@ -164,9 +165,19 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
   });
   terminals.set(tile, child);
   child.onData((data) => {
+    if (agent === 'codex') {
+      const previousEntry = codexTerminalQuestions.get(tile);
+      const previous = previousEntry?.buffer || '';
+      const buffer = `${previous}${data}`.slice(-12000);
+      const question = terminalApprovalQuestion(buffer);
+      codexTerminalQuestions.set(tile, { buffer, question });
+      if (question && JSON.stringify(previousEntry?.question || null) !== JSON.stringify(question)) {
+        board.handleHook('approval', tile, { session_id: sessionId, cwd });
+      }
+    }
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('pty:data', { tile, data });
   });
-  child.onExit(() => terminals.delete(tile));
+  child.onExit(() => { terminals.delete(tile); codexTerminalQuestions.delete(tile); });
 }
 
 function findAgent(agent) {
@@ -276,7 +287,14 @@ async function start() {
     token: process.env.TELEGRAM_BOT_TOKEN,
     chatId: process.env.TELEGRAM_CHAT_ID,
     listSessions: () => board.list(),
-    getHistory: sessionHistory,
+    getHistory: (session) => {
+      const history = sessionHistory(session);
+      const terminalQuestion = codexTerminalQuestions.get(session.tile || session.key)?.question;
+      if (session.agent === 'codex' && terminalQuestion && !history.pendingQuestions.length) {
+        history.pendingQuestions = [terminalQuestion];
+      }
+      return history;
+    },
     executeTerminal: executeRemoteTerminal,
     interruptTerminal: interruptRemoteTerminal,
     sendPrompt: sendRemoteAgentPrompt,
@@ -301,7 +319,7 @@ async function start() {
       windowRef.webContents.send('sessions:changed', { sessions: board.list(), changed });
     }
     if (desktopNotificationsEnabled && changed && changed.state && !changed.navigation) notifyUser(changed);
-    if (['approval', 'done'].includes(changed?.state) && !changed.navigation) {
+    if (['approval', 'done'].includes(changed?.state) && !changed.navigation && !changed.repeated) {
       telegram.notifyState(board.list().find((session) => session.key === changed.key), changed.state);
     }
   });

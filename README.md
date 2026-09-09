@@ -310,7 +310,9 @@ command with the saved thread ID, avoiding fragile terminal keystroke emulation.
 Signal Box also polls Codex session logs for pending `request_user_input` calls,
 so Codex questions are promoted to amber and shown with the same Telegram option
 buttons as Claude questions. Pending Codex tool permission requests are surfaced
-the same way with Allow and Deny actions.
+the same way with Allow and Deny actions. The Codex terminal approval screen
+(`Would you like to run the following command?`) is also detected directly from
+the PTY stream.
 Signal Box also launches Codex with `disable_paste_burst=true` for other remote
 interactions. The override only applies to Codex processes launched inside
 Signal Box and does not modify the user's global Codex configuration.
