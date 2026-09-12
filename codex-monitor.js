@@ -45,7 +45,7 @@ function terminalApprovalQuestion(output) {
     header: 'Permission required',
     question: command ? `Codex wants permission to run:\n${command}` : 'Codex is waiting for permission to continue.',
     options: [
-      { label: 'Allow', description: 'Run this command once.', keys: 'y\r' },
+      { label: 'Allow', description: 'Run this command once.', keys: '\r' },
       { label: 'Always allow', description: 'Allow this command pattern.', keys: 'p\r' },
       { label: 'Deny', description: 'Cancel this command.', keys: '\x1b' },
     ],

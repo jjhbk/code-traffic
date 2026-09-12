@@ -12,6 +12,53 @@ function displayPath(cwd) {
   return cwd === home ? '~' : cwd.startsWith(`${home}${path.sep}`) ? `~${cwd.slice(home.length)}` : cwd;
 }
 
+function permissionQuestion(payload) {
+  const tool = payload?.tool_name || payload?.toolName || payload?.name || 'an operation';
+  const rawInput = payload?.tool_input || payload?.toolInput || payload?.input;
+  let detail = '';
+  if (typeof rawInput === 'string') detail = rawInput;
+  else if (rawInput && typeof rawInput === 'object') detail = rawInput.command || rawInput.cmd || JSON.stringify(rawInput);
+  if (detail.length > 700) detail = `${detail.slice(0, 697)}...`;
+  const suggestions = payload?.permission_suggestions || payload?.permissionSuggestions;
+  const options = Array.isArray(suggestions) && suggestions.length
+    ? suggestions.map((suggestion, index) => {
+      const rawLabel = suggestion?.label || suggestion?.name || suggestion?.type || suggestion?.behavior || `Option ${index + 1}`;
+      const label = String(rawLabel).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
+      return {
+        label: label.charAt(0).toUpperCase() + label.slice(1),
+        description: suggestion?.description || suggestion?.prompt || '',
+        keys: `${'\x1b[B'.repeat(index)}\r`,
+      };
+    })
+    : [
+      { label: 'Allow once', description: 'Allow this request once.', keys: '\r' },
+      { label: 'Always allow', description: 'Allow future matching requests.', keys: '\x1b[B\r' },
+      { label: 'Deny', description: 'Reject this request.', keys: '\x1b[B\x1b[B\r' },
+    ];
+  return {
+    header: 'Permission required',
+    question: `Claude wants permission to use ${tool}${detail ? `:\n${detail}` : '.'}`,
+    options,
+  };
+}
+
+function userQuestionsFromHook(payload) {
+  const input = payload?.tool_input || payload?.toolInput || payload?.input || payload;
+  const questions = input?.questions;
+  if (String(payload?.tool_name || payload?.toolName || payload?.name || '').toLowerCase() !== 'askuserquestion'
+    || !Array.isArray(questions)) return null;
+  return questions.map((question) => ({
+    id: question.id || null,
+    header: question.header || '',
+    question: question.question || '',
+    multiSelect: Boolean(question.multiSelect),
+    options: Array.isArray(question.options) ? question.options.map((option) => ({
+      label: option.label || '',
+      description: option.description || '',
+    })).filter((option) => option.label) : [],
+  })).filter((question) => question.question);
+}
+
 function sessionDetails(key, tile, sessionId, cwd, owned, agent = null) {
   const now = Date.now();
   return {
@@ -214,6 +261,13 @@ class Board extends EventEmitter {
         session.path = displayPath(cwd);
         metadataChanged = true;
       }
+      if (state === 'approval' && session.agent === 'claude' && !session.approvalQuestions?.length) {
+        session.approvalQuestions = userQuestionsFromHook(payload) || [permissionQuestion(payload)];
+        metadataChanged = true;
+      } else if (state !== 'approval' && session.approvalQuestions) {
+        delete session.approvalQuestions;
+        metadataChanged = true;
+      }
       if (state === 'closed' && !session.owned) {
         this.sessions.delete(key);
         this.persist();
@@ -333,4 +387,4 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload, null, 2));
 }
 
-module.exports = { Board, displayPath };
+module.exports = { Board, displayPath, permissionQuestion, userQuestionsFromHook };

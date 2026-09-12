@@ -164,7 +164,7 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   twoQuestionControl.notifyState(sessions[0], 'approval');
   await new Promise((resolve) => setImmediate(resolve));
   const twoQuestionMessage = approvalMessages.at(-1);
-  assert.strictEqual(twoQuestionMessage.reply_markup.inline_keyboard.length, 2);
+  assert.strictEqual(twoQuestionMessage.reply_markup.inline_keyboard.length, 4);
   const firstQuestion = twoQuestionMessage.reply_markup.inline_keyboard[0][0].callback_data;
   await twoQuestionControl.handleUpdate({ callback_query: {
     id: 'first-question', data: firstQuestion,
@@ -172,10 +172,9 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   } });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepStrictEqual(approvalWrites, ['\r']);
-  const secondQuestionMessage = approvalMessages.at(-1);
-  assert.strictEqual(secondQuestionMessage.reply_markup.inline_keyboard.length, 2);
-  assert.match(secondQuestionMessage.reply_markup.inline_keyboard[0][0].text, /^2\. /);
-  const secondQuestion = secondQuestionMessage.reply_markup.inline_keyboard[0][0].callback_data;
+  const secondQuestionMessage = twoQuestionMessage;
+  assert.match(secondQuestionMessage.reply_markup.inline_keyboard[2][0].text, /^2\. /);
+  const secondQuestion = secondQuestionMessage.reply_markup.inline_keyboard[2][0].callback_data;
   await twoQuestionControl.handleUpdate({ callback_query: {
     id: 'second-question', data: secondQuestion,
     message: { message_id: 12, text: secondQuestionMessage.text, reply_markup: secondQuestionMessage.reply_markup, chat: { id: 42 } },

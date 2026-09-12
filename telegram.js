@@ -172,6 +172,16 @@ class TelegramControl {
     });
   }
 
+  async refreshApprovals() {
+    const approvals = this.listSessions().filter((session) => session.state === 'approval');
+    if (!approvals.length) {
+      await this.send('There are no pending permissions or questions.');
+      return;
+    }
+    for (const session of approvals) this.notifyState(session, 'approval');
+    await this.send(`Refreshed ${approvals.length} pending approval${approvals.length === 1 ? '' : 's'}.`);
+  }
+
   async poll() {
     try {
       if (this.configured) {
@@ -287,7 +297,7 @@ class TelegramControl {
     if (!action) {
       await this.request('answerCallbackQuery', {
         callback_query_id: query.id,
-        text: 'This option has expired. Wait for a new prompt or open the app.',
+        text: 'This option has expired. Send /refresh for a new button.',
         show_alert: true,
       });
       return;
@@ -328,7 +338,6 @@ class TelegramControl {
         this.selectedTile = action.tile;
         await this.acknowledgeAnswer(query, action.label, action.questionSignature, answeredTokens);
         this.approvalNotifications.delete(action.tile);
-        this.notifyState(session, 'approval');
       } else if (action.type === 'select') {
         const session = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
         if (!session) throw new Error('That session is no longer available.');
@@ -365,7 +374,11 @@ class TelegramControl {
 
   async handleCommand({ name, argument }) {
     if (name === 'start' || name === 'help') {
-      await this.send('Signal Box remote control\n\n/sessions — list sessions\n/use <number> — select a session\n/status — show the selected session\n/send <text> — send a prompt\n/tail — show the last 3 input/output pairs\n/history — show the full conversation\n/interrupt — send Ctrl+C\n\nAfter selecting a session, plain text is also sent as a prompt.');
+      await this.send('Signal Box remote control\n\n/sessions — list sessions\n/refresh — resend pending permission buttons\n/use <number> — select a session\n/status — show the selected session\n/send <text> — send a prompt\n/tail — show the last 3 input/output pairs\n/history — show the full conversation\n/interrupt — send Ctrl+C\n\nAfter selecting a session, plain text is also sent as a prompt.');
+      return;
+    }
+    if (name === 'refresh') {
+      await this.refreshApprovals();
       return;
     }
     if (name === 'sessions') {
@@ -489,16 +502,24 @@ class TelegramControl {
     const select = number > 0 ? `\nTap the session button below to open it.` : '';
     if (state !== 'approval') {
       this.clearApproval(tile);
-      let latest = '';
-      try {
-        const history = this.getHistory?.(session);
-        latest = history?.pairs?.length ? `\n\nLatest input/output:\n${formatHistoryPairs(history.pairs, 1)}` : '';
-      } catch (error) {
-        console.error(`[telegram] could not read completed session output: ${error.message}`);
-      }
-      this.sendLong(`✅ ${session.project} completed.${latest}${select}`,
-        number > 0 ? this.sessionButtonMarkup(session) : {})
-        .catch((error) => console.error(`[telegram] notification failed: ${error.message}`));
+      const sendCompletion = async () => {
+        let history = null;
+        try { history = this.getHistory?.(session); } catch (error) {
+          console.error(`[telegram] could not read completed session output: ${error.message}`);
+        }
+        const latestPair = history?.pairs?.at(-1);
+        if (!latestPair?.output) {
+          // Claude can emit Stop before it flushes the final assistant message.
+          await delay(750);
+          try { history = this.getHistory?.(session); } catch (error) {
+            console.error(`[telegram] could not reread completed session output: ${error.message}`);
+          }
+        }
+        const latest = history?.pairs?.length ? `\n\nLatest input/output:\n${formatHistoryPairs(history.pairs, 1)}` : '';
+        await this.sendLong(`✅ ${session.project} completed.${latest}${select}`,
+          number > 0 ? this.sessionButtonMarkup(session) : {});
+      };
+      sendCompletion().catch((error) => console.error(`[telegram] notification failed: ${telegramErrorText(error)}`));
       return;
     }
 
@@ -527,13 +548,9 @@ class TelegramControl {
 
     const inlineKeyboard = [];
     if (session.owned) {
-      const questionIndex = questions.findIndex((question) => {
-        const signature = JSON.stringify(question);
-        return !this.answeredApprovals.get(tile)?.has(signature);
-      });
-      if (questionIndex >= 0) {
-        const question = questions[questionIndex];
+      questions.forEach((question, questionIndex) => {
         const questionSignature = JSON.stringify(question);
+        if (this.answeredApprovals.get(tile)?.has(questionSignature)) return;
         (question.options || []).forEach((option, optionIndex) => {
           const token = this.addAction({
             type: 'answer',
@@ -548,7 +565,7 @@ class TelegramControl {
             callback_data: token,
           }]);
         });
-      }
+      });
     }
 
     if (questions.length && session.owned && !inlineKeyboard.length

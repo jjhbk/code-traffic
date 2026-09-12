@@ -14,7 +14,7 @@ function nodeExecutable() {
 function notifierPath() {
   // The notifier is executed by an external Node process, so it must live
   // outside app.asar in packaged builds.
-  return process.resourcesPath && process.versions.electron
+  return process.resourcesPath && process.versions.electron && process.defaultApp !== true
     ? path.join(process.resourcesPath, 'codex-notify.js')
     : path.join(__dirname, 'codex-notify.js');
 }

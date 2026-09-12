@@ -386,6 +386,9 @@ async function start() {
       const session = board.sessions.get(tile);
       if ((approval || data.endsWith('\r')) && session?.agent === 'codex') codexTerminalQuestions.delete(tile);
       child.write(data);
+      if (approval && session?.agent !== 'terminal') {
+        board.handleHook('working', tile, { session_id: session.sessionId, cwd: session.cwd, submitted: true });
+      }
       if (!approval && data.endsWith('\r') && session?.agent !== 'terminal') {
         board.handleHook('working', tile, { cwd: session?.cwd, submitted: true });
       }

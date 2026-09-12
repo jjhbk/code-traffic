@@ -197,7 +197,7 @@ function sessionHistory(session) {
     }
   }
   if (session.state === 'approval' && !pendingQuestions.length) {
-    pendingQuestions = questionsFromText(pairs.at(-1)?.output);
+    pendingQuestions = session.approvalQuestions || questionsFromText(pairs.at(-1)?.output);
   }
   return {
     session: {
