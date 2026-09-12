@@ -103,6 +103,27 @@ function waitFor(board, predicate) {
   persistentBoard.handleHook('working', 'persisted', { session_id: 'saved-id', cwd: '/tmp/persisted' });
   persistentBoard.handleHook('working', 'persisted', { session_id: 'updated-id', cwd: '/tmp/persisted' });
   assert.strictEqual(new Board({ storagePath }).list()[0].sessionId, 'updated-id');
+
+  const oldCodexHome = process.env.CODEX_HOME;
+  try {
+    process.env.CODEX_HOME = temporaryDirectory;
+    const codexDirectory = path.join(temporaryDirectory, 'sessions');
+    fs.mkdirSync(codexDirectory);
+    const codexTile = persistentBoard.register('codex-tile', '/tmp/owned', 'codex');
+    fs.writeFileSync(path.join(codexDirectory, 'real.jsonl'), `${JSON.stringify({ type: 'session_meta', payload: { id: 'real-thread', cwd: codexTile.cwd } })}\n`);
+    persistentBoard.handleHook('done', 'codex-tile', { session_id: 'wrong-thread', cwd: codexTile.cwd });
+    assert.strictEqual(codexTile.sessionId, 'real-thread', 'a unique session file repairs an invalid reported ID');
+    assert.strictEqual(codexTile.sessionIdVerified, true);
+    fs.writeFileSync(path.join(codexDirectory, 'other.jsonl'), `${JSON.stringify({ type: 'session_meta', payload: { id: 'other-thread', cwd: codexTile.cwd } })}\n`);
+    persistentBoard.handleHook('working', 'codex-tile', { session_id: 'other-thread', cwd: codexTile.cwd });
+    assert.strictEqual(codexTile.sessionId, 'real-thread', 'later notifications cannot move a verified tile');
+    fs.rmSync(path.join(codexDirectory, 'real.jsonl'));
+    persistentBoard.handleHook('done', 'codex-tile', { session_id: 'other-thread', cwd: codexTile.cwd });
+    assert.strictEqual(codexTile.sessionId, 'real-thread', 'a missing file cannot silently rebind a verified tile');
+  } finally {
+    if (oldCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = oldCodexHome;
+  }
   fs.rmSync(temporaryDirectory, { recursive: true });
 
   console.log('board tests passed');

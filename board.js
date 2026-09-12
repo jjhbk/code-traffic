@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
+const { resolveCodexSessionId, findUniqueCodexSessionSince } = require('./codex-sessions');
 
 const STATES = new Set(['working', 'approval', 'done', 'closed']);
 
@@ -111,12 +112,24 @@ class Board extends EventEmitter {
 
   handleHook(state, tile, payload) {
     if (!STATES.has(state)) return;
-    const sessionId = payload && typeof payload.session_id === 'string' ? payload.session_id : null;
+    let sessionId = payload && typeof payload.session_id === 'string' ? payload.session_id : null;
     const cwd = payload && typeof payload.cwd === 'string' ? payload.cwd : '';
     const key = tile || sessionId;
     if (!key) return;
 
     let session = this.sessions.get(key);
+    let bindingChanged = false;
+    if (session?.agent === 'codex' && session.owned) {
+      const current = resolveCodexSessionId(session.sessionId, session.cwd);
+      sessionId = current || (!session.sessionIdVerified && (
+        resolveCodexSessionId(sessionId, session.cwd)
+        || findUniqueCodexSessionSince(session.cwd, session.created)?.id
+      )) || null;
+      if (sessionId && !session.sessionIdVerified) {
+        session.sessionIdVerified = true;
+        bindingChanged = true;
+      }
+    }
     if (!session && !tile && cwd) {
       const matched = [...this.sessions.values()].find((candidate) => !candidate.owned && !candidate.sessionId && candidate.cwd === cwd);
       if (matched) {
@@ -136,7 +149,7 @@ class Board extends EventEmitter {
       this.persist();
       this.emit('change', { key, state });
     } else {
-      let metadataChanged = false;
+      let metadataChanged = bindingChanged;
       if (sessionId && session.sessionId !== sessionId) {
         session.sessionId = sessionId;
         metadataChanged = true;

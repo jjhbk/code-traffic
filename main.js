@@ -10,7 +10,7 @@ const { sessionArgs } = require('./session-command');
 const { checkCodexSandbox } = require('./codex-sandbox');
 const { runTerminalCommand } = require('./terminal-command');
 const { TelegramControl } = require('./telegram');
-const { resolveCodexSessionId } = require('./codex-sessions');
+const { resolveCodexTileSessionId } = require('./codex-sessions');
 const { queuePrompt } = require('./codex-control');
 const { sessionHistory } = require('./history');
 const { startCodexMonitor, terminalApprovalQuestion } = require('./codex-monitor');
@@ -160,11 +160,12 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
     if (!sessionId && launchRecord.state == null) {
       reopening = false;
     } else {
-      const resolvedId = resolveCodexSessionId(sessionId, cwd);
+      const resolvedId = resolveCodexTileSessionId(sessionId, cwd, launchRecord.sessionIdVerified ? null : launchRecord.created);
       if (!resolvedId) throw new Error('Cannot identify this Codex thread safely. Create a new session instead.');
       sessionId = resolvedId;
-      if (launchRecord.sessionId !== resolvedId) {
+      if (launchRecord.sessionId !== resolvedId || !launchRecord.sessionIdVerified) {
         launchRecord.sessionId = resolvedId;
+        launchRecord.sessionIdVerified = true;
         board.persist();
       }
     }
@@ -247,11 +248,16 @@ function interruptRemoteTerminal(session) {
 
 async function sendRemoteAgentPrompt(session, message) {
   if (session.agent !== 'codex') return false;
-  const threadId = resolveCodexSessionId(session.sessionId, session.cwd);
-  if (!threadId) throw new Error('Could not resolve this Codex session ID. Open the session and submit one prompt locally first.');
+  const threadId = resolveCodexTileSessionId(session.sessionId, session.cwd, session.sessionIdVerified ? null : session.created);
+  if (!threadId) {
+    throw new Error(session.sessionId
+      ? 'Cannot verify this tile\'s Codex thread. Create a new tile instead.'
+      : 'Open this Signal Box tile and finish a Codex turn before sending prompts remotely.');
+  }
   const saved = board.sessions.get(session.tile || session.key);
-  if (saved && saved.sessionId !== threadId) {
+  if (saved && (saved.sessionId !== threadId || !saved.sessionIdVerified)) {
     saved.sessionId = threadId;
+    saved.sessionIdVerified = true;
     board.persist();
   }
   const binary = findAgent('codex');

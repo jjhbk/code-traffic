@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { resolveCodexSessionId } = require('../codex-sessions');
+const { findUniqueCodexSessionSince, resolveCodexSessionId, resolveCodexTileSessionId } = require('../codex-sessions');
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-codex-'));
 const first = path.join(directory, 'first.jsonl');
@@ -27,6 +27,14 @@ assert.strictEqual(resolveCodexSessionId(null, '/unknown', directory), null);
 assert.strictEqual(resolveCodexSessionId('linked-id', project, directory), 'linked-id');
 assert.strictEqual(resolveCodexSessionId('linked-id', alias, directory), 'linked-id');
 assert.strictEqual(resolveCodexSessionId('linked-id', '/other-project', directory), null);
+assert.strictEqual(resolveCodexTileSessionId('wrong-id', project, Date.now() - 1000, directory), 'linked-id');
+assert.strictEqual(resolveCodexTileSessionId('wrong-id', project, Date.now() + 10000, directory), null);
+fs.writeFileSync(path.join(directory, 'another-linked.jsonl'), `${JSON.stringify({ type: 'session_meta', payload: { session_id: 'another-id', cwd: project } })}\n`);
+assert.strictEqual(findUniqueCodexSessionSince(project, Date.now() - 1000, directory), null);
+assert.strictEqual(resolveCodexTileSessionId('linked-id', project, Date.now() - 1000, directory), 'linked-id');
+fs.writeFileSync(path.join(directory, 'old-start.jsonl'), `${JSON.stringify({ timestamp: '2020-01-01T00:00:00Z', type: 'session_meta', payload: { session_id: 'old-id', cwd: project } })}\n`);
+fs.rmSync(path.join(directory, 'another-linked.jsonl'));
+assert.strictEqual(findUniqueCodexSessionSince(project, Date.now() - 1000, directory)?.id, 'linked-id');
 
 fs.rmSync(directory, { recursive: true });
 console.log('codex session tests passed');

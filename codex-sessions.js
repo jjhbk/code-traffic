@@ -18,7 +18,10 @@ function sessionFiles(directory = sessionsDirectory()) {
       const target = path.join(current, entry.name);
       if (entry.isDirectory()) pending.push(target);
       else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-        try { files.push({ path: target, modified: fs.statSync(target).mtimeMs }); } catch (_) { /* Session may disappear during cleanup. */ }
+        try {
+          const stats = fs.statSync(target);
+          files.push({ path: target, modified: stats.mtimeMs, created: stats.birthtimeMs });
+        } catch (_) { /* Session may disappear during cleanup. */ }
       }
     }
   }
@@ -37,6 +40,7 @@ function sessionMetadata(file) {
     return {
       id: record.payload.session_id || record.payload.id || null,
       cwd: record.payload.cwd || '',
+      started: Date.parse(record.timestamp || record.payload.timestamp || ''),
     };
   } catch (_) {
     return null;
@@ -80,4 +84,23 @@ function resolveCodexSessionId(candidate, cwd, directory = sessionsDirectory()) 
   return findCodexSession(candidate, cwd, directory)?.id || null;
 }
 
-module.exports = { findCodexSession, resolveCodexSessionId, sessionMetadata };
+function findUniqueCodexSessionSince(cwd, since, directory = sessionsDirectory()) {
+  if (!cwd || !Number.isFinite(since)) return null;
+  let match = null;
+  for (const file of sessionFiles(directory)) {
+    const metadata = sessionMetadata(file.path);
+    const started = Number.isFinite(metadata?.started) ? metadata.started : file.created;
+    if (started < since - 2000) continue;
+    if (!metadata?.id || !matchesDirectory(metadata.cwd, cwd)) continue;
+    if (match) return null;
+    match = { ...metadata, path: file.path };
+  }
+  return match;
+}
+
+function resolveCodexTileSessionId(candidate, cwd, created, directory = sessionsDirectory()) {
+  return resolveCodexSessionId(candidate, cwd, directory)
+    || findUniqueCodexSessionSince(cwd, created, directory)?.id || null;
+}
+
+module.exports = { findCodexSession, findUniqueCodexSessionSince, resolveCodexSessionId, resolveCodexTileSessionId, sessionMetadata };
