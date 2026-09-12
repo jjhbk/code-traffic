@@ -86,4 +86,4 @@ jobs:
         run: |
           assets=()
           while IFS= read -r -d '' file; do assets+=("$file"); done < <(find release-assets -type f -print0)
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --generate-notes --title "Signal Box $GITHUB_REF_NAME"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${assets[@]}" --generate-notes --title "Signal Box $GITHUB_REF_NAME"
