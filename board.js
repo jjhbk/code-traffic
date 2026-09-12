@@ -33,8 +33,10 @@ class Board extends EventEmitter {
   constructor({ storagePath = null, historyProvider = null } = {}) {
     super();
     this.storagePath = storagePath;
+    this.archivePath = storagePath ? `${storagePath}.archive` : null;
     this.historyProvider = historyProvider;
     this.sessions = new Map();
+    this.archived = new Map();
     this.restore();
   }
 
@@ -54,6 +56,15 @@ class Board extends EventEmitter {
         });
       }
     } catch (_) { /* A missing or corrupt cache must not prevent startup. */ }
+    if (!this.archivePath) return;
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.archivePath, 'utf8'));
+      if (!Array.isArray(saved)) return;
+      for (const record of saved) {
+        if (!record || !record.key || !record.cwd) continue;
+        this.archived.set(record.key, { ...record, tile: record.tile || record.key, owned: true, state: null });
+      }
+    } catch (_) { /* A missing or corrupt archive must not prevent startup. */ }
   }
 
   persist() {
@@ -62,6 +73,14 @@ class Board extends EventEmitter {
       fs.mkdirSync(path.dirname(this.storagePath), { recursive: true });
       fs.writeFileSync(this.storagePath, JSON.stringify(this.list(), null, 2));
     } catch (_) { /* Persistence is best effort. */ }
+  }
+
+  persistArchive() {
+    if (!this.archivePath) return;
+    try {
+      fs.mkdirSync(path.dirname(this.archivePath), { recursive: true });
+      fs.writeFileSync(this.archivePath, JSON.stringify([...this.archived.values()], null, 2));
+    } catch (_) { /* Archive persistence is best effort. */ }
   }
 
   register(tile, cwd, agent = null) {
@@ -99,6 +118,32 @@ class Board extends EventEmitter {
 
   list() {
     return [...this.sessions.values()].map((session) => ({ ...session }));
+  }
+
+  listArchived() {
+    return [...this.archived.values()].map((session) => ({ ...session }));
+  }
+
+  archive(tile) {
+    const session = this.sessions.get(tile);
+    if (!session) return false;
+    this.sessions.delete(tile);
+    this.archived.set(tile, { ...session, state: null, tile: session.tile || tile });
+    this.persist();
+    this.persistArchive();
+    this.emit('change', { key: tile, state: null, archived: true });
+    return true;
+  }
+
+  unarchive(tile) {
+    const session = this.archived.get(tile);
+    if (!session) return null;
+    this.archived.delete(tile);
+    this.sessions.set(tile, { ...session, state: null, owned: true });
+    this.persistArchive();
+    this.persist();
+    this.emit('change', { key: tile, state: null, navigation: true });
+    return this.sessions.get(tile);
   }
 
   close(tile) {

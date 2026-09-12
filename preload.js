@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('signalBox', {
   listSessions: () => ipcRenderer.invoke('sessions:list'),
+  listArchivedSessions: () => ipcRenderer.invoke('sessions:archived-list'),
   onSessionsChanged: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('sessions:changed', listener);

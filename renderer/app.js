@@ -4,7 +4,9 @@ const error = document.getElementById('error');
 const terminalView = document.getElementById('terminal-view');
 const terminalHost = document.getElementById('terminal');
 const terminalTitle = document.getElementById('terminal-title');
+const sessionChoice = document.getElementById('session-choice');
 let sessions = [];
+let archivedSessions = [];
 let activeTile = null;
 let fitTimer;
 let fitAttempts = 0;
@@ -68,7 +70,7 @@ function render() {
       dismiss.textContent = '×';
       dismiss.addEventListener('click', async (event) => {
         event.stopPropagation();
-        await window.signalBox.closeSession({ tile: session.key });
+        await window.signalBox.closeSession({ tile: session.key, permanent: true });
         sessions = sessions.filter((item) => item.key !== session.key);
         render();
       });
@@ -219,6 +221,52 @@ function scheduleFit() {
 
 function showError(message) { error.textContent = message; error.hidden = false; setTimeout(() => { error.hidden = true; }, 4000); }
 
+function chooseSessionMode() {
+  sessionChoice.hidden = false;
+  document.getElementById('start-new-session').focus();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (mode) => {
+      if (settled) return;
+      settled = true;
+      sessionChoice.hidden = true;
+      resolve(mode);
+    };
+    document.getElementById('start-new-session').onclick = () => finish('new');
+    document.getElementById('continue-session').onclick = () => finish('continue');
+    document.getElementById('cancel-session-choice').onclick = () => finish(null);
+    sessionChoice.onclick = (event) => {
+      if (event.target === sessionChoice) finish(null);
+    };
+    sessionChoice.onkeydown = (event) => {
+      if (event.key === 'Escape') finish(null);
+    };
+  });
+}
+
+function latestSavedSession(cwd) {
+  return [...sessions, ...archivedSessions]
+    .filter((session) => session.owned && session.cwd === cwd && session.sessionId)
+    .sort((a, b) => (b.created || 0) - (a.created || 0))[0] || null;
+}
+
+async function startSession(mode) {
+  const cwd = await window.signalBox.pickFolder();
+  if (!cwd) return;
+  const previous = latestSavedSession(cwd);
+  if (mode === 'continue') {
+    if (!previous) throw new Error('No saved session was found for that project folder.');
+    await window.signalBox.openSession({ tile: previous.tile || previous.key });
+    openTerminal(previous);
+    return;
+  }
+  const agent = document.getElementById('agent-select').value;
+  const tile = await window.signalBox.createSession({ cwd, agent });
+  const project = cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd;
+  const session = sessions.find((item) => item.tile === tile) || { tile, project, path: cwd, cwd, agent };
+  openTerminal(session);
+}
+
 const soundToggle = document.getElementById('sound-toggle');
 const audio = window.signalBoxAudio || {
   isEnabled: () => false,
@@ -242,21 +290,22 @@ updateSoundButton();
 
 document.getElementById('new-session').addEventListener('click', async () => {
   try {
-    const cwd = await window.signalBox.pickFolder();
-    if (cwd) {
-      const agent = document.getElementById('agent-select').value;
-      const tile = await window.signalBox.createSession({ cwd, agent });
-      const project = cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd;
-      const session = sessions.find((item) => item.tile === tile) || { tile, project, path: cwd, agent };
-      openTerminal(session);
-    }
+    const mode = await chooseSessionMode();
+    if (mode) await startSession(mode);
   } catch (caught) { showError(caught.message || 'Could not create a session.'); }
 });
 
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !sessionChoice.hidden) document.getElementById('cancel-session-choice').click();
+});
+
 document.getElementById('clear-all').addEventListener('click', async () => {
-  if (!sessions.length || !window.confirm(`Remove all ${sessions.length} sessions from Signal Box? Owned processes will be terminated.`)) return;
+  if (!sessions.length || !window.confirm(`Clear all ${sessions.length} sessions? External sessions will be removed; Signal Box sessions will be archived.`)) return;
   const current = [...sessions];
-  await Promise.all(current.map((session) => window.signalBox.closeSession({ tile: session.tile || session.key })));
+  await Promise.all(current.map((session) => window.signalBox.closeSession({
+    tile: session.tile || session.key,
+    permanent: !session.owned,
+  })));
   sessions = [];
   render();
   closeTerminalView();
@@ -279,8 +328,9 @@ window.addEventListener('resize', () => {
   if (!terminalView.hidden && terminals.has(activeTile)) scheduleFit();
 });
 
-window.signalBox.onSessionsChanged(({ sessions: next, changed }) => {
+window.signalBox.onSessionsChanged(({ sessions: next, archivedSessions: archived, changed }) => {
   sessions = next;
+  if (Array.isArray(archived)) archivedSessions = archived;
   render();
   if (changed && changed.state && !changed.navigation && !changed.repeated) audio.play(changed.state);
 });
@@ -289,5 +339,9 @@ window.signalBox.onPtyData(({ tile, data }) => {
   if (entry) entry.terminal.write(data);
   else pendingPty.set(tile, `${pendingPty.get(tile) || ''}${data}`.slice(-1024 * 1024));
 });
-window.signalBox.listSessions().then((next) => { sessions = next; render(); }).catch((caught) => showError(caught.message));
+Promise.all([window.signalBox.listSessions(), window.signalBox.listArchivedSessions()]).then(([next, archived]) => {
+  sessions = next;
+  archivedSessions = archived;
+  render();
+}).catch((caught) => showError(caught.message));
 setInterval(render, 1000);

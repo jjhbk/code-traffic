@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';">
     <title>Signal Box</title>
-    <link rel="stylesheet" href="styles.css?v=4">
+    <link rel="stylesheet" href="styles.css?v=5">
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css?v=3">
   </head>
   <body>
@@ -37,9 +37,20 @@
       </section>
       <p id="error" class="error" role="alert" hidden></p>
     </main>
+    <div id="session-choice" class="modal-backdrop" hidden>
+      <section class="session-dialog" role="dialog" aria-modal="true" aria-labelledby="session-choice-title">
+        <h2 id="session-choice-title">Start a session</h2>
+        <p>Choose how to open the project folder.</p>
+        <div class="session-choice-actions">
+          <button id="start-new-session" class="primary-action" type="button">Start new session</button>
+          <button id="continue-session" type="button">Continue previous session</button>
+        </div>
+        <button id="cancel-session-choice" class="modal-cancel" type="button">Cancel</button>
+      </section>
+    </div>
     <script src="../node_modules/@xterm/xterm/lib/xterm.js?v=3"></script>
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js?v=3"></script>
     <script src="audio.js?v=3"></script>
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
   </body>
 </html>

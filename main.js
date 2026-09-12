@@ -102,6 +102,7 @@ function saveWindowState(bounds) {
 
 function wireIpc() {
   ipcMain.handle('sessions:list', () => board.list());
+  ipcMain.handle('sessions:archived-list', () => board.listArchived());
   ipcMain.handle('session:create', async (_event, { cwd, agent = 'claude' } = {}) => {
     if (!SESSION_TYPES.has(agent)) throw new Error('Choose Claude Code, Codex, or Terminal.');
     const tile = crypto.randomUUID();
@@ -111,20 +112,20 @@ function wireIpc() {
     return tile;
   });
   ipcMain.handle('session:open', async (_event, { tile } = {}) => {
-    const session = board.sessions.get(tile);
+    const session = board.sessions.get(tile) || board.unarchive(tile);
     if (!session) throw new Error('That session is no longer available.');
     await spawnSession(tile, session.cwd, session.agent || 'claude', session.sessionId, true);
     board.reopen(tile);
     return true;
   });
-  ipcMain.handle('session:close', (_event, { tile } = {}) => {
+  ipcMain.handle('session:close', (_event, { tile, permanent = false } = {}) => {
     telegram?.clearApproval(tile);
     const child = terminals.get(tile);
     if (child) {
       child.kill();
       terminals.delete(tile);
     }
-    return board.close(tile);
+    return permanent ? board.close(tile) : board.archive(tile);
   });
   ipcMain.handle('folder:pick', async () => {
     const result = await dialog.showOpenDialog(windowRef, { properties: ['openDirectory'] });
@@ -345,7 +346,7 @@ async function start() {
   });
   board.on('change', (changed) => {
     if (windowRef && !windowRef.isDestroyed()) {
-      windowRef.webContents.send('sessions:changed', { sessions: board.list(), changed });
+      windowRef.webContents.send('sessions:changed', { sessions: board.list(), archivedSessions: board.listArchived(), changed });
     }
     if (desktopNotificationsEnabled && changed && changed.state && !changed.navigation) notifyUser(changed);
     if (changed?.state && changed.state !== 'approval') telegram.clearApproval(changed.key);
