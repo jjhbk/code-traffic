@@ -2,6 +2,7 @@
   "name": "signal-box",
   "version": "0.1.0",
   "private": true,
+  "author": "Signal Box contributors",
   "license": "MIT",
   "description": "A desktop signal board for Claude Code sessions",
   "main": "main.js",

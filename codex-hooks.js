@@ -11,6 +11,14 @@ function nodeExecutable() {
   return process.env.npm_node_execpath || process.env.NODE || 'node';
 }
 
+function notifierPath() {
+  // The notifier is executed by an external Node process, so it must live
+  // outside app.asar in packaged builds.
+  return process.resourcesPath && process.versions.electron
+    ? path.join(process.resourcesPath, 'codex-notify.js')
+    : path.join(__dirname, 'codex-notify.js');
+}
+
 function paths() {
   const home = os.homedir();
   const directory = process.env.CODEX_HOME || path.join(home, '.codex');
@@ -21,7 +29,7 @@ function paths() {
   };
 }
 
-function command() { return JSON.stringify([nodeExecutable(), path.join(__dirname, 'codex-notify.js')]); }
+function command() { return JSON.stringify([nodeExecutable(), notifierPath()]); }
 
 function install() {
   const target = paths();
