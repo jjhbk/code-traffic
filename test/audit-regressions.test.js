@@ -84,6 +84,31 @@ async function launchRace() {
   creationContext.wireIpc();
   await assert.rejects(handlers.get('session:create')(null, { cwd: '/project', agent: 'codex' }), /Sandbox failed/);
   assert.equal(records.size, 0, 'failed launches must remove their newly registered tile');
+
+  const reopened = [];
+  const openContext = {
+    ipcMain: { handle: (name, handler) => handlers.set(name, handler), on: () => {} },
+    board: { sessions: new Map([['old', { cwd: '/project', agent: 'codex', sessionId: 'missing' }]]), reopen: tile => reopened.push(tile) },
+    spawnSession: async () => { throw new Error('Thread not found'); },
+  };
+  vm.runInNewContext(source.slice(source.indexOf('function wireIpc()'), source.indexOf('async function spawnSession(')), openContext);
+  openContext.wireIpc();
+  await assert.rejects(handlers.get('session:open')(null, { tile: 'old' }), /Thread not found/);
+  assert.deepEqual(reopened, [], 'failed opens must not change the saved tile');
+
+  const freshArgs = [];
+  const freshContext = {
+    board: { sessions: new Map([['fresh', { state: null, sessionId: null }]]) },
+    terminals: new Map(), SESSION_TYPES: new Set(['codex']), process: { env: {} },
+    pty: { spawn: () => ({ onData: () => {}, onExit: () => {} }) },
+    findAgent: () => '/bin/codex',
+    sessionArgs: (_agent, _sessionId, reopening) => { freshArgs.push(reopening); return []; },
+    checkCodexSandbox: async () => {},
+    resolveCodexSessionId: () => { throw new Error('An untouched tile needs no thread lookup'); },
+  };
+  vm.runInNewContext(functionSource, freshContext);
+  await freshContext.spawnSession('fresh', '/project', 'codex', null, true);
+  assert.deepEqual(freshArgs, [false], 'untouched Codex tiles start their first thread');
 }
 
 function historyCache() {

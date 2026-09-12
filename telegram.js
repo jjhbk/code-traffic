@@ -24,6 +24,12 @@ function sessionListText(sessions, selectedTile) {
   return `Sessions:\n${rows.join('\n')}\n\nTap a session below to select or view it.`;
 }
 
+function telegramErrorText(error) {
+  const causes = error.cause?.errors || [error.cause];
+  const codes = [...new Set(causes.map((cause) => cause?.code).filter(Boolean))];
+  return codes.length ? `${error.message} (${codes.join(', ')})` : error.message;
+}
+
 class TelegramControl {
   constructor({ token, chatId, listSessions, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, sendPrompt, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
     this.token = token;
@@ -56,7 +62,7 @@ class TelegramControl {
     if (!this.enabled || !this.stopped) return;
     this.stopped = false;
     this.poll().catch((error) => {
-      if (!this.stopped) console.error(`[telegram] polling stopped: ${error.message}`);
+      if (!this.stopped) console.error(`[telegram] polling stopped: ${telegramErrorText(error)}`);
     });
   }
 
@@ -178,7 +184,7 @@ class TelegramControl {
       }
     } catch (error) {
       if (this.stopped || error.name === 'AbortError') return;
-      console.error(`[telegram] could not initialize: ${error.message}`);
+      console.error(`[telegram] could not initialize: ${telegramErrorText(error)}`);
     }
 
     while (!this.stopped) {
@@ -194,7 +200,7 @@ class TelegramControl {
         }
       } catch (error) {
         if (this.stopped || error.name === 'AbortError') return;
-        console.error(`[telegram] ${error.message}`);
+        console.error(`[telegram] ${telegramErrorText(error)}`);
         await delay(3000);
       }
     }

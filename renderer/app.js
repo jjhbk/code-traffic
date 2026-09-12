@@ -111,6 +111,35 @@ function openTerminal(session) {
       terminal.loadAddon(fitAddon);
       terminal.open(container);
       terminal.onData((data) => window.signalBox.writePty({ tile, data }));
+      const copySelection = () => {
+        const selection = terminal.getSelection();
+        if (!selection) return false;
+        navigator.clipboard?.writeText(selection).catch(() => {
+          const helper = document.createElement('textarea');
+          helper.value = selection;
+          helper.style.position = 'fixed';
+          helper.style.opacity = '0';
+          document.body.append(helper);
+          helper.select();
+          document.execCommand('copy');
+          helper.remove();
+        });
+        return true;
+      };
+      terminal.attachCustomKeyEventHandler((event) => {
+        const key = event.key.toLowerCase();
+        const modifier = event.ctrlKey || event.metaKey;
+        if (modifier && (key === 'c' || (event.shiftKey && key === 'c')) && terminal.hasSelection()) {
+          copySelection();
+          return false;
+        }
+        return true;
+      });
+      container.addEventListener('contextmenu', (event) => {
+        if (!terminal.hasSelection()) return;
+        event.preventDefault();
+        copySelection();
+      });
       terminal.onKey(({ domEvent }) => {
         if (domEvent.key === 'Enter') window.signalBox.markWorking({ tile });
       });

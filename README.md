@@ -370,6 +370,11 @@ fresh token with BotFather's `/token`, set `TELEGRAM_CHAT_ID=` to blank, restart
 Signal Box, and send `/start` to the bot again. After it returns the chat ID,
 save that value and restart once more.
 
+`[telegram] fetch failed` indicates a network request failed before Telegram
+could respond. The accompanying code identifies the cause: `EAI_AGAIN` is a DNS
+lookup failure, while `ETIMEDOUT` indicates a connection timeout. Check network
+access to `api.telegram.org`; Signal Box retries automatically when it returns.
+
 If `TELEGRAM_CHAT_ID` already contains an incorrect value, the bot is locked to
 that chat for control commands. `/start` remains available as a safe pairing
 command: send it to the running bot, replace `TELEGRAM_CHAT_ID` with the value

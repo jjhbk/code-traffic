@@ -111,9 +111,10 @@ function wireIpc() {
     return tile;
   });
   ipcMain.handle('session:open', async (_event, { tile } = {}) => {
-    const session = board.reopen(tile);
+    const session = board.sessions.get(tile);
     if (!session) throw new Error('That session is no longer available.');
     await spawnSession(tile, session.cwd, session.agent || 'claude', session.sessionId, true);
+    board.reopen(tile);
     return true;
   });
   ipcMain.handle('session:close', (_event, { tile } = {}) => {
@@ -156,13 +157,16 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
   const displayName = agent === 'codex' ? 'Codex CLI' : agent === 'terminal' ? 'A system shell' : 'Claude Code';
   if (!binary) throw new Error(`${displayName} was not found. Install or configure it, then restart Signal Box.`);
   if (agent === 'codex' && reopening) {
-    const resolvedId = resolveCodexSessionId(sessionId, cwd);
-    if (!resolvedId) throw new Error('Cannot identify this Codex thread safely. Create a new session instead.');
-    sessionId = resolvedId;
-    const saved = board?.sessions.get(tile);
-    if (resolvedId && saved && saved.sessionId !== resolvedId) {
-      saved.sessionId = resolvedId;
-      board.persist();
+    if (!sessionId && launchRecord.state == null) {
+      reopening = false;
+    } else {
+      const resolvedId = resolveCodexSessionId(sessionId, cwd);
+      if (!resolvedId) throw new Error('Cannot identify this Codex thread safely. Create a new session instead.');
+      sessionId = resolvedId;
+      if (launchRecord.sessionId !== resolvedId) {
+        launchRecord.sessionId = resolvedId;
+        board.persist();
+      }
     }
   }
   const args = sessionArgs(agent, sessionId, reopening);

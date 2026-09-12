@@ -49,19 +49,25 @@ function sessionMetadata(file) {
 
 const resolvedFiles = new Map();
 
+function matchesDirectory(actual, requested) {
+  if (!requested || actual === requested) return true;
+  try { return fs.realpathSync(actual) === fs.realpathSync(requested); }
+  catch (_) { return false; }
+}
+
 function findCodexSession(candidate, cwd, directory = sessionsDirectory()) {
   if (!candidate || candidate.startsWith('codex:')) return null;
   const cacheKey = `${directory}\0${candidate}`;
   const cached = resolvedFiles.get(cacheKey);
   if (cached && fs.existsSync(cached.path)) {
-    return !cwd || cached.cwd === cwd ? { ...cached } : null;
+    return matchesDirectory(cached.cwd, cwd) ? { ...cached } : null;
   }
   resolvedFiles.delete(cacheKey);
   for (const file of sessionFiles(directory)) {
     const metadata = sessionMetadata(file.path);
     if (!metadata?.id) continue;
     const session = { ...metadata, path: file.path };
-    if (metadata.id === candidate && (!cwd || metadata.cwd === cwd)) {
+    if (metadata.id === candidate && matchesDirectory(metadata.cwd, cwd)) {
       if (resolvedFiles.size >= 256) resolvedFiles.delete(resolvedFiles.keys().next().value);
       resolvedFiles.set(cacheKey, session);
       return { ...session };
