@@ -1,5 +1,4 @@
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
@@ -14,6 +13,21 @@ const { resolveCodexTileSessionId } = require('./codex-sessions');
 const { queuePrompt } = require('./codex-control');
 const { sessionHistory } = require('./history');
 const { startCodexMonitor, terminalApprovalQuestion } = require('./codex-monitor');
+const { readSettings, writeSettings } = require('./app-settings');
+const { install: installClaudeHooks } = require('./hooks');
+const { install: installCodexHooks } = require('./codex-hooks');
+
+const hasSingleInstance = app.requestSingleInstanceLock();
+if (!hasSingleInstance) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!windowRef || windowRef.isDestroyed()) return;
+    if (windowRef.isMinimized()) windowRef.restore();
+    windowRef.show();
+    windowRef.focus();
+  });
+}
 
 const disableSandbox = process.env.SIGNAL_BOX_NO_SANDBOX === '1';
 
@@ -33,6 +47,7 @@ let board;
 let pty;
 let telegram;
 let stopCodexMonitor;
+let appSettings = {};
 const codexTerminalQuestions = new Map();
 const terminals = new Map();
 const remoteCommands = new Map();
@@ -103,6 +118,35 @@ function saveWindowState(bounds) {
 function wireIpc() {
   ipcMain.handle('sessions:list', () => board.list());
   ipcMain.handle('sessions:archived-list', () => board.listArchived());
+  ipcMain.handle('settings:get', () => ({
+    configured: Boolean(appSettings.telegramBotToken && appSettings.telegramChatId),
+    enabled: appSettings.telegramEnabled === true
+      || (appSettings.telegramEnabled === undefined && Boolean(appSettings.telegramBotToken)),
+    hasToken: Boolean(appSettings.telegramBotToken),
+    chatId: appSettings.telegramChatId || '',
+  }));
+  ipcMain.handle('settings:save', (_event, { telegramBotToken, telegramChatId, telegramEnabled = true } = {}) => {
+    const submittedToken = typeof telegramBotToken === 'string' ? telegramBotToken.trim() : '';
+    const token = submittedToken || appSettings.telegramBotToken || '';
+    const chatId = typeof telegramChatId === 'string' ? telegramChatId.trim() : '';
+    const tokenChanged = Boolean(submittedToken && submittedToken !== appSettings.telegramBotToken);
+    const savedChatId = tokenChanged ? '' : chatId;
+    if (telegramEnabled && !token) throw new Error('Enter a Telegram bot token to continue.');
+    appSettings = { ...appSettings, telegramEnabled, telegramBotToken: token, telegramChatId: savedChatId };
+    writeSettings(app.getPath('userData'), appSettings);
+    if (telegram) {
+      telegram.stop();
+      telegram.token = token;
+      telegram.chatId = savedChatId;
+      if (telegramEnabled) telegram.start();
+    }
+    return {
+      configured: Boolean(telegramEnabled && token && savedChatId),
+      enabled: telegramEnabled,
+      chatId: savedChatId,
+      tokenChanged,
+    };
+  });
   ipcMain.handle('session:create', async (_event, { cwd, agent = 'claude' } = {}) => {
     if (!SESSION_TYPES.has(agent)) throw new Error('Choose Claude Code, Codex, or Terminal.');
     const tile = crypto.randomUUID();
@@ -306,6 +350,9 @@ function sessionHistoryWithTerminalQuestions(session) {
 }
 
 async function start() {
+  appSettings = readSettings(app.getPath('userData'));
+  try { installClaudeHooks(); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
+  try { installCodexHooks(); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
   board = new Board({
     storagePath: path.join(app.getPath('userData'), 'sessions.json'),
     historyProvider: sessionHistoryWithTerminalQuestions,
@@ -320,8 +367,8 @@ async function start() {
     throw error;
   }
   telegram = new TelegramControl({
-    token: process.env.TELEGRAM_BOT_TOKEN,
-    chatId: process.env.TELEGRAM_CHAT_ID,
+    token: appSettings.telegramEnabled === false ? '' : appSettings.telegramBotToken,
+    chatId: appSettings.telegramChatId,
     listSessions: () => board.list(),
     getHistory: sessionHistoryWithTerminalQuestions,
     executeTerminal: executeRemoteTerminal,
@@ -365,13 +412,13 @@ async function start() {
   });
   wireIpc();
   createWindow();
-  telegram.start();
+  if (appSettings.telegramEnabled !== false) telegram.start();
   for (const session of board.list()) {
     if (session.state === 'approval') telegram.notifyState(session, 'approval');
   }
 }
 
-app.whenReady().then(start).catch((error) => {
+app.whenReady().then(() => hasSingleInstance ? start() : undefined).catch((error) => {
   dialog.showErrorBox('Signal Box could not start', error.message);
   app.quit();
 });

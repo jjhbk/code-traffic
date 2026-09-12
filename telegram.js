@@ -217,7 +217,7 @@ class TelegramControl {
     if (!command) return;
     const incomingChatId = String(message.chat.id);
     if (command.name === 'start' && incomingChatId !== this.chatId) {
-      await this.sendTo(incomingChatId, `Your Signal Box chat ID is ${incomingChatId}.\n\nSet TELEGRAM_CHAT_ID=${incomingChatId} in .env, then restart Signal Box.`);
+      await this.sendTo(incomingChatId, `Your Signal Box chat ID is ${incomingChatId}.\n\nTELEGRAM_CHAT_ID=${incomingChatId}\n\nEnter this chat ID in the Signal Box setup window.`);
       return;
     }
     if (!this.configured) return;

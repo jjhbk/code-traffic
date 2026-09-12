@@ -80,17 +80,133 @@ Signal Box automatically disables Electron GPU acceleration in WSLg. Its
 launcher also removes `ELECTRON_RUN_AS_NODE`, which can cause Electron to
 start as plain Node.js.
 
-## Installation
+## Install A Packaged Release
+
+Users do not need Node.js, Git, or this source repository to use Signal Box.
+Download the latest release from the repository's GitHub **Releases** page and
+choose the file for your operating system and CPU architecture:
+
+- Windows x64: run the `.exe` installer.
+- macOS Intel: download the macOS x64 `.zip`, open it, and move Signal Box to
+  **Applications**.
+- macOS Apple Silicon: download the macOS arm64 `.zip`, open it, and move
+  Signal Box to **Applications**.
+- Debian or Ubuntu x64: install the Linux x64 `.deb` package.
+- Debian or Ubuntu arm64: install the Linux arm64 `.deb` package.
+- RPM-based Linux x64: install the Linux x64 `.rpm` package.
+- RPM-based Linux arm64: install the Linux arm64 `.rpm` package.
+
+On Debian or Ubuntu, a downloaded `.deb` can be installed with:
+
+```bash
+sudo apt install ./signal-box_*.deb
+```
+
+On an RPM-based distribution, install the `.rpm` with:
+
+```bash
+sudo dnf install ./signal-box-*.rpm
+```
+
+macOS users can download and install the latest matching release from Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-macos.sh | bash
+```
+
+Windows users can run this PowerShell command. It detects x64 versus arm64 and
+starts the matching installer:
+
+```powershell
+irm https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-windows.ps1 | iex
+```
+
+To inspect either script before running it, download it from the repository and
+execute the local copy instead. The scripts install the latest GitHub Release;
+they do not install Claude Code or Codex.
+
+On supported Linux distributions, the latest matching package can also be
+downloaded and installed automatically based on CPU architecture:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install.sh | bash
+```
+
+The script supports Debian/Ubuntu (`apt`) and Fedora/RHEL-family systems
+(`dnf`/`yum`) on x64 and arm64. To inspect it before running it, download the
+script first and then execute it:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/jjhbk/code-traffic/main/install.sh
+bash install.sh
+```
+
+WSL users should install the Linux package inside the WSL distribution and
+launch it through WSLg. A Windows installer is a separate Windows application
+and does not use the Linux tools or files inside WSL.
+
+After installation, start Signal Box from the operating system application
+menu. Claude Code or Codex must be installed separately. Signal Box installs
+its integration hooks automatically when it starts, and Telegram remote
+control is optional.
+
+## Install From Source
 
 ```bash
 cd /home/your-user/code-traffic
 npm install
 ```
 
+To build and install the current checkout locally in one step, run:
+
+```bash
+npm run install:local
+```
+
+The script builds for the host architecture, installs the resulting package,
+and launches Signal Box where supported. On Linux it may prompt for your sudo
+password. Use `npm run make` when you only want to create installers without
+installing them.
+
 The install includes Electron, `node-pty`, xterm, and
 `@electron/rebuild`. The `postinstall` script attempts to rebuild
 `node-pty` against Electron. Rebuild failure does not prevent board-only
 operation.
+
+## Package For Distribution
+
+Signal Box can be packaged with Electron Forge. Run this once to add the
+packaging configuration, then create the distributable files with
+`npm run make`:
+
+```bash
+npm install --save-dev @electron-forge/cli
+npx electron-forge import
+npm run make
+```
+
+The generated installers and packaged applications are written to `out/`.
+Build on each target operating system because `node-pty` is a native module.
+Sign the installers before sharing them publicly so Windows and macOS do not
+present untrusted-app warnings. Do not package `.env` files or credentials.
+
+### GitHub Releases
+
+The repository includes a GitHub Actions workflow at
+`.github/workflows/release.yml`. Push a semantic version tag to build Linux,
+Windows, and macOS artifacts for x64 and arm64, then publish them as a GitHub
+Release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds each platform separately, collects the files in `out/make`,
+and attaches them to the release. Signing certificates and credentials should
+be added as GitHub Actions secrets before public distribution. The workflow
+uses cross-architecture Forge builds; test the arm64 artifacts on their target
+systems, especially where native `node-pty` compilation is required.
 
 ## Start
 
@@ -100,8 +216,8 @@ npm start
 
 The board displays project name, path, state lamp, elapsed state time, sound
 control, agent selector, new-session control, and a confirmed **Clear all**
-action. Clear all removes every tile and terminates processes owned by Signal
-Box.
+action. Clear all permanently removes external sessions and archives sessions
+owned by Signal Box for later continuation.
 
 Session records are persisted in Electron’s user-data directory. A session
 created by Signal Box remains an owned, openable tile after restarting the app;
@@ -110,7 +226,8 @@ ID is available.
 
 ## Claude Code hooks
 
-Install the global Claude hooks once:
+Claude hooks are installed automatically when Signal Box starts. They can also
+be installed manually as a fallback:
 
 ```bash
 npm run install-hooks
@@ -130,7 +247,8 @@ Inside Claude Code, run `/hooks` to inspect active hooks and their source file.
 
 ## Codex notifications
 
-Install the Codex adapter:
+The Codex adapter is installed automatically when Signal Box starts. It can
+also be installed manually as a fallback:
 
 ```bash
 npm run install-codex-hooks
@@ -252,40 +370,27 @@ remain available.
 
 1. Open **@BotFather** in Telegram. Use `/newbot` to create a bot, or `/token`
    to generate a token for an existing bot.
-2. Copy the example configuration:
-
-```bash
-cp .env.example .env
-```
-
-```dotenv
-TELEGRAM_BOT_TOKEN=PASTE_REAL_BOTFATHER_TOKEN_HERE
-TELEGRAM_CHAT_ID=
-```
-
-3. Paste the real BotFather token, leave `TELEGRAM_CHAT_ID` blank, and start
-   Signal Box:
+2. Start Signal Box. Telegram is optional, so you can use Signal Box locally
+   without configuring it. To enable remote control, open **Telegram settings**
+   and enable it. Signal Box stores the credentials in the per-user application
+   data directory:
 
 ```bash
 npm start
 ```
 
-4. Open your new bot in Telegram and send `/start`. In token-only pairing mode,
-   it replies with that conversation's numeric chat ID:
+3. After saving the token, open your bot in Telegram and send `/start`. The app
+   asks you to initialize the bot before accepting the chat ID. It replies with
+   that conversation's numeric chat ID:
 
 ```text
 Your Signal Box chat ID is 123456789.
 ```
 
-5. Add the returned value to `.env` and restart Signal Box:
+4. Enter the returned chat ID in the setup window. The app becomes ready only
+   after both values are saved, and only messages from that chat are accepted.
 
-```dotenv
-TELEGRAM_CHAT_ID=123456789
-```
-
-Remote control is disabled until the chat ID is configured; afterward, only
-messages from that chat are accepted. Signal Box loads `.env` from its project
-directory. Keep the bot token secret; `.env` is ignored by Git.
+Only messages from that chat are accepted. Keep the bot token secret.
 
 Use `/sessions` once to open the session picker. Tap a session to select an owned session or view an external session, then use the inline **Recent**, **History**, **Status**, **Sessions**, and **Interrupt** buttons. Typed commands remain available for keyboard-oriented use.
 
@@ -363,22 +468,20 @@ differs from `4747`.
 
 ### Telegram bot does not reply
 
-Confirm that Signal Box is running and that `.env` contains the real token from
-BotFather rather than the placeholder from `.env.example`. A Telegram
+Confirm that Signal Box is running and that the startup setup window contains
+the real token from BotFather rather than a placeholder. A Telegram
 `Unauthorized` error means the bot token is invalid or was revoked. Generate a
-fresh token with BotFather's `/token`, set `TELEGRAM_CHAT_ID=` to blank, restart
-Signal Box, and send `/start` to the bot again. After it returns the chat ID,
-save that value and restart once more.
+fresh token with BotFather's `/token`, restart Signal Box, and send `/start` to
+the bot again. After it returns the chat ID, enter it in the setup window.
 
 `[telegram] fetch failed` indicates a network request failed before Telegram
 could respond. The accompanying code identifies the cause: `EAI_AGAIN` is a DNS
 lookup failure, while `ETIMEDOUT` indicates a connection timeout. Check network
 access to `api.telegram.org`; Signal Box retries automatically when it returns.
 
-If `TELEGRAM_CHAT_ID` already contains an incorrect value, the bot is locked to
-that chat for control commands. `/start` remains available as a safe pairing
-command: send it to the running bot, replace `TELEGRAM_CHAT_ID` with the value
-it returns, and restart Signal Box.
+If the saved chat ID is incorrect, send `/start` to the running bot. Enter the
+new value in the Signal Box setup window. Only that chat is authorized for
+control commands.
 
 ### Electron does not start
 

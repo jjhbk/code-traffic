@@ -1,0 +1,89 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-22.04
+            arch: x64
+          - platform: linux
+            runner: ubuntu-22.04
+            arch: arm64
+          - platform: windows
+            runner: windows-2022
+            arch: x64
+          - platform: windows
+            runner: windows-2022
+            arch: arm64
+          - platform: macos
+            runner: macos-13
+            arch: x64
+          - platform: macos
+            runner: macos-14
+            arch: arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux packaging tools
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install --yes rpm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build distributables
+        run: npm run make -- --arch=${{ matrix.arch }}
+
+      - name: Label artifacts with architecture
+        run: node scripts/label-release-assets.js ${{ matrix.arch }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-box-${{ matrix.platform }}-${{ matrix.arch }}
+          path: out/make/**
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: signal-box-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          assets=()
+          while IFS= read -r -d '' file; do assets+=("$file"); done < <(find release-assets -type f -print0)
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --generate-notes --title "Signal Box $GITHUB_REF_NAME"

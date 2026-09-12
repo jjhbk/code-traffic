@@ -176,14 +176,23 @@ class Board extends EventEmitter {
       }
     }
     if (!session && !tile && cwd) {
-      const matched = [...this.sessions.values()].find((candidate) => !candidate.owned && !candidate.sessionId && candidate.cwd === cwd);
+      const candidates = [...this.sessions.values()].filter((candidate) => candidate.owned && candidate.cwd === cwd);
+      const matchedOwned = candidates.find((candidate) => sessionId && candidate.sessionId === sessionId)
+        || candidates.filter((candidate) => !candidate.sessionId || candidate.state === 'working')
+          .sort((a, b) => (b.created || 0) - (a.created || 0))[0];
+      const matched = matchedOwned || [...this.sessions.values()]
+        .find((candidate) => !candidate.owned && !candidate.sessionId && candidate.cwd === cwd);
       if (matched) {
-        this.sessions.delete(matched.key);
-        matched.key = key;
-        matched.sessionId = sessionId;
-        this.sessions.set(key, matched);
-        this.persist();
-        session = matched;
+        if (matched.owned) {
+          session = matched;
+        } else {
+          this.sessions.delete(matched.key);
+          matched.key = key;
+          matched.sessionId = sessionId;
+          this.sessions.set(key, matched);
+          this.persist();
+          session = matched;
+        }
       }
     }
     if (!session) {

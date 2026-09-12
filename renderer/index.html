@@ -5,17 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';">
     <title>Signal Box</title>
-    <link rel="stylesheet" href="styles.css?v=5">
+    <link rel="stylesheet" href="styles.css?v=7">
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css?v=3">
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
-        <div>
-          <h1>Signal Box</h1>
+        <div class="brand-block">
+          <div class="brand-row"><span class="brand-mark" aria-hidden="true">SB</span><div><p class="eyebrow">SESSION CONTROL</p><h1>Signal Box</h1></div></div>
           <p id="summary">No sessions</p>
         </div>
-          <div class="actions">
+        <div class="actions">
             <button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="false">Sound off</button>
             <select id="agent-select" class="agent-select" aria-label="Agent">
               <option value="claude">Claude Code</option>
@@ -23,6 +23,7 @@
               <option value="terminal">Terminal</option>
             </select>
             <button id="clear-all" class="clear-all" type="button">Clear all</button>
+            <button id="telegram-settings" type="button">Telegram settings</button>
             <button id="new-session" class="new-session" type="button">+ New session</button>
           </div>
       </header>
@@ -37,6 +38,24 @@
       </section>
       <p id="error" class="error" role="alert" hidden></p>
     </main>
+    <div id="settings-modal" class="modal-backdrop" hidden>
+      <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <h2 id="settings-title">Connect Signal Box</h2>
+        <p id="settings-instruction">Telegram is optional. Enable it for remote control.</p>
+        <form id="settings-form">
+          <label class="settings-toggle"><input id="enable-telegram" type="checkbox"> Enable Telegram remote control</label>
+          <label id="telegram-token-label" for="telegram-token">Telegram bot token</label>
+          <input id="telegram-token" type="password" autocomplete="off" required>
+          <label id="telegram-chat-label" for="telegram-chat-id" hidden>Telegram chat ID</label>
+          <input id="telegram-chat-id" type="text" inputmode="numeric" autocomplete="off" hidden>
+          <p id="settings-error" class="settings-error" hidden></p>
+          <div class="settings-actions">
+            <button id="close-settings" type="button">Close</button>
+            <button id="save-settings" class="primary-action" type="submit">Save bot token</button>
+          </div>
+        </form>
+      </section>
+    </div>
     <div id="session-choice" class="modal-backdrop" hidden>
       <section class="session-dialog" role="dialog" aria-modal="true" aria-labelledby="session-choice-title">
         <h2 id="session-choice-title">Start a session</h2>

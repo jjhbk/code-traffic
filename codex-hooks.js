@@ -6,6 +6,11 @@ const path = require('path');
 
 const commandMarker = 'codex-notify.js';
 
+function nodeExecutable() {
+  // Electron's process.execPath is the Electron binary, not a Node runtime.
+  return process.env.npm_node_execpath || process.env.NODE || 'node';
+}
+
 function paths() {
   const home = os.homedir();
   const directory = process.env.CODEX_HOME || path.join(home, '.codex');
@@ -16,7 +21,7 @@ function paths() {
   };
 }
 
-function command() { return JSON.stringify([process.execPath, path.join(__dirname, 'codex-notify.js')]); }
+function command() { return JSON.stringify([nodeExecutable(), path.join(__dirname, 'codex-notify.js')]); }
 
 function install() {
   const target = paths();
@@ -43,13 +48,17 @@ function uninstall() {
 
 function print() { process.stdout.write(`notify = ${command()}\n`); }
 
-const action = process.argv[2];
-try {
-  if (action === '--install') install();
-  else if (action === '--uninstall') uninstall();
-  else if (action === '--print') print();
-  else throw new Error('Usage: node codex-hooks.js --install | --uninstall | --print');
-} catch (error) {
-  console.error(`Signal Box Codex hooks: ${error.message}`);
-  process.exitCode = 1;
+if (typeof module === 'undefined' || require.main === module) {
+  const action = process.argv[2];
+  try {
+    if (action === '--install') install();
+    else if (action === '--uninstall') uninstall();
+    else if (action === '--print') print();
+    else throw new Error('Usage: node codex-hooks.js --install | --uninstall | --print');
+  } catch (error) {
+    console.error(`Signal Box Codex hooks: ${error.message}`);
+    process.exitCode = 1;
+  }
 }
+
+if (typeof module !== 'undefined') module.exports = { install, uninstall, print, paths };

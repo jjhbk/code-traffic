@@ -5,8 +5,11 @@ const terminalView = document.getElementById('terminal-view');
 const terminalHost = document.getElementById('terminal');
 const terminalTitle = document.getElementById('terminal-title');
 const sessionChoice = document.getElementById('session-choice');
+const settingsModal = document.getElementById('settings-modal');
 let sessions = [];
 let archivedSessions = [];
+let hasTelegramToken = false;
+let telegramChatStep = false;
 let activeTile = null;
 let fitTimer;
 let fitAttempts = 0;
@@ -221,6 +224,91 @@ function scheduleFit() {
 
 function showError(message) { error.textContent = message; error.hidden = false; setTimeout(() => { error.hidden = true; }, 4000); }
 
+function showSettings() {
+  settingsModal.hidden = false;
+  telegramChatStep = false;
+  updateSettingsFields();
+  document.getElementById('save-settings').textContent = 'Save bot token';
+  document.getElementById('telegram-token').focus();
+}
+
+function updateSettingsFields() {
+  const enabled = document.getElementById('enable-telegram').checked;
+  const token = document.getElementById('telegram-token');
+  const chatId = document.getElementById('telegram-chat-id');
+  const tokenLabel = document.getElementById('telegram-token-label');
+  const chatLabel = document.getElementById('telegram-chat-label');
+  tokenLabel.hidden = !enabled || telegramChatStep;
+  token.hidden = !enabled || telegramChatStep;
+  chatLabel.hidden = !enabled || !telegramChatStep;
+  chatId.hidden = !enabled || !telegramChatStep;
+  token.disabled = !enabled;
+  chatId.disabled = !enabled;
+  token.required = enabled && !telegramChatStep && !hasTelegramToken;
+  chatId.required = enabled && telegramChatStep;
+  if (!enabled) document.getElementById('settings-instruction').textContent = 'Telegram is optional. Continue without remote control, or enable it below.';
+}
+
+function showChatIdStep() {
+  telegramChatStep = true;
+  document.getElementById('settings-title').textContent = 'Initialize Telegram';
+  document.getElementById('settings-instruction').textContent = 'Open your bot in Telegram, send /start, then enter the chat ID it sends back.';
+  document.getElementById('save-settings').textContent = 'Save chat ID';
+  updateSettingsFields();
+  document.getElementById('telegram-chat-id').focus();
+}
+
+document.getElementById('enable-telegram').addEventListener('change', () => {
+  if (!document.getElementById('enable-telegram').checked) telegramChatStep = false;
+  updateSettingsFields();
+});
+document.getElementById('telegram-settings').addEventListener('click', async () => {
+  try {
+    const settings = await window.signalBox.getSettings();
+    hasTelegramToken = settings.hasToken;
+    document.getElementById('settings-title').textContent = 'Telegram settings';
+    document.getElementById('settings-instruction').textContent = hasTelegramToken
+      ? 'Enter a new bot token, or leave it blank to keep the saved token.'
+      : 'Telegram is optional. Enable it for remote control.';
+    document.getElementById('enable-telegram').checked = settings.enabled;
+    document.getElementById('telegram-token').value = '';
+    document.getElementById('telegram-token').placeholder = hasTelegramToken ? 'Leave blank to keep saved token' : '';
+    document.getElementById('telegram-chat-id').value = settings.chatId;
+    telegramChatStep = false;
+    document.getElementById('close-settings').hidden = !settings.configured && settings.enabled;
+    showSettings();
+  } catch (caught) { showError(caught.message || 'Could not load Telegram settings.'); }
+});
+document.getElementById('close-settings').addEventListener('click', () => { settingsModal.hidden = true; });
+
+document.getElementById('settings-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const settingsError = document.getElementById('settings-error');
+  settingsError.hidden = true;
+  try {
+    const enabled = document.getElementById('enable-telegram').checked;
+    const wasChatStep = telegramChatStep;
+    const tokenInput = document.getElementById('telegram-token');
+    const chatIdInput = document.getElementById('telegram-chat-id');
+    const result = await window.signalBox.saveSettings({
+      telegramEnabled: enabled,
+      telegramBotToken: tokenInput.value,
+      telegramChatId: chatIdInput.value,
+    });
+    if (enabled) {
+      if (wasChatStep && result.configured) settingsModal.hidden = true;
+      else {
+        chatIdInput.value = result.chatId;
+        showChatIdStep();
+      }
+    }
+    else settingsModal.hidden = true;
+  } catch (caught) {
+    settingsError.textContent = caught.message || 'Could not save settings.';
+    settingsError.hidden = false;
+  }
+});
+
 function chooseSessionMode() {
   sessionChoice.hidden = false;
   document.getElementById('start-new-session').focus();
@@ -343,5 +431,14 @@ Promise.all([window.signalBox.listSessions(), window.signalBox.listArchivedSessi
   sessions = next;
   archivedSessions = archived;
   render();
+}).catch((caught) => showError(caught.message));
+window.signalBox.getSettings().then((settings) => {
+  hasTelegramToken = settings.hasToken;
+  document.getElementById('enable-telegram').checked = settings.enabled;
+  if (settings.enabled && !settings.configured) {
+    document.getElementById('close-settings').hidden = true;
+    showSettings();
+    if (settings.chatId === '' && settings.hasToken) showChatIdStep();
+  }
 }).catch((caught) => showError(caught.message));
 setInterval(render, 1000);

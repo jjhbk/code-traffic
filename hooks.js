@@ -129,4 +129,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { hookCommand, ourHooks, removeOurHooks, settingsPaths };
+module.exports = { hookCommand, ourHooks, removeOurHooks, settingsPaths, install, uninstall };
