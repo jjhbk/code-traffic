@@ -1,8 +1,37 @@
 # Signal Box
 
 Signal Box is an Electron desktop board for monitoring Claude Code and Codex CLI
-sessions and opening remotely controllable shell terminals. Agent tiles
-represent persistent lifecycle state:
+sessions and opening remotely controllable shell terminals.
+
+## Quick Install
+
+The scripts detect your processor architecture and select the matching release.
+Claude Code and Codex must be installed separately.
+
+**Windows — PowerShell:**
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-windows.ps1")))
+```
+
+**macOS — Terminal:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-macos.sh | bash
+```
+
+If the macOS script reports a missing `Signal Box.app`, use the manual ZIP
+installation in the macOS section below.
+
+**Linux — Terminal:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install.sh | bash
+```
+
+## Session States
+
+Agent tiles represent persistent lifecycle state:
 
 | Lamp | State | Meaning |
 | --- | --- | --- |
@@ -13,6 +42,114 @@ represent persistent lifecycle state:
 
 Signal Box receives lifecycle events through local hooks. It does not inspect
 terminal text to guess state.
+
+## Install A Packaged Release
+
+Users do not need Node.js, Git, or this source repository to use Signal Box.
+Download the latest release from the repository's GitHub **Releases** page and
+choose the file for your operating system and CPU architecture:
+
+- Windows x64 or ARM64: run the matching `-x64.exe` or `-arm64.exe` installer.
+- macOS Intel: download the macOS x64 `.zip`, open it, and move Signal Box to
+  **Applications**.
+- macOS Apple Silicon: download the macOS arm64 `.zip`, open it, and move
+  Signal Box to **Applications**.
+- Debian or Ubuntu x64: install the Linux x64 `.deb` package.
+- Debian or Ubuntu arm64: install the Linux arm64 `.deb` package.
+- RPM-based Linux x64: install the Linux x64 `.rpm` package.
+- RPM-based Linux arm64: install the Linux arm64 `.rpm` package.
+
+If you downloaded a GitHub Actions artifact ZIP, extract it first to find the
+Windows installer or the macOS release ZIP. The app is branded **Signal Box**;
+the current packaging configuration uses **`signal-box`** as the app name.
+
+On Debian or Ubuntu, a downloaded `.deb` can be installed with:
+
+```bash
+sudo apt install ./signal-box_*.deb
+```
+
+On an RPM-based distribution, install the `.rpm` with:
+
+```bash
+sudo dnf install ./signal-box-*.rpm
+```
+
+### macOS
+
+Download the `darwin-x64` ZIP for an Intel Mac or the `darwin-arm64` ZIP for an
+Apple Silicon Mac. Extract it, move **`signal-box.app`** to **Applications**,
+then double-click it. To launch it again from Terminal:
+
+```bash
+open -a "signal-box"
+```
+
+The macOS installer script detects Intel versus Apple Silicon (including under
+Rosetta) and downloads the latest matching release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-macos.sh | bash
+```
+
+The current script expects the ZIP to contain **`Signal Box.app`**, while the
+current packaging configuration produces **`signal-box.app`**. If it reports
+`The downloaded release did not contain Signal Box.app.`, use the manual ZIP
+installation above. If the script succeeds, it installs and opens
+**`/Applications/Signal Box.app`**. Launch that installation again with:
+
+```bash
+open "/Applications/Signal Box.app"
+```
+
+### Windows
+
+Run the downloaded `.exe` installer, then search for **`signal-box`** in the
+Windows Start menu to open the app.
+
+Alternatively, run this command in **PowerShell**. The script detects the
+processor architecture automatically, including when PowerShell runs under
+emulation, and downloads the matching x64 or ARM64 installer:
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-windows.ps1")))
+```
+
+Wait for the installer to finish, then open **`signal-box`** from Start.
+Running only `irm` displays the script text without installing anything. The
+script defaults to `auto`; when running a downloaded copy, you can override
+detection with `./install-windows.ps1 -Architecture x64` or `-Architecture arm64`.
+
+To inspect either script before running it, download it from the repository and
+execute the local copy instead. The scripts install the latest GitHub Release;
+they do not install Claude Code or Codex.
+
+### Linux
+
+On supported Linux distributions, the latest matching package can also be
+downloaded and installed automatically based on CPU architecture:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install.sh | bash
+```
+
+The script supports Debian/Ubuntu (`apt`) and Fedora/RHEL-family systems
+(`dnf`/`yum`) on x64 and arm64. To inspect it before running it, download the
+script first and then execute it:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/jjhbk/code-traffic/main/install.sh
+bash install.sh
+```
+
+WSL users should install the Linux package inside the WSL distribution and
+launch it through WSLg. A Windows installer is a separate Windows application
+and does not use the Linux tools or files inside WSL.
+
+After installation, start Signal Box from the operating system application
+menu. Claude Code or Codex must be installed separately. Signal Box installs
+its integration hooks automatically when it starts, and Telegram remote
+control is optional.
 
 ## Schematic
 
@@ -79,76 +216,6 @@ Claude and Codex configuration is stored in the WSL home directory:
 Signal Box automatically disables Electron GPU acceleration in WSLg. Its
 launcher also removes `ELECTRON_RUN_AS_NODE`, which can cause Electron to
 start as plain Node.js.
-
-## Install A Packaged Release
-
-Users do not need Node.js, Git, or this source repository to use Signal Box.
-Download the latest release from the repository's GitHub **Releases** page and
-choose the file for your operating system and CPU architecture:
-
-- Windows x64: run the `.exe` installer.
-- macOS Intel: download the macOS x64 `.zip`, open it, and move Signal Box to
-  **Applications**.
-- macOS Apple Silicon: download the macOS arm64 `.zip`, open it, and move
-  Signal Box to **Applications**.
-- Debian or Ubuntu x64: install the Linux x64 `.deb` package.
-- Debian or Ubuntu arm64: install the Linux arm64 `.deb` package.
-- RPM-based Linux x64: install the Linux x64 `.rpm` package.
-- RPM-based Linux arm64: install the Linux arm64 `.rpm` package.
-
-On Debian or Ubuntu, a downloaded `.deb` can be installed with:
-
-```bash
-sudo apt install ./signal-box_*.deb
-```
-
-On an RPM-based distribution, install the `.rpm` with:
-
-```bash
-sudo dnf install ./signal-box-*.rpm
-```
-
-macOS users can download and install the latest matching release from Terminal:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-macos.sh | bash
-```
-
-Windows users can run this PowerShell command. It detects x64 versus arm64 and
-starts the matching installer:
-
-```powershell
-irm https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-windows.ps1 | iex
-```
-
-To inspect either script before running it, download it from the repository and
-execute the local copy instead. The scripts install the latest GitHub Release;
-they do not install Claude Code or Codex.
-
-On supported Linux distributions, the latest matching package can also be
-downloaded and installed automatically based on CPU architecture:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install.sh | bash
-```
-
-The script supports Debian/Ubuntu (`apt`) and Fedora/RHEL-family systems
-(`dnf`/`yum`) on x64 and arm64. To inspect it before running it, download the
-script first and then execute it:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/jjhbk/code-traffic/main/install.sh
-bash install.sh
-```
-
-WSL users should install the Linux package inside the WSL distribution and
-launch it through WSLg. A Windows installer is a separate Windows application
-and does not use the Linux tools or files inside WSL.
-
-After installation, start Signal Box from the operating system application
-menu. Claude Code or Codex must be installed separately. Signal Box installs
-its integration hooks automatically when it starts, and Telegram remote
-control is optional.
 
 ## Install From Source
 

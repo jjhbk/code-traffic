@@ -1,13 +1,20 @@
 param(
-  [ValidateSet('x64', 'arm64')]
-  [string]$Architecture
+  [ValidateSet('auto', 'x64', 'arm64')]
+  [string]$Architecture = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = 'jjhbk/code-traffic'
-if (-not $Architecture) {
-  $Architecture = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+if ($Architecture -eq 'auto') {
+  # Query the hardware so an emulated PowerShell does not select the wrong build.
+  $processor = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
+  $Architecture = switch ($processor.Architecture) {
+    9 { 'x64' }
+    12 { 'arm64' }
+    default { throw "Unsupported Windows processor architecture: $($processor.Architecture)" }
+  }
 }
+Write-Host "Using Windows architecture: $Architecture"
 
 $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
 $asset = $release.assets | Where-Object { $_.name -match "-$Architecture\.exe$" } | Select-Object -First 1

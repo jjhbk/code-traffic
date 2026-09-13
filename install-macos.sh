@@ -3,11 +3,16 @@ set -euo pipefail
 
 repo="jjhbk/code-traffic"
 machine="$(uname -m)"
+# Under Rosetta, uname reports x86_64 even on Apple Silicon.
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = "1" ]; then
+  machine="arm64"
+fi
 case "$machine" in
   x86_64) architecture="x64" ;;
   arm64) architecture="arm64" ;;
   *) echo "Unsupported macOS architecture: $machine" >&2; exit 1 ;;
 esac
+echo "Detected macOS architecture: $architecture"
 
 asset_url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
   | grep -oE '"browser_download_url": "[^"]+"' \

@@ -9,6 +9,7 @@ case "$machine" in
   aarch64|arm64) deb_arch="arm64"; rpm_arch="aarch64" ;;
   *) echo "Unsupported architecture: $machine" >&2; exit 1 ;;
 esac
+echo "Detected Linux architecture: $machine"
 
 if command -v apt-get >/dev/null 2>&1; then
   package_type="deb"
