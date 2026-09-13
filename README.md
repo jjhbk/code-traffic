@@ -263,8 +263,8 @@ Windows, and macOS artifacts for x64 and arm64, then publish them as a GitHub
 Release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.5
+git push origin v1.0.5
 ```
 
 The workflow builds each platform separately, collects the files in `out/make`,
