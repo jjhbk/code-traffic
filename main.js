@@ -6,6 +6,7 @@ const { app, BrowserWindow, dialog, ipcMain, Notification, screen } = require('e
 const { Board } = require('./board');
 const { runningAgents } = require('./processes');
 const { sessionArgs } = require('./session-command');
+const { restoreShellPath } = require('./shell-path');
 const { checkCodexSandbox } = require('./codex-sandbox');
 const { runTerminalCommand } = require('./terminal-command');
 const { TelegramControl } = require('./telegram');
@@ -421,7 +422,11 @@ async function start() {
   }
 }
 
-app.whenReady().then(() => hasSingleInstance ? start() : undefined).catch((error) => {
+app.whenReady().then(async () => {
+  if (!hasSingleInstance) return;
+  await restoreShellPath();
+  return start();
+}).catch((error) => {
   dialog.showErrorBox('Signal Box could not start', error.message);
   app.quit();
 });

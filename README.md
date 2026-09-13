@@ -580,6 +580,19 @@ This keeps system-wide AppArmor restrictions and Codex workspace isolation
 enabled. See [OpenAI's Linux sandbox guidance](https://learn.chatgpt.com/docs/sandboxing).
 Launch a Codex session again after correcting the host configuration.
 
+### macOS: Claude or Codex is not found
+
+Signal Box loads your interactive login shell's `PATH` before looking up
+`claude` and `codex`. It also checks standard Homebrew and user install
+directories. This supports apps opened from Finder as well as Terminal.
+
+If discovery still fails, run `command -v claude` and `command -v codex` in
+Terminal. The Codex executable is named `codex`, not `codex-cli`. If either
+command is missing there too, install that CLI first. After installing a CLI
+or changing your shell configuration, quit and reopen Signal Box.
+Shell configuration must finish within five seconds; otherwise the app uses
+its inherited PATH plus the standard install directories.
+
 ### macOS: `session:create` fails with `posix_spawnp failed`
 
 The terminal uses node-pty's `spawn-helper` executable. It must be outside
@@ -667,6 +680,7 @@ node test/codex-control.test.js
 node test/codex-monitor.test.js
 node test/history.test.js
 node test/session-command.test.js
+node test/shell-path.test.js
 node test/pty-packaging.test.js
 node test/terminal-command.test.js
 node test/telegram.test.js
