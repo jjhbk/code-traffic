@@ -20,8 +20,8 @@ Claude Code and Codex must be installed separately.
 curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-macos.sh | bash
 ```
 
-If the macOS script reports a missing `Signal Box.app`, use the manual ZIP
-installation in the macOS section below.
+Copy the entire macOS command, including `| bash`; without it, `curl` only
+prints the script.
 
 **Linux — Terminal:**
 
@@ -92,11 +92,9 @@ Rosetta) and downloads the latest matching release:
 curl -fsSL https://raw.githubusercontent.com/jjhbk/code-traffic/main/install-macos.sh | bash
 ```
 
-The current script expects the ZIP to contain **`Signal Box.app`**, while the
-current packaging configuration produces **`signal-box.app`**. If it reports
-`The downloaded release did not contain Signal Box.app.`, use the manual ZIP
-installation above. If the script succeeds, it installs and opens
-**`/Applications/Signal Box.app`**. Launch that installation again with:
+The script accepts either **`signal-box.app`** or **`Signal Box.app`** from the
+ZIP and installs and opens **`/Applications/Signal Box.app`**. Launch that
+installation again with:
 
 ```bash
 open "/Applications/Signal Box.app"
