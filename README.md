@@ -580,6 +580,24 @@ This keeps system-wide AppArmor restrictions and Codex workspace isolation
 enabled. See [OpenAI's Linux sandbox guidance](https://learn.chatgpt.com/docs/sandboxing).
 Launch a Codex session again after correcting the host configuration.
 
+### macOS: `session:create` fails with `posix_spawnp failed`
+
+The terminal uses node-pty's `spawn-helper` executable. It must be outside
+`app.asar` and have execute permission. Release packaging explicitly unpacks
+this helper and sets its permissions before archiving the app.
+
+For an already installed app, quit Signal Box and repair existing helpers:
+
+```bash
+find "/Applications/Signal Box.app/Contents/Resources/app.asar.unpacked/node_modules/node-pty" \
+  -type f -name spawn-helper -exec chmod 755 {} +
+```
+
+Then reopen Signal Box. If the helper is missing, a permission change cannot
+repair it; install a release built with the packaging fix, or build this source
+with `npm ci` and `npm run make`. The installer downloads the latest published
+release, so editing the installer alone does not rebuild the application.
+
 ### No tiles
 
 Confirm Signal Box is running and test the endpoint with the curl command above.
@@ -649,6 +667,7 @@ node test/codex-control.test.js
 node test/codex-monitor.test.js
 node test/history.test.js
 node test/session-command.test.js
+node test/pty-packaging.test.js
 node test/terminal-command.test.js
 node test/telegram.test.js
 ```

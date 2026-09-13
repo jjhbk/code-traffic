@@ -39,6 +39,9 @@ curl -fL "$asset_url" -o "$temporary_zip"
 ditto -x -k "$temporary_zip" "$temporary_directory"
 app_path="$(find "$temporary_directory" -maxdepth 2 -type d \( -name 'Signal Box.app' -o -name 'signal-box.app' \) -print -quit)"
 if [ -z "$app_path" ]; then echo "The downloaded release did not contain Signal Box.app or signal-box.app." >&2; exit 1; fi
+# node-pty 1.1.0 can ship its macOS spawn helper without execute permission.
+# Repair extracted helpers before copying the bundle into Applications.
+find "$app_path/Contents/Resources" -type f -path '*/node-pty/*/spawn-helper' -exec chmod 755 {} +
 rm -rf "/Applications/Signal Box.app"
 ditto "$app_path" "/Applications/Signal Box.app"
 open "/Applications/Signal Box.app"

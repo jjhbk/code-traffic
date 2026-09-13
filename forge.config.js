@@ -1,10 +1,17 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
+const { preparePtyHelpers } = require('./scripts/prepare-pty-helpers');
 
 module.exports = {
   packagerConfig: {
-    asar: true,
+    // node-pty launches this executable by its app.asar.unpacked path.
+    // AutoUnpackNatives only handles .node libraries, not spawn-helper.
+    asar: { unpack: '**/node-pty/**/spawn-helper' },
     extraResource: ['codex-notify.js'],
+    afterPrune: [(buildPath, _electronVersion, platform, _arch, callback) => {
+      if (platform !== 'darwin') return callback();
+      preparePtyHelpers(buildPath).then(() => callback(), callback);
+    }],
   },
   rebuildConfig: {},
   makers: [
