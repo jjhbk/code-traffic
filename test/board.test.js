@@ -4,10 +4,11 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { Board } = require('../board');
+const { SqliteStore } = require('../host/store/sqlite-store');
 
-function post(port, query, body = '') {
+function postPath(port, requestPath, body = '') {
   return new Promise((resolve, reject) => {
-    const request = http.request({ hostname: '127.0.0.1', port, path: `/hook?${query}`, method: 'POST' }, (response) => {
+    const request = http.request({ hostname: '127.0.0.1', port, path: requestPath, method: 'POST' }, (response) => {
       response.resume();
       response.on('end', () => resolve(response.statusCode));
     });
@@ -15,6 +16,8 @@ function post(port, query, body = '') {
     request.end(body);
   });
 }
+
+function post(port, query, body = '') { return postPath(port, `/hook?${query}`, body); }
 
 function get(port, pathname) {
   return new Promise((resolve, reject) => {
@@ -43,10 +46,15 @@ function waitFor(board, predicate) {
 (async () => {
   let pendingQuestions = [];
   const port = 4750 + Math.floor(Math.random() * 100);
+  const store = new SqliteStore();
   const board = new Board({
+    store,
     historyProvider: (session) => ({ session: { key: session.key }, pairs: [{ prompt: 'hello', output: 'hi' }], count: 1, pendingQuestions }),
   });
   await board.listen(port);
+
+  assert.equal(await postPath(port, '/event', JSON.stringify({ source: 'fixture', actor_id: 'actor-1', kind: 'marker', seq: 1, payload: { label: 'test_suite_passed' } })), 200);
+  assert.equal(store.ingestEvent({ eventId: 'fixture-check', adapterId: 'fixture', type: 'marker', payload: { label: 'stored' } }).accepted, true);
 
   await post(port, 'state=done', JSON.stringify({ session_id: 's1', cwd: '/tmp/project' }));
   await waitFor(board, () => board.list().some((s) => s.key === 's1'));
@@ -127,6 +135,7 @@ function waitFor(board, predicate) {
   fs.rmSync(temporaryDirectory, { recursive: true });
 
   console.log('board tests passed');
+  store.close();
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

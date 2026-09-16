@@ -97,13 +97,13 @@ Signal Box is a working application, not a proposal. Being honest about the line
 | Pending question re-sent after restart; stale commands discarded | Built |
 | Read-only local history API | Built |
 | One-line install, six platform/arch targets | Built |
-| Staleness detection for silent agent loops | Not built |
-| Event server authentication; keychain secret storage | Not built |
-| Ingest connectors (mail, calendar, files) | Not built |
-| Privacy vault and pseudonymization | Not built |
-| Task graph, prioritizer, digest | Not built |
+| Staleness detection for silent agent loops | Built; per-session tuning remains open |
+| Event server authentication; keychain secret storage | Legacy hook authentication and OS-protected credentials built; generalized `/event` remains |
+| Ingest connectors (mail, calendar, files) | Gmail built; calendar and files remain |
+| Privacy vault and pseudonymization | Deterministic pseudonymization primitive built; persistent encrypted vault and local entity recognition remain |
+| Task graph, prioritizer, digest | Deterministic Gmail task graph and scheduled digest built; frontier ranking remains optional/future |
 | Browser recipes; standing authority; payments | Not built |
-| Audit log | Not built |
+| Audit log | Approval, execution, and notification audit records built; full append-only event audit remains |
 
 The bolded row is load-bearing. A question with its real options, delivered to a phone, answered with one tap, returned to the right session — that is the primitive everything else in this document plugs into, and it works today.
 

@@ -13,6 +13,10 @@ adapters → /event → task graph ──→ prioritizer ──→ scheduler ─
 
 This document describes the components, data formats, and execution model for Signal Box. It assumes an Electron application and a local host process on the same machine as the agents, browser, and data it works with. Sections are marked **[built]** where they describe the current implementation and **[proposed]** where they describe work not yet done.
 
+### Implementation alignment note
+
+The current application is the single-user Gmail vertical slice of this design. The board, Telegram approval surface, liveness handling, authenticated legacy hooks and generalized `/event` endpoint, durable SQLite approvals/tasks/notifications, Gmail OAuth and sync, deterministic task extraction, scheduled digests, data export/deletion, and reviewed Gmail replies are built. The persistent encrypted vault with local entity recognition, enforced frontier-model gateway, full policy engine, calendar/files, browser recipes, standing authority, payments, and multi-user operation remain proposed or explicitly excluded from this implementation cycle. No payment or multi-user capability is being added.
+
 ## Contents
 
 1. [Architecture](#1-architecture)

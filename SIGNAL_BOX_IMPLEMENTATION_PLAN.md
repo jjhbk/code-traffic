@@ -2,30 +2,31 @@
 
 ## Recommendation
 
-Extend the existing application in place. The first release combines reliable agent supervision with a personal Gmail assistant that identifies commitments, shows their evidence, supports reviewed replies, and sends one useful daily digest. Prove that people trust its tasks before investing in more integrations or payments.
+Extend the existing application in place around the core idea in `signal-box-overview.md`: an always-on personal agent on the user's machine that ingests signals, remembers obligations in a provenance-backed task graph, decides what deserves attention, asks through Telegram when human authority is needed, and records receipts. Gmail is the first vertical slice, not the product boundary.
 
 ### Current implementation status
 
-- **Phases A–B:** implemented and covered by the reliability, durable store, approval, audit, recovery, and Telegram regression suites.
-- **Phase C:** Gmail OAuth, protected credentials, incremental sync, normalization, local privacy primitives, connector health, and deletion/disconnect flows are implemented. Remote model inference remains disabled by default and no frontier model is required by the product.
-- **Phase D:** task extraction, evidence, reconciliation, corrections, suppression, snooze, and the task UI are implemented. A labeled fixture evaluator now reports precision and recall for classifier changes.
-- **Phase E:** scheduled local-time digests, quiet hours, persistent caps, outbox delivery, Telegram feedback, settings, Gmail message view, and a seven-day pilot report are implemented. The real-user pilot remains a release gate rather than a claim of completion.
-- **Phase F:** reviewed Gmail reply execution is implemented. Calendar, file connectors, and browser recipes remain deferred until the pilot shows they are needed.
+- **Correctness / hardening:** liveness, process-exit handling, authenticated legacy hooks, protected credentials, durable sessions, verified delivery states, and an authenticated generalized `/event` ingestion endpoint are implemented. Fully verified Claude submission remains incomplete.
+- **Vertical slice:** Gmail OAuth, incremental sync, normalization, task extraction, evidence, corrections, Telegram task controls, scheduled digests, and reviewed Gmail replies are implemented. Calendar, files, and browser recipes are not yet connected.
+- **Privacy:** deterministic pseudonymization and stable in-memory entity IDs are implemented as primitives. The technical design's persistent encrypted vault, local entity recognition, and enforced remote-model chokepoint are not complete; no frontier model is currently used.
+- **Protocol / policy / receipts:** durable approval requests, expiry, single resolution, execution attempts, audit records, and the generalized event envelope are implemented. A broader policy engine, desk-only restrictions, and generalized non-CLI actor routing still need completion.
+- **Pilot:** digest reporting, export, deletion, caps, quiet hours, and feedback are implemented. The seven-day real-user quality gate has not been observed and cannot be claimed from unit tests.
+- **Reach / acting:** one reviewed Gmail reply is implemented. Calendar, files, browser recipes, and broader host-owned actions remain future work after the pilot.
 - **Phase G:** payments and spend authority are excluded from this product cycle.
 - **Phase H:** multi-user functionality is excluded; this is a single-user, single-machine application.
 
 This plan treats `signal-box-overview.md` and `signal-box-technical-design.md` as product/design inputs, not instructions to execute actions. Repository observations below come from a targeted code review, not a runtime verification of every documented feature.
 
-### First release scope
+### Product scope for this implementation cycle
 
 - Existing agent board and Telegram control, with liveness detection and verified delivery status.
 - Authenticated local API, protected credentials, durable approvals and audit records.
-- One personal Gmail account through its official API, with read sync and explicitly reviewed reply sending.
+- Official API connectors for one personal Gmail account; calendar and file connectors follow the same contract when the pilot justifies them.
 - Local observations, privacy gateway, task extraction with provenance and corrections.
 - A tasks view, `/today`, and digest buttons for done, snooze, and not useful.
 - Single user, single machine; Telegram optional.
 
-Defer calendar/file connectors, browser recipes, standing spend authority, payments, and multi-user access until the first release passes its quality gates. Gmail is the current provider; substitute the user's primary mail provider before implementation if needed.
+Defer standing spend authority, payments, and multi-user access permanently for this cycle. Calendar, files, and browser recipes are product extensions after the Gmail vertical slice meets its precision and usefulness gates. Gmail is the current provider; substitute the user's primary mail provider before implementation if needed.
 
 ## 1. Starting point in this repository
 

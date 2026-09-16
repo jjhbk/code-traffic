@@ -5,7 +5,7 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const { resolveCodexSessionId, findUniqueCodexSessionSince } = require('./codex-sessions');
 const { DEFAULTS: LIVENESS_DEFAULTS, livenessFor } = require('./liveness');
-const { normalizeEvent } = require('./host/events/event-contract');
+const { normalizeEvent, normalizeIngestEvent } = require('./host/events/event-contract');
 
 const STATES = new Set(['working', 'approval', 'done', 'closed']);
 
@@ -424,6 +424,27 @@ class Board extends EventEmitter {
         if (!session) { sendJson(response, 404, { error: 'Session not found.' }); return; }
         if (!this.historyProvider) { sendJson(response, 503, { error: 'Session history is unavailable.' }); return; }
         try { sendJson(response, 200, this.historyProvider({ ...session })); } catch (error) { sendJson(response, 500, { error: error.message }); }
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/event') {
+        let body = '';
+        let bytes = 0;
+        let tooLarge = false;
+        request.setEncoding('utf8');
+        request.on('data', (chunk) => {
+          bytes += Buffer.byteLength(chunk);
+          if (bytes > 1024 * 1024) { tooLarge = true; body = ''; return; }
+          body += chunk;
+        });
+        request.on('end', () => {
+          if (tooLarge) { sendJson(response, 413, { error: 'Event payload exceeds 1 MiB.' }); return; }
+          try {
+            const event = normalizeIngestEvent(JSON.parse(body || '{}'));
+            if (!this.store) { sendJson(response, 503, { error: 'Durable event storage is unavailable.' }); return; }
+            const result = this.store.ingestEvent(event);
+            sendJson(response, 200, { ok: true, ...result });
+          } catch (error) { sendJson(response, 400, { error: error.message }); }
+        });
         return;
       }
       if (request.method !== 'POST' || url.pathname !== '/hook') {
