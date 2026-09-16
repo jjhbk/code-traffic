@@ -238,6 +238,9 @@ h1 { font-size: 30px; font-weight: 730; letter-spacing: -.045em; background: lin
 .tasks-heading { margin-bottom: 13px; }
 .tasks-heading h2 { font-size: 17px; }
 .task-card { padding: 17px; border-radius: 14px; }
+.mail-card { display: grid; gap: 6px; }
+.mail-card h3 { margin: 0; color: #eaffff; font-size: 14px; }
+.mail-body { margin: 4px 0 0; color: #a8bfc1; white-space: pre-wrap; line-height: 1.5; max-height: 180px; overflow: auto; }
 .modal-backdrop { padding: 28px; }
 .session-dialog { width: min(500px, 100%); padding: 26px; }
 .terminal-view { padding: 0 24px 24px; background: #071016; }

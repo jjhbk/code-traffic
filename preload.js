@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   pairMail: (payload) => ipcRenderer.invoke('mail:pair', payload),
   disconnectMail: () => ipcRenderer.invoke('mail:disconnect'),
   syncMail: () => ipcRenderer.invoke('mail:sync'),
+  listMailMessages: () => ipcRenderer.invoke('mail:messages'),
   proposeReply: (payload) => ipcRenderer.invoke('mail:propose-reply', payload),
   sendApprovedReply: (payload) => ipcRenderer.invoke('mail:send-approved-reply', payload),
   reconcileReply: (payload) => ipcRenderer.invoke('mail:reconcile-reply', payload),

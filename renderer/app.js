@@ -185,6 +185,26 @@ function renderTasks() {
   }
 }
 
+function renderMailMessages(messages) {
+  const list = document.getElementById('mail-list');
+  list.replaceChildren();
+  if (!messages.length) {
+    const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No synced Gmail messages yet. Connect Gmail and run Sync now.'; list.append(empty); return;
+  }
+  for (const message of messages) {
+    const card = document.createElement('article'); card.className = 'mail-card task-card';
+    const title = document.createElement('h3'); title.textContent = message.subject || '(no subject)'; card.append(title);
+    const meta = document.createElement('p'); meta.className = 'task-meta';
+    const timestamp = message.timestamp ? new Date(Number(message.timestamp)).toLocaleString() : 'Unknown time';
+    meta.textContent = `${message.direction === 'outgoing' ? 'Sent' : 'Received'} · ${message.from || 'Unknown sender'} · ${timestamp}`; card.append(meta);
+    const body = document.createElement('p'); body.className = 'mail-body'; body.textContent = message.body || '(empty message)'; card.append(body);
+    list.append(card);
+  }
+}
+async function loadMailMessages() {
+  try { renderMailMessages(await window.signalBox.listMailMessages()); } catch (caught) { showError(caught.message || 'Could not load Gmail messages.'); }
+}
+
 const taskEditModal = document.getElementById('task-edit-modal');
 function openTaskEditModal(task, mode) {
   taskEditMode = mode;
@@ -265,6 +285,12 @@ document.getElementById('tasks-toggle').addEventListener('click', async () => {
   if (!view.hidden) await loadTasks();
 });
 document.getElementById('tasks-refresh').addEventListener('click', loadTasks);
+document.getElementById('mail-toggle').addEventListener('click', async () => {
+  const view = document.getElementById('mail-view');
+  view.hidden = !view.hidden;
+  if (!view.hidden) await loadMailMessages();
+});
+document.getElementById('mail-refresh').addEventListener('click', loadMailMessages);
 
 function openTerminal(session) {
   try {
@@ -575,6 +601,7 @@ document.getElementById('digest-settings').addEventListener('click', async () =>
     const settings = await window.signalBox.getDigestSettings();
     document.getElementById('quiet-start').value = settings.quietHoursStart;
     document.getElementById('quiet-end').value = settings.quietHoursEnd;
+    document.getElementById('digest-at').value = settings.digestAt;
     document.getElementById('digest-cap').value = settings.dailyCap;
     document.getElementById('digest-timezone').textContent = `Timezone: ${settings.timeZone}`;
     const delivery = Object.entries(settings.stats.delivery || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No deliveries yet';
@@ -593,6 +620,7 @@ document.getElementById('digest-form').addEventListener('submit', async (event) 
     await window.signalBox.saveDigestSettings({
       quietHoursStart: document.getElementById('quiet-start').value,
       quietHoursEnd: document.getElementById('quiet-end').value,
+      digestAt: document.getElementById('digest-at').value,
       dailyCap: Number(document.getElementById('digest-cap').value),
     });
     digestModal.hidden = true;

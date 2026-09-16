@@ -14,14 +14,23 @@ function rankTask(task) {
 }
 
 class DigestScheduler {
-  constructor({ store, timeZone = 'UTC', dailyCap = 5, quietStart = null, quietEnd = null, clock = () => Date.now() } = {}) {
+  constructor({ store, timeZone = 'UTC', dailyCap = 5, digestAt = '08:30', quietStart = null, quietEnd = null, clock = () => Date.now() } = {}) {
     if (!store) throw new Error('Digest scheduler requires a store.');
     this.store = store;
     this.timeZone = timeZone;
     this.dailyCap = dailyCap;
+    this.digestAt = digestAt || '08:30';
     this.quietStart = quietStart;
     this.quietEnd = quietEnd;
     this.clock = clock;
+  }
+
+  isDue(now = this.clock()) {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(this.digestAt)) return false;
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: this.timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(now));
+    const current = Number(parts.find((part) => part.type === 'hour').value) * 60 + Number(parts.find((part) => part.type === 'minute').value);
+    const [hour, minute] = this.digestAt.split(':').map(Number);
+    return current >= hour * 60 + minute;
   }
 
   isQuiet(now = this.clock()) {
@@ -44,6 +53,12 @@ class DigestScheduler {
     const key = dateKey(this.clock(), this.timeZone);
     const items = ranked.slice(0, this.dailyCap).map(({ task, reasons }) => ({ taskId: task.taskId, summary: task.summary, reasons }));
     return this.store.reserveDigest({ dateKey: key, items, cap: this.dailyCap });
+  }
+
+  prepareScheduled(tasks = []) {
+    const key = dateKey(this.clock(), this.timeZone);
+    if (!this.isDue() || this.isQuiet() || this.store.hasNotificationForDate(key, 'digest')) return null;
+    return this.prepare(tasks);
   }
 }
 

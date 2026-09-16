@@ -219,21 +219,13 @@ Effort ranges below assume one experienced full-time engineer familiar with this
 
 **Exit:** one real task is completed after one approval; changed parameters require a new approval; a timed-out commit remains unknown until reconciled and is not automatically repeated. Retry reversible operations only when their retry safety is explicitly established.
 
-### Phase G — Standing authority and spend · separately scoped after F
+### Phase G — Deferred payments and spend authority
 
-- Begin with one narrow merchant/action class; keep bank challenges and identity verification manual.
-- Store money as integer minor units with an explicit currency. Define period boundaries and forbid implicit cross-currency allowance comparisons.
-- Add per-action caps, aggregate allowances, action-count limits, expiry, revocation, merchant scope, and price-change limits.
-- Atomically reserve allowance before dispatch; concurrent purchases must not both spend the same remaining budget. Keep unknown outcomes reserved until reconciled.
-- Compute the total from trusted executor data, including shipping, tax, and fees; never trust a model's declared amount.
-- Choose a documented policy precedence: deny/global pause first, mandatory desk approval next, standing authority only where no stronger restriction applies, then explicit approval by default.
-- Link receipts and settlement events to the original action. Refunds, cancellations, and failed settlements require explicit accounting rules.
+Deferred from the single-user assistant scope. Signal Box will not implement payments, purchasing, standing spend authority, or financial execution in this product cycle.
 
-**Exit:** an authorized in-limit action succeeds with a receipt; changed price, merchant, scope, revoked authority, or exceeded allowance produces no automatic commit. Concurrency and crash tests cannot exceed the allowance.
+### Phase H — Removed from scope
 
-### Phase H — Multi-user · future product decision
-
-Introduce per-person identity, role/scoped permissions, actor ownership, approval assignment, and vault/data isolation. First define how separate machines authenticate and share state; a second Telegram chat does not solve multi-user authorization. Keep this outside the personal MVP estimate.
+Multi-user identity, role-scoped permissions, approval assignment, shared state, and per-user vault isolation are intentionally excluded. Signal Box remains a single-user, single-machine assistant.
 
 ## 5. Validation strategy
 

@@ -468,6 +468,10 @@ class SqliteStore {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
 
+  hasNotificationForDate(dateKey, notificationClass = 'digest') {
+    return Boolean(this.db.prepare('SELECT 1 FROM notification_ledger WHERE date_key = ? AND notification_class = ?').get(dateKey, notificationClass));
+  }
+
   claimNotification(notificationClass = 'digest') {
     const now = this.clock();
     this.db.exec('BEGIN IMMEDIATE');

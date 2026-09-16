@@ -36,6 +36,7 @@
             <button id="clear-all" class="clear-all" type="button">Clear all</button>
             <button id="telegram-settings" type="button">Telegram settings</button>
             <button id="gmail-settings" type="button">Gmail settings</button>
+            <button id="mail-toggle" type="button">Mail</button>
             <button id="tasks-toggle" type="button">Tasks</button>
             <button id="digest-settings" type="button">Digest settings</button>
             <button id="new-session" class="new-session" type="button">+ New session</button>
@@ -49,6 +50,10 @@
       <section id="tasks-view" class="tasks-view" hidden>
         <div class="tasks-heading"><h2>Tasks</h2><button id="tasks-refresh" type="button">Refresh</button></div>
         <div id="tasks-list" class="tasks-list" aria-live="polite"></div>
+      </section>
+      <section id="mail-view" class="tasks-view" hidden>
+        <div class="tasks-heading"><h2>Gmail messages</h2><button id="mail-refresh" type="button">Refresh</button></div>
+        <div id="mail-list" class="tasks-list" aria-live="polite"></div>
       </section>
       <section id="terminal-view" class="terminal-view" hidden>
         <div class="terminal-bar">
@@ -120,6 +125,8 @@
           <input id="quiet-start" type="time">
           <label for="quiet-end">Quiet hours end</label>
           <input id="quiet-end" type="time">
+          <label for="digest-at">Daily digest time</label>
+          <input id="digest-at" type="time" value="08:30">
           <label for="digest-cap">Daily task cap</label>
           <input id="digest-cap" type="number" min="1" max="50" step="1">
           <h3 class="settings-subheading">Suppressions</h3>

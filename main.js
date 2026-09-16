@@ -77,6 +77,7 @@ let mailSync;
 let taskService;
 let digestScheduler;
 let mailSyncTimer;
+let digestTimer;
 let appSettings = {};
 const codexTerminalQuestions = new Map();
 const terminals = new Map();
@@ -230,24 +231,26 @@ function wireIpc() {
   ipcMain.handle('digest:get-settings', () => ({
     quietHoursStart: appSettings.quietHoursStart || '',
     quietHoursEnd: appSettings.quietHoursEnd || '',
+    digestAt: appSettings.digestAt || '08:30',
     dailyCap: Number.isInteger(appSettings.dailyDigestCap) ? appSettings.dailyDigestCap : 5,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     stats: hostStore?.notificationStats() || { delivery: {}, feedback: {} },
     history: hostStore?.listNotifications() || [],
   }));
-  ipcMain.handle('digest:save-settings', (_event, { quietHoursStart = '', quietHoursEnd = '', dailyCap = 5 } = {}) => {
+  ipcMain.handle('digest:save-settings', (_event, { quietHoursStart = '', quietHoursEnd = '', digestAt = '08:30', dailyCap = 5 } = {}) => {
     const validTime = (value) => value === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
     const cap = Number(dailyCap);
-    if (!validTime(quietHoursStart) || !validTime(quietHoursEnd)) throw new Error('Quiet hours must use HH:MM format.');
+    if (!validTime(quietHoursStart) || !validTime(quietHoursEnd) || !validTime(digestAt)) throw new Error('Digest and quiet hours must use HH:MM format.');
     if (!Number.isInteger(cap) || cap < 1 || cap > 50) throw new Error('Daily digest cap must be between 1 and 50.');
-    appSettings = { ...appSettings, quietHoursStart, quietHoursEnd, dailyDigestCap: cap };
+    appSettings = { ...appSettings, quietHoursStart, quietHoursEnd, digestAt, dailyDigestCap: cap };
     writeSettings(app.getPath('userData'), appSettings);
     if (digestScheduler) {
       digestScheduler.quietStart = quietHoursStart || null;
       digestScheduler.quietEnd = quietHoursEnd || null;
+      digestScheduler.digestAt = digestAt;
       digestScheduler.dailyCap = cap;
     }
-    return { quietHoursStart, quietHoursEnd, dailyCap: cap };
+    return { quietHoursStart, quietHoursEnd, digestAt, dailyCap: cap };
   });
   ipcMain.handle('settings:get', () => ({
     configured: Boolean(appSettings.telegramBotToken && appSettings.telegramChatId),
@@ -284,6 +287,12 @@ function wireIpc() {
     return { paired: Boolean(mailCredentials?.load('gmail-refresh-token')), provider: 'gmail', account, clientId: mailCredentials?.load('gmail-client-id') || GOOGLE_CLIENT_ID || '', storageAvailable: Boolean(mailCredentials), storageMessage: mailCredentials ? null : 'Signal Box cannot access the OS credential store. Start a desktop keyring service, then restart Signal Box.', health: adapterId ? hostStore?.getConnectorHealth(adapterId) || null : null };
   });
   ipcMain.handle('mail:sync', async () => runMailSync());
+  ipcMain.handle('mail:messages', () => {
+    if (!hostStore) return [];
+    const account = mailCredentials?.load('gmail-account') || '';
+    const adapterId = account ? `gmail:${account}` : null;
+    return hostStore.observations(adapterId).sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  });
   ipcMain.handle('mail:propose-reply', async (_event, { taskId, subject, body } = {}) => {
     if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
     const task = hostStore.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
@@ -655,6 +664,7 @@ async function start() {
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    digestAt: appSettings.digestAt || '08:30',
     quietStart: appSettings.quietHoursStart || null,
     quietEnd: appSettings.quietHoursEnd || null,
   }) : null;
@@ -736,6 +746,8 @@ async function start() {
   runMailSync().catch((error) => console.error(`[mail] initial sync failed: ${error.message}`));
   mailSyncTimer = setInterval(() => runMailSync().catch((error) => console.error(`[mail] scheduled sync failed: ${error.message}`)), 5 * 60 * 1000);
   mailSyncTimer.unref?.();
+  digestTimer = setInterval(() => runScheduledDigest().catch((error) => console.error(`[digest] scheduled delivery failed: ${error.message}`)), 30 * 1000);
+  digestTimer.unref?.();
   if (appSettings.telegramEnabled !== false) telegram.start();
   for (const session of board.list()) {
     if (session.state === 'approval') telegram.notifyState(session, 'approval');
@@ -771,11 +783,9 @@ async function runMailSync() {
   try {
     const result = await mailSync.run({ adapterId, accountAddress: account });
     const tasks = taskService?.processAll(adapterId) || [];
-    const digest = digestScheduler?.prepare(hostStore.listTasks()) || null;
-    const syncResult = { ...result, taskCandidates: tasks.length, digestPrepared: Boolean(digest), notificationId: digest?.notificationId || null };
+    const syncResult = { ...result, taskCandidates: tasks.length };
     console.error(`[mail] sync complete account=${account} fetched=${syncResult.fetched} inserted=${syncResult.inserted} tasks=${syncResult.taskCandidates}`);
     hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);
-    await deliverPendingDigest();
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('mail:status-changed', { status: 'healthy', result: syncResult });
     return syncResult;
   } catch (error) {
@@ -783,6 +793,14 @@ async function runMailSync() {
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('mail:status-changed', { status: 'error', error: error.message });
     throw error;
   }
+}
+
+async function runScheduledDigest() {
+  if (!digestScheduler || !hostStore || !telegram?.enabled || !telegram.configured) return null;
+  const digest = digestScheduler.prepareScheduled(hostStore.listTasks());
+  if (!digest) return null;
+  await deliverPendingDigest();
+  return digest;
 }
 
 async function deliverPendingDigest() {
@@ -824,6 +842,7 @@ app.on('before-quit', async () => {
   stopCodexMonitor?.();
   if (livenessTimer) clearInterval(livenessTimer);
   if (mailSyncTimer) clearInterval(mailSyncTimer);
+  if (digestTimer) clearInterval(digestTimer);
   telegram?.stop();
   for (const child of remoteCommands.values()) {
     try { child.kill(); } catch (_) { /* Process may already have exited. */ }
