@@ -180,6 +180,16 @@ const MIGRATIONS = [
   );
   CREATE UNIQUE INDEX IF NOT EXISTS jobs_active_dedupe
     ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running');`,
+  `CREATE TABLE IF NOT EXISTS task_relations (
+    from_task_id TEXT NOT NULL,
+    to_task_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(from_task_id, to_task_id, relation_type),
+    FOREIGN KEY(from_task_id) REFERENCES tasks(task_id),
+    FOREIGN KEY(to_task_id) REFERENCES tasks(task_id)
+  );`,
 ];
 
 class SqliteStore {
@@ -469,7 +479,45 @@ class SqliteStore {
       }
       edges.push({ from: `task:${row.taskId}`, to: observationId, type: 'evidence', label: row.evidenceText || '' });
     }
+    const relationRows = this.db.prepare(`SELECT from_task_id AS fromTaskId, to_task_id AS toTaskId, relation_type AS relationType, details_json AS detailsJson
+      FROM task_relations`).all();
+    for (const row of relationRows) {
+      if (!taskIds.has(row.fromTaskId) || !taskIds.has(row.toTaskId)) continue;
+      let details = {};
+      try { details = JSON.parse(row.detailsJson); } catch (_) {}
+      edges.push({ from: `task:${row.fromTaskId}`, to: `task:${row.toTaskId}`, type: row.relationType, ...details });
+    }
     return { nodes, edges };
+  }
+
+  addTaskRelation(fromTaskId, toTaskId, relationType, details = {}) {
+    const allowed = new Set(['depends_on', 'blocks', 'belongs_to', 'supersedes', 'related_to']);
+    if (!allowed.has(relationType)) throw new Error('Invalid task relation.');
+    if (!fromTaskId || !toTaskId || fromTaskId === toTaskId) throw new Error('A task relation requires two distinct tasks.');
+    if (!details || typeof details !== 'object' || Array.isArray(details)) throw new Error('Task relation details must be an object.');
+    const exists = this.db.prepare('SELECT task_id FROM tasks WHERE task_id IN (?, ?)').all(fromTaskId, toTaskId);
+    if (exists.length !== 2) throw new Error('Both related tasks must exist.');
+    if (relationType === 'depends_on' && this._taskRelationReaches(toTaskId, fromTaskId, 'depends_on')) throw new Error('Task dependency would create a cycle.');
+    this.db.prepare(`INSERT INTO task_relations(from_task_id, to_task_id, relation_type, details_json, created_at)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(from_task_id, to_task_id, relation_type) DO UPDATE SET details_json = excluded.details_json`).run(fromTaskId, toTaskId, relationType, JSON.stringify(details), this.clock());
+    this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, ?, ?, ?)')
+      .run(fromTaskId, `relation-${relationType}`, JSON.stringify({ toTaskId, ...details }), this.clock());
+    return { fromTaskId, toTaskId, relationType, details };
+  }
+
+  _taskRelationReaches(startTaskId, targetTaskId, relationType, seen = new Set()) {
+    if (startTaskId === targetTaskId) return true;
+    if (seen.has(startTaskId)) return false;
+    seen.add(startTaskId);
+    const next = this.db.prepare('SELECT to_task_id AS taskId FROM task_relations WHERE from_task_id = ? AND relation_type = ?').all(startTaskId, relationType);
+    return next.some((row) => this._taskRelationReaches(row.taskId, targetTaskId, relationType, seen));
+  }
+
+  taskRelations(taskId = null) {
+    const rows = taskId
+      ? this.db.prepare('SELECT from_task_id AS fromTaskId, to_task_id AS toTaskId, relation_type AS relationType, details_json AS detailsJson, created_at AS createdAt FROM task_relations WHERE from_task_id = ? OR to_task_id = ? ORDER BY created_at').all(taskId, taskId)
+      : this.db.prepare('SELECT from_task_id AS fromTaskId, to_task_id AS toTaskId, relation_type AS relationType, details_json AS detailsJson, created_at AS createdAt FROM task_relations ORDER BY created_at').all();
+    return rows.map((row) => ({ ...row, details: JSON.parse(row.detailsJson) }));
   }
 
   setTaskStatus(taskId, status, details = {}) {
@@ -546,7 +594,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
