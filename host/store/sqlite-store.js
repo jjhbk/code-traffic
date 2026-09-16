@@ -192,6 +192,19 @@ const MIGRATIONS = [
   );`,
   `ALTER TABLE tasks ADD COLUMN obligation_key TEXT;
    CREATE INDEX IF NOT EXISTS tasks_obligation_key ON tasks(obligation_key);`,
+  `CREATE TABLE IF NOT EXISTS context_records (
+    record_id TEXT PRIMARY KEY,
+    record_type TEXT NOT NULL,
+    record_key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    source_json TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    confirmed INTEGER NOT NULL,
+    valid_until INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(record_type, record_key)
+  );`,
 ];
 
 class SqliteStore {
@@ -435,6 +448,50 @@ class SqliteStore {
       .map((row) => row.threadId).filter(Boolean);
   }
 
+  upsertContext({ recordId = crypto.randomUUID(), recordType, recordKey, value, source = {}, confidence = 'inferred', confirmed = false, validUntil = null } = {}) {
+    const types = new Set(['person', 'project', 'goal', 'preference', 'fact']);
+    const confidences = new Set(['inferred', 'low', 'medium', 'high']);
+    if (!types.has(recordType) || !recordKey || value === undefined || !confidences.has(confidence) || typeof confirmed !== 'boolean') throw new Error('Invalid context record.');
+    if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('Context source must be an object.');
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO context_records(record_id, record_type, record_key, value_json, source_json, confidence, confirmed, valid_until, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(record_type, record_key) DO UPDATE SET value_json = excluded.value_json, source_json = excluded.source_json,
+      confidence = excluded.confidence, confirmed = excluded.confirmed, valid_until = excluded.valid_until, updated_at = excluded.updated_at`)
+      .run(recordId, recordType, String(recordKey), JSON.stringify(value), JSON.stringify(source), confidence, confirmed ? 1 : 0, validUntil, now, now);
+    this.audit('context-upserted', null, null, { recordType, recordKey: String(recordKey), confirmed });
+    return this.getContext(recordType, recordKey);
+  }
+
+  getContext(recordType, recordKey, now = this.clock()) {
+    const row = this.db.prepare(`SELECT record_id AS recordId, record_type AS recordType, record_key AS recordKey, value_json AS valueJson,
+      source_json AS sourceJson, confidence, confirmed, valid_until AS validUntil, created_at AS createdAt, updated_at AS updatedAt
+      FROM context_records WHERE record_type = ? AND record_key = ? AND (valid_until IS NULL OR valid_until > ?)`)
+      .get(recordType, String(recordKey), now);
+    return row ? this._contextRow(row) : null;
+  }
+
+  listContext({ recordType = null, includeExpired = false, now = this.clock() } = {}) {
+    const clauses = [];
+    const params = [];
+    if (recordType) { clauses.push('record_type = ?'); params.push(recordType); }
+    if (!includeExpired) { clauses.push('(valid_until IS NULL OR valid_until > ?)'); params.push(now); }
+    const rows = this.db.prepare(`SELECT record_id AS recordId, record_type AS recordType, record_key AS recordKey, value_json AS valueJson,
+      source_json AS sourceJson, confidence, confirmed, valid_until AS validUntil, created_at AS createdAt, updated_at AS updatedAt
+      FROM context_records ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY updated_at DESC`).all(...params);
+    return rows.map((row) => this._contextRow(row));
+  }
+
+  _contextRow(row) {
+    return { ...row, value: JSON.parse(row.valueJson), source: JSON.parse(row.sourceJson), confirmed: Boolean(row.confirmed) };
+  }
+
+  deleteContext(recordType, recordKey) {
+    const result = this.db.prepare('DELETE FROM context_records WHERE record_type = ? AND record_key = ?').run(recordType, String(recordKey));
+    if (Number(result.changes)) this.audit('context-deleted', null, null, { recordType, recordKey: String(recordKey) });
+    return Number(result.changes) === 1;
+  }
+
   saveTaskCandidate(candidate) {
     if (!candidate?.candidateId || !candidate.observationId) throw new Error('Invalid task candidate.');
     const now = this.clock();
@@ -615,7 +672,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'context_records', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
