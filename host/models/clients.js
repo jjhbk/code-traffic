@@ -13,10 +13,20 @@ class OllamaClient extends JsonModelClient {
   }
 
   async available() {
-    const response = await this.fetch(`${this.baseUrl}/api/tags`);
-    if (!response.ok) return false;
-    const body = await response.json();
-    return Array.isArray(body.models) && body.models.some((item) => item.name === this.model || item.name?.startsWith(`${this.model}:`));
+    return (await this.availabilityDetails()).available;
+  }
+
+  async availabilityDetails() {
+    const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(1500) : undefined;
+    let response;
+    try { response = await this.fetch(`${this.baseUrl}/api/tags`, signal ? { signal } : undefined); }
+    catch (_) { return { available: false, reason: 'ollama-unreachable' }; }
+    if (!response.ok) return { available: false, reason: `ollama-http-${response.status}` };
+    let body;
+    try { body = await response.json(); } catch (_) { return { available: false, reason: 'ollama-invalid-response' }; }
+    if (!Array.isArray(body.models)) return { available: false, reason: 'ollama-invalid-model-list' };
+    const available = body.models.some((item) => item.name === this.model || item.name?.startsWith(`${this.model}:`));
+    return { available, reason: available ? null : 'model-not-installed' };
   }
 
   async complete({ system, prompt, schema } = {}) {

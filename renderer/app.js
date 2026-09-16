@@ -6,6 +6,91 @@ const terminalHost = document.getElementById('terminal');
 const terminalTitle = document.getElementById('terminal-title');
 const sessionChoice = document.getElementById('session-choice');
 const settingsModal = document.getElementById('settings-modal');
+document.getElementById('browser-extension-settings').addEventListener('click', async () => {
+  try {
+    const opened = await window.signalBox.openBrowserExtensionFolder();
+   const pairing = await window.signalBox.getBrowserPairing();
+   await window.signalBox.writeClipboard(pairing.token);
+    const extensionPathTarget = document.getElementById('browser-extension-path');
+    extensionPathTarget.textContent = opened.windowsPath || opened.path;
+    extensionPathTarget.dataset.copyPath = opened.windowsPath || opened.path;
+   document.getElementById('browser-session-id').textContent = pairing.sessionId;
+   document.getElementById('browser-host-url').textContent = pairing.hostUrl;
+    document.getElementById('browser-setup-status').textContent = opened.folderOpened
+      ? opened.managerOpened
+        ? 'The extension folder and browser extension manager are open.'
+        : 'The extension folder is open. In Chrome, open chrome://extensions manually.'
+      : 'Copy the path below and load it in Chrome. The folder could not be opened automatically.';
+   document.getElementById('browser-modal').hidden = false;
+    refreshBrowserStatus();
+  } catch (error) { showError(error.message); }
+});
+async function refreshBrowserStatus() {
+  const status = document.getElementById('browser-connection-status');
+  try {
+    const bridge = await window.signalBox.getBrowserStatus();
+    status.textContent = bridge.connected
+      ? `Browser status: connected · ${bridge.pending} action${bridge.pending === 1 ? '' : 's'} waiting`
+      : 'Browser status: waiting for the paired extension on an allowed browser page.';
+  } catch (error) { status.textContent = `Browser status: unavailable · ${error.message}`; }
+}
+document.getElementById('close-browser-setup').addEventListener('click', () => { document.getElementById('browser-modal').hidden = true; });
+document.getElementById('open-browser-manager').addEventListener('click', async () => {
+  try {
+    await window.signalBox.openBrowserExtensionManager();
+    document.getElementById('browser-setup-status').textContent = 'Chrome extensions is open. Turn on Developer mode, then choose Load unpacked.';
+  } catch (error) { showError(error.message); }
+});
+document.getElementById('copy-browser-token').addEventListener('click', async () => {
+  try { const pairing = await window.signalBox.getBrowserPairing(); await window.signalBox.writeClipboard(pairing.token); showError('Pairing token copied.'); }
+  catch (error) { showError(error.message); }
+});
+document.getElementById('copy-browser-path').addEventListener('click', async () => {
+  const target = document.getElementById('browser-extension-path');
+  await window.signalBox.writeClipboard(target.dataset.copyPath || target.textContent);
+  showError('Extension path copied.');
+});
+document.getElementById('copy-browser-session').addEventListener('click', async () => {
+  await window.signalBox.writeClipboard(document.getElementById('browser-session-id').textContent);
+  showError('Browser session ID copied.');
+});
+let browserTestRequest = null;
+document.getElementById('browser-test-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const status = document.getElementById('browser-test-status');
+  const actions = document.getElementById('browser-test-actions');
+  actions.hidden = true;
+  status.textContent = 'Preparing browser action…';
+  try {
+    browserTestRequest = await window.signalBox.prepareUberBooking({
+      pickup: document.getElementById('browser-test-pickup').value.trim(),
+      destination: document.getElementById('browser-test-destination').value.trim(),
+      rideType: document.getElementById('browser-test-ride').value.trim(),
+      maxFare: Number(document.getElementById('browser-test-max-fare').value),
+      preflight: document.getElementById('browser-test-preflight').checked,
+      sessionId: document.getElementById('browser-session-id').textContent,
+    });
+    status.textContent = 'Test action is waiting for approval. Approve here or use the Telegram button.';
+    actions.hidden = false;
+  } catch (caught) { status.textContent = caught.message || 'Could not prepare the browser action.'; }
+});
+document.getElementById('approve-browser-test').addEventListener('click', async () => {
+  if (!browserTestRequest) return;
+  const status = document.getElementById('browser-test-status');
+  const actions = document.getElementById('browser-test-actions');
+  actions.hidden = true; status.textContent = 'Approved. Waiting for the paired Chrome tab…';
+  try {
+    const result = await window.signalBox.decideBrowserAction({ requestId: browserTestRequest.request_id || browserTestRequest.requestId, optionId: 'allow', sessionId: document.getElementById('browser-session-id').textContent });
+    status.textContent = `Browser action ${result.status || 'finished'}. Check Chrome for the result.`;
+  } catch (caught) { status.textContent = caught.message || 'Browser action failed.'; }
+});
+document.getElementById('deny-browser-test').addEventListener('click', async () => {
+  if (!browserTestRequest) return;
+  try { await window.signalBox.decideBrowserAction({ requestId: browserTestRequest.request_id || browserTestRequest.requestId, optionId: 'deny' }); } catch (caught) { showError(caught.message); }
+  browserTestRequest = null;
+  document.getElementById('browser-test-actions').hidden = true;
+  document.getElementById('browser-test-status').textContent = 'Test action cancelled.';
+});
 const setupPanel = document.getElementById('setup-panel');
 let sessions = [];
 let archivedSessions = [];
@@ -18,25 +103,6 @@ let fitAttempts = 0;
 const terminals = new Map();
 const pendingPty = new Map();
 let taskEditMode = 'edit';
-
-if (window.signalBox.environment?.wsl) {
-  document.body.classList.add('wsl-cursor-fallback');
-  const cursor = document.getElementById('wsl-cursor');
-  let cursorFrame = 0;
-  let cursorX = 0;
-  let cursorY = 0;
-  window.addEventListener('pointermove', (event) => {
-    cursorX = event.clientX;
-    cursorY = event.clientY;
-    if (cursorFrame) return;
-    cursorFrame = requestAnimationFrame(() => {
-      cursor.style.transform = `translate3d(${cursorX + 2}px, ${cursorY + 2}px, 0) rotate(-12deg)`;
-      cursorFrame = 0;
-    });
-  }, { passive: true });
-  window.addEventListener('blur', () => { cursor.style.display = 'none'; });
-  window.addEventListener('focus', () => { cursor.style.display = 'block'; });
-}
 
 window.addEventListener('error', (event) => {
   console.error(`[renderer-error] ${event.message}`, event.error);
@@ -84,7 +150,11 @@ function render() {
     const pathText = document.createElement('div'); pathText.className = 'path'; pathText.textContent = session.path || 'Unknown location';
     const clock = document.createElement('div'); clock.className = 'clock';
     clock.textContent = session.liveness === 'unknown' ? 'status unknown' : session.liveness === 'stale' ? 'stale' : elapsed(session.since);
-    tile.append(lamp, project, pathText, clock);
+    const delivery = document.createElement('div'); delivery.className = `delivery delivery-${session.delivery?.status || 'none'}`;
+    if (session.state !== 'done' && session.delivery?.status === 'submitted') delivery.textContent = 'prompt submitted · waiting for agent';
+    else if (session.state !== 'done' && session.delivery?.status === 'unknown') delivery.textContent = 'prompt acknowledgement unknown';
+    else if (session.state !== 'done' && session.delivery?.status === 'failed') delivery.textContent = 'prompt delivery failed';
+    tile.append(lamp, project, pathText, clock, delivery);
     const sessionMark = document.createElement('span');
     sessionMark.className = 'session-mark';
     sessionMark.textContent = `${session.owned ? '' : 'external · '}${agentLabel(session.agent)}${session.processStatus === 'exited' ? ' · exited' : ''}`;
@@ -134,17 +204,36 @@ function renderSetup(items) {
 
 async function refreshSetupCenter() {
   try {
-    const [telegram, gmail, digest, model] = await Promise.all([
+    const [telegram, gmail, digest, model, calendar, drive, integrations] = await Promise.all([
       window.signalBox.getSettings(),
       window.signalBox.getMailStatus(),
       window.signalBox.getDigestSettings(),
       window.signalBox.checkModel().catch(() => null),
+      window.signalBox.getCalendarStatus().catch(() => null),
+      window.signalBox.getDriveStatus().catch(() => null),
+      window.signalBox.getIntegrationStatus().catch(() => null),
     ]);
     const items = [];
     if (!telegram.configured) items.push({ icon: '↗', title: 'Connect Telegram', detail: 'Receive approvals and daily updates wherever you are.', action: 'Set up', tone: 'cyan', onClick: () => document.getElementById('telegram-settings').click() });
     if (!gmail.paired) items.push({ icon: '✉', title: 'Connect Gmail', detail: 'Let Signal Box find commitments and follow-ups from your inbox.', action: 'Connect', tone: 'violet', onClick: () => document.getElementById('gmail-settings').click() });
+    if (gmail.paired && calendar?.health?.status === 'error') items.push({ icon: '◫', title: 'Calendar sync needs attention', detail: calendar.health.details?.message || 'Google Calendar could not sync. Reconnect Google to refresh permissions.', action: 'Reconnect', tone: 'amber', onClick: () => document.getElementById('gmail-settings').click() });
+    if (gmail.paired && drive?.health?.status === 'error') items.push({ icon: '□', title: 'Drive sync needs attention', detail: drive.health.details?.message || 'Google Drive could not sync. Reconnect Google to refresh permissions.', action: 'Reconnect', tone: 'amber', onClick: () => document.getElementById('gmail-settings').click() });
     if (!digest.quietHoursStart && !digest.quietHoursEnd) items.push({ icon: '◷', title: 'Set notification quiet hours', detail: `Choose when Signal Box should stay quiet. Current timezone: ${digest.timeZone}.`, action: 'Configure', tone: 'amber', onClick: () => document.getElementById('digest-settings').click() });
-    if (model?.mode === 'local' && model.localAvailable === false) items.push({ icon: '◌', title: 'Enable private local AI', detail: `Install ${model.localModel} with Ollama to enable local model assistance. Deterministic ranking remains active until then.`, action: 'Install guide', tone: 'violet', onClick: () => window.signalBox.openExternal('https://ollama.com/download') });
+    const localModel = model?.localModel || 'the recommended model';
+    const installLocalModel = async () => {
+      const command = `ollama pull ${localModel}`;
+      await window.signalBox.writeClipboard(command);
+      await window.signalBox.openExternal('https://ollama.com/download');
+      showError(`Copied “${command}”. Install Ollama, run the command, then refresh Signal Box.`);
+    };
+    const localModelDetail = model?.localError === 'ollama-unreachable'
+      ? 'Ollama is installed but is not responding. Start Ollama, then refresh Signal Box.'
+      : `Install ${localModel} with Ollama. The exact command will be copied when you continue.`;
+    if (model?.mode === 'local' && model.localAvailable === false) items.push({ icon: '◌', title: 'Enable private local AI', detail: `${localModelDetail} Deterministic ranking remains active until then.`, action: 'Copy command', tone: 'violet', onClick: installLocalModel });
+    if (model?.mode === 'frontier' && model.localAvailable === false) items.push({ icon: '◌', title: 'Frontier ranking is paused', detail: `${localModelDetail} Signal Box requires local privacy processing before sending pseudonymized tasks to a frontier model.`, action: 'Copy command', tone: 'amber', onClick: installLocalModel });
+    if (model?.hardware?.wsl && model.hardware.reason === 'gpu-query-failed') items.push({ icon: '▣', title: 'WSL GPU access needs attention', detail: 'nvidia-smi is present but WSL cannot access the GPU. Ollama can still run on CPU; enable the WSL GPU driver integration for faster local inference.', action: 'Refresh', tone: 'amber', onClick: refreshSetupCenter });
+    if (integrations && !integrations.claude.configured) items.push({ icon: '⌁', title: 'Claude integration needs setup', detail: 'Signal Box cannot find its Claude lifecycle hook. Restart Signal Box, then start a new Claude session.', action: 'Refresh', tone: 'amber', onClick: refreshSetupCenter });
+    if (integrations && !integrations.codex.configured) items.push({ icon: '⌁', title: 'Codex integration needs setup', detail: 'Signal Box cannot find its Codex notification hook. Restart Signal Box, then start a new Codex session.', action: 'Refresh', tone: 'amber', onClick: refreshSetupCenter });
     renderSetup(items);
   } catch (caught) { console.error('[setup-center]', caught); }
 }
@@ -196,6 +285,7 @@ function renderMailMessages(messages) {
   for (const message of messages) {
     const card = document.createElement('article'); card.className = 'mail-card task-card';
     const title = document.createElement('h3'); title.textContent = message.subject || '(no subject)'; card.append(title);
+    if (message.isSpam || message.isBulk) { const badge = document.createElement('span'); badge.className = `mail-classification ${message.isSpam ? 'mail-spam' : 'mail-bulk'}`; badge.textContent = message.isSpam ? 'Likely spam' : 'Bulk / unwanted'; card.append(badge); }
     const meta = document.createElement('p'); meta.className = 'task-meta';
     const timestamp = message.timestamp ? new Date(Number(message.timestamp)).toLocaleString() : 'Unknown time';
     meta.textContent = `${message.direction === 'outgoing' ? 'Sent' : 'Received'} · ${message.from || 'Unknown sender'} · ${timestamp}`; card.append(meta);
@@ -281,18 +371,189 @@ async function loadTasks() {
   try { tasks = await window.signalBox.listTasks(); renderTasks(); } catch (caught) { showError(caught.message || 'Could not load tasks.'); }
 }
 
+const ACTIVITY_LABELS = {
+  'model-local': 'Local model recognized entities for privacy filtering',
+  'model-ranking': 'Task ranking completed',
+  'model-privacy': 'Privacy boundary processed model data',
+  'observation-saved': 'Source observation stored',
+  'connector-health': 'Connector health updated',
+  'event-ingested': 'Agent event received',
+  'approval-requested': 'Approval requested',
+  'approval-decided': 'Approval decision recorded',
+  'approval-expired': 'Approval expired',
+  'execution-prepared': 'Action prepared',
+  'execution-authorized': 'Action authorized',
+  'execution-dispatched': 'Action dispatched',
+  'execution-confirmed': 'Action completed',
+  'execution-failed': 'Action failed',
+  'notification-sent': 'Telegram notification sent',
+  'notification-unknown': 'Telegram notification delivery is unknown',
+};
+function activityDetails(entry) {
+  const details = entry.details || {};
+  const parts = [];
+  if (details.provider) parts.push(details.provider);
+  if (details.type) parts.push(details.type);
+  if (details.capability) parts.push(details.capability);
+  if (details.source) parts.push(details.source);
+  if (details.status && !entry.kind.includes(details.status)) parts.push(details.status);
+  if (entry.kind === 'model-ranking' && details.source) parts.push(`source: ${details.source}`);
+  if (entry.kind === 'model-privacy') parts.push(details.redacted ? 'PII check passed' : 'PII check failed');
+  if (details.reason) parts.push(details.reason);
+  return parts.join(' · ');
+}
+async function loadActivity() {
+  const list = document.getElementById('activity-list');
+  try {
+    const entries = await window.signalBox.getActivity();
+    list.replaceChildren();
+    if (!entries.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No assistant activity yet. Connect a source or run a local privacy test.'; list.append(empty); return; }
+    for (const entry of entries) {
+      const item = document.createElement('article'); item.className = 'activity-item';
+      const title = document.createElement('strong'); title.textContent = ACTIVITY_LABELS[entry.kind] || entry.kind.replaceAll('-', ' ');
+      const meta = document.createElement('span'); meta.textContent = new Date(entry.createdAt).toLocaleString();
+      const detail = document.createElement('p'); detail.textContent = activityDetails(entry);
+      item.append(title, meta, detail); list.append(item);
+    }
+  } catch (caught) { list.textContent = caught.message || 'Activity is unavailable.'; }
+}
+
+function formatDiagnosticTime(value) { return value ? new Date(value).toLocaleString() : 'never'; }
+function renderModelDiagnostics(diagnostic) {
+  const metrics = diagnostic?.metrics || {};
+  const ranking = metrics.lastRanking;
+  const local = metrics.lastLocalCall;
+  const privacy = metrics.lastPrivacyCheck;
+  document.getElementById('model-diagnostics').textContent = [
+    `Mode: ${diagnostic?.mode || 'off'} · local model: ${diagnostic?.localModel || 'not configured'} · frontier: ${diagnostic?.frontierModel || 'not configured'}`,
+    `Local calls: ${metrics.localCalls || 0} · frontier calls: ${metrics.frontierCalls || 0} · ranking runs: ${metrics.rankingCalls || 0}`,
+    `Last local call: ${local ? `${local.purpose}, ${local.status}, ${formatDiagnosticTime(local.at)}` : 'never'}`,
+    `Last ranking: ${ranking ? `${ranking.source}, ${ranking.status || 'fallback'}${ranking.reason ? ` (${ranking.reason})` : ''}, ${formatDiagnosticTime(ranking.at)}` : 'never'}`,
+    `Last privacy boundary: ${privacy ? `${privacy.redacted ? '✓ PII redaction check passed' : '✕ redaction check failed'} · ${privacy.boundary} · ${formatDiagnosticTime(privacy.at)}` : 'not exercised yet'}`,
+  ].join('\n');
+}
+async function refreshModelDiagnostics() {
+  try { renderModelDiagnostics(await window.signalBox.getModelDiagnostics()); } catch (caught) { document.getElementById('model-diagnostics').textContent = caught.message || 'Diagnostics unavailable.'; }
+}
+
+function graphText(parent, x, y, value, className) {
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('x', x); text.setAttribute('y', y); text.setAttribute('class', className); text.textContent = String(value || '').slice(0, 52); parent.append(text); return text;
+}
+async function loadTaskGraph() {
+  const svg = document.getElementById('task-graph');
+  const empty = document.getElementById('graph-empty');
+  svg.replaceChildren();
+  try {
+    const graph = await window.signalBox.getTaskGraph();
+    if (!graph.nodes.length) { empty.hidden = false; svg.hidden = true; return; }
+    empty.hidden = true; svg.hidden = false;
+    const taskNodes = graph.nodes.filter((node) => node.type === 'task');
+    const sourceNodes = graph.nodes.filter((node) => node.type === 'observation');
+    const positions = new Map();
+    const height = Math.max(300, Math.max(taskNodes.length, sourceNodes.length) * 88 + 50);
+    svg.setAttribute('viewBox', `0 0 900 ${height}`);
+    taskNodes.forEach((node, index) => positions.set(node.id, { x: 220, y: 55 + index * 88 }));
+    sourceNodes.forEach((node, index) => positions.set(node.id, { x: 680, y: 55 + index * 88 }));
+    for (const edge of graph.edges) {
+      const from = positions.get(edge.from); const to = positions.get(edge.to); if (!from || !to) continue;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', from.x + 155); line.setAttribute('y1', from.y); line.setAttribute('x2', to.x - 155); line.setAttribute('y2', to.y); line.setAttribute('class', 'graph-edge'); svg.append(line);
+    }
+    for (const node of graph.nodes) {
+      const position = positions.get(node.id); if (!position) continue;
+      const group = document.createElementNS('http://www.w3.org/2000/svg', 'g'); group.setAttribute('class', `graph-node graph-${node.type}`);
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); rect.setAttribute('x', position.x - 155); rect.setAttribute('y', position.y - 25); rect.setAttribute('width', 310); rect.setAttribute('height', 50); rect.setAttribute('rx', 12); group.append(rect);
+      graphText(group, position.x - 140, position.y - 3, node.label, 'graph-label');
+      graphText(group, position.x - 140, position.y + 16, node.type === 'task' ? `${node.status || 'active'}${node.dueDate ? ` · due ${node.dueDate}` : ''}` : (node.source || 'source observation'), 'graph-meta');
+      svg.append(group);
+    }
+  } catch (caught) { empty.hidden = false; empty.textContent = caught.message || 'Task graph unavailable.'; svg.hidden = true; }
+}
+
 document.getElementById('tasks-toggle').addEventListener('click', async () => {
   const view = document.getElementById('tasks-view');
   view.hidden = !view.hidden;
   if (!view.hidden) await loadTasks();
 });
 document.getElementById('tasks-refresh').addEventListener('click', loadTasks);
+document.getElementById('activity-toggle').addEventListener('click', async () => { const view = document.getElementById('activity-view'); view.hidden = !view.hidden; if (!view.hidden) await loadActivity(); });
+document.getElementById('activity-refresh').addEventListener('click', loadActivity);
+document.getElementById('graph-toggle').addEventListener('click', async () => { const view = document.getElementById('graph-view'); view.hidden = !view.hidden; if (!view.hidden) await loadTaskGraph(); });
+document.getElementById('graph-refresh').addEventListener('click', loadTaskGraph);
 document.getElementById('mail-toggle').addEventListener('click', async () => {
   const view = document.getElementById('mail-view');
   view.hidden = !view.hidden;
   if (!view.hidden) await loadMailMessages();
 });
 document.getElementById('mail-refresh').addEventListener('click', loadMailMessages);
+async function loadCalendarEvents() {
+  try {
+    const events = await window.signalBox.listCalendarEvents();
+    const list = document.getElementById('calendar-list'); list.replaceChildren();
+    if (!events.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No calendar events synced yet.'; list.append(empty); return; }
+    for (const event of events) {
+      const card = document.createElement('article'); card.className = 'mail-card task-card';
+      const title = document.createElement('h3'); title.textContent = event.subject || '(untitled event)';
+      const meta = document.createElement('p'); meta.className = 'task-meta'; meta.textContent = event.timestamp ? new Date(event.timestamp).toLocaleString() : 'Unknown time';
+      const body = document.createElement('p'); body.textContent = event.body || '';
+      const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = 'Edit'; edit.addEventListener('click', () => openCalendarEditor(event));
+      card.append(title, meta, body, edit); list.append(card);
+    }
+  } catch (caught) { showError(caught.message || 'Could not load calendar events.'); }
+}
+function calendarInputValue(value) {
+  if (!value || !String(value).includes('T')) return '';
+  const date = new Date(value); if (Number.isNaN(date.valueOf())) return '';
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.valueOf() - offset).toISOString().slice(0, 16);
+}
+function openCalendarEditor(event) {
+  document.getElementById('calendar-edit-id').value = event.id || '';
+  document.getElementById('calendar-edit-etag').value = event.etag || '';
+  document.getElementById('calendar-edit-summary').value = event.subject || '';
+  document.getElementById('calendar-edit-start').value = calendarInputValue(event.start || event.timestamp);
+  document.getElementById('calendar-edit-end').value = calendarInputValue(event.end);
+  document.getElementById('calendar-edit-location').value = event.location || '';
+  document.getElementById('calendar-edit-description').value = event.description || '';
+  document.getElementById('calendar-edit-error').hidden = true;
+  document.getElementById('calendar-edit-modal').hidden = false;
+}
+document.getElementById('close-calendar-edit').addEventListener('click', () => { document.getElementById('calendar-edit-modal').hidden = true; });
+document.getElementById('calendar-edit-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorTarget = document.getElementById('calendar-edit-error'); errorTarget.hidden = true;
+  try {
+    const changes = {
+      summary: document.getElementById('calendar-edit-summary').value.trim(),
+      start: document.getElementById('calendar-edit-start').value,
+      end: document.getElementById('calendar-edit-end').value,
+      location: document.getElementById('calendar-edit-location').value.trim(),
+      description: document.getElementById('calendar-edit-description').value.trim(),
+    };
+    const approval = await window.signalBox.prepareCalendarUpdate({ eventId: document.getElementById('calendar-edit-id').value, etag: document.getElementById('calendar-edit-etag').value, changes });
+    const action = approval.action || {};
+    const confirmed = window.confirm(`Save this calendar edit?\n\n${action.changes?.summary || changes.summary}`);
+    if (!confirmed) return;
+    await window.signalBox.executeCalendarUpdate({ requestId: approval.request_id || approval.requestId });
+    document.getElementById('calendar-edit-modal').hidden = true;
+    await loadCalendarEvents();
+  } catch (caught) { errorTarget.textContent = caught.message || 'Could not update the calendar event.'; errorTarget.hidden = false; }
+});
+async function loadDriveFiles() {
+  try {
+    const files = await window.signalBox.listDriveFiles();
+    const list = document.getElementById('drive-list'); list.replaceChildren();
+    if (!files.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No Drive files synced yet.'; list.append(empty); return; }
+    for (const file of files) { const card = document.createElement('article'); card.className = 'mail-card task-card'; const title = document.createElement('h3'); title.textContent = file.subject || '(unnamed file)'; const meta = document.createElement('p'); meta.className = 'task-meta'; meta.textContent = file.timestamp ? new Date(file.timestamp).toLocaleString() : 'Unknown time'; const body = document.createElement('p'); body.textContent = file.body || ''; card.append(title, meta, body); list.append(card); }
+  } catch (caught) { showError(caught.message || 'Could not load Drive files.'); }
+}
+document.getElementById('calendar-toggle').addEventListener('click', async () => { const view = document.getElementById('calendar-view'); view.hidden = !view.hidden; if (!view.hidden) await loadCalendarEvents(); });
+document.getElementById('calendar-refresh').addEventListener('click', loadCalendarEvents);
+document.getElementById('calendar-sync').addEventListener('click', async () => { try { await window.signalBox.syncCalendar(); await loadCalendarEvents(); } catch (caught) { showError(caught.message || 'Calendar sync failed.'); } });
+document.getElementById('drive-toggle').addEventListener('click', async () => { const view = document.getElementById('drive-view'); view.hidden = !view.hidden; if (!view.hidden) await loadDriveFiles(); });
+document.getElementById('drive-refresh').addEventListener('click', loadDriveFiles);
+document.getElementById('drive-sync').addEventListener('click', async () => { try { await window.signalBox.syncDrive(); await loadDriveFiles(); } catch (caught) { showError(caught.message || 'Drive sync failed.'); } });
 
 function openTerminal(session) {
   try {
@@ -500,6 +761,55 @@ document.getElementById('telegram-settings').addEventListener('click', async () 
     showSettings();
   } catch (caught) { showError(caught.message || 'Could not load Telegram settings.'); }
 });
+const modelModal = document.getElementById('model-modal');
+document.getElementById('model-settings').addEventListener('click', async () => {
+  try {
+    const settings = await window.signalBox.getModelSettings();
+    document.getElementById('model-mode').value = settings.mode;
+    document.getElementById('local-model').value = settings.localModel;
+    document.getElementById('frontier-model').value = settings.frontierModel;
+    document.getElementById('frontier-base-url').value = settings.frontierBaseUrl;
+    document.getElementById('frontier-api-key').value = '';
+    document.getElementById('model-key-status').textContent = settings.hasFrontierKey
+      ? 'Frontier API key is stored securely. Leave the field blank to keep it.'
+      : 'No frontier API key is stored.';
+    document.getElementById('model-error').hidden = true;
+    modelModal.hidden = false;
+    await refreshModelDiagnostics();
+  } catch (caught) { showError(caught.message || 'Could not load AI settings.'); }
+});
+document.getElementById('close-model').addEventListener('click', () => { modelModal.hidden = true; });
+document.getElementById('probe-local-model').addEventListener('click', async () => {
+  const target = document.getElementById('model-diagnostics');
+  target.textContent = 'Running local entity recognition and redaction test…';
+  try {
+    const result = await window.signalBox.probeLocalModel();
+    target.textContent = `${result.localCall ? '✓ Local model call completed.' : 'Local model call was not made.'} ${result.redacted ? '✓ PII was removed before the pseudonymized payload boundary.' : '✕ PII redaction check failed.'}\nDetected entities: ${result.entitiesDetected}.\nSample payload: ${result.sample}`;
+    await refreshModelDiagnostics();
+  } catch (caught) {
+    target.textContent = caught.message || 'Local model test failed. Install and start Ollama, then retry.';
+  }
+});
+document.getElementById('model-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorTarget = document.getElementById('model-error');
+  errorTarget.hidden = true;
+  try {
+    await window.signalBox.saveModelSettings({
+      mode: document.getElementById('model-mode').value,
+      localModel: document.getElementById('local-model').value.trim(),
+      frontierModel: document.getElementById('frontier-model').value.trim(),
+      frontierBaseUrl: document.getElementById('frontier-base-url').value.trim(),
+      frontierApiKey: document.getElementById('frontier-api-key').value.trim(),
+    });
+    modelModal.hidden = true;
+    await refreshSetupCenter();
+    showError('AI settings saved.');
+  } catch (caught) {
+    errorTarget.textContent = caught.message || 'Could not save AI settings.';
+    errorTarget.hidden = false;
+  }
+});
 const gmailModal = document.getElementById('gmail-modal');
 window.signalBox.onMailPairProgress?.(({ stage, message, redirectUri }) => {
   const statusTarget = document.getElementById('gmail-status');
@@ -535,13 +845,21 @@ document.querySelectorAll('.guide-link').forEach((button) => {
 async function refreshGmailStatus() {
   const status = await window.signalBox.getMailStatus();
   const health = status.health;
+  const credentialStatus = document.getElementById('gmail-credential-status');
+  if (credentialStatus) {
+    credentialStatus.textContent = status.storageAvailable
+      ? status.hasClientSecret
+        ? '✓ Google client secret is stored securely in the OS-backed credential store. It will never be shown here.'
+        : 'No Google client secret is stored. This is valid for public PKCE clients; enter one only if Google requires it.'
+      : 'Secure credential storage is unavailable. No Google client secret can be stored safely.';
+  }
   document.getElementById('gmail-status').textContent = !status.paired
     ? (status.storageMessage || 'Gmail is not connected.')
     : health?.status === 'error'
       ? `Gmail sync error: ${health.details?.message || 'unknown error'}`
       : health?.updatedAt
         ? `Gmail is connected. Last sync: ${new Date(health.updatedAt).toLocaleString()}.`
-        : 'Gmail is connected for read-only sync.';
+      : 'Gmail is connected. Calendar edits require reconnecting Google to grant Calendar event access.';
   document.getElementById('disconnect-gmail').hidden = !status.paired;
   document.getElementById('sync-gmail').hidden = !status.paired;
   const clientIdInput = document.getElementById('gmail-client-id');
@@ -608,9 +926,7 @@ document.getElementById('digest-settings').addEventListener('click', async () =>
     document.getElementById('digest-timezone').textContent = `Timezone: ${settings.timeZone}`;
     const delivery = Object.entries(settings.stats.delivery || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No deliveries yet';
     const feedback = Object.entries(settings.stats.feedback || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No feedback yet';
-    const pilot = settings.pilot;
-    const pilotLine = pilot ? `Pilot — ${pilot.observedDays.length}/7 days observed · ${pilot.delivery.sent} sent · ${pilot.delivery.failed} failed · ${pilot.delivery.unknown} unknown${pilot.usefulnessRate === null ? '' : ` · ${Math.round(pilot.usefulnessRate * 100)}% useful`}` : '';
-    document.getElementById('digest-stats').textContent = `Delivery — ${delivery}\nFeedback — ${feedback}\n${pilotLine}`;
+    document.getElementById('digest-stats').textContent = `Delivery — ${delivery}\nFeedback — ${feedback}`;
     await renderSuppressions();
     digestModal.hidden = false;
   } catch (caught) { showError(caught.message); }
@@ -839,3 +1155,7 @@ window.signalBox.getSettings().then((settings) => {
 }).catch((caught) => showError(caught.message));
 refreshSetupCenter();
 setInterval(render, 1000);
+setInterval(() => {
+  if (!document.getElementById('activity-view').hidden) loadActivity();
+  if (!document.getElementById('browser-modal').hidden) refreshBrowserStatus();
+}, 3000);

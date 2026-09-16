@@ -23,7 +23,7 @@ module.exports = {
     // node-pty launches this executable by its app.asar.unpacked path.
     // AutoUnpackNatives only handles .node libraries, not spawn-helper.
     asar: { unpack: '**/node-pty/**/spawn-helper' },
-    extraResource: ['codex-notify.js'],
+    extraResource: ['codex-notify.js', 'browser-extension'],
     afterPrune: [(buildPath, _electronVersion, platform, _arch, callback) => {
       if (platform !== 'darwin') return callback();
       preparePtyHelpers(buildPath).then(() => callback(), callback);

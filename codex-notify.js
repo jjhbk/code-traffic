@@ -33,9 +33,13 @@ function stateFor(payload) {
   const lastMessage = String(
     payload['last-assistant-message'] || payload.last_assistant_message || payload.lastAssistantMessage || '',
   ).trim();
-  if (/\?\s*$/.test(lastMessage) || /\b(?:need|requires?|waiting for|please provide|please approve)\b[^.]{0,80}\b(?:input|permission|approval|answer|choice)\b/i.test(lastMessage)) return 'approval';
+  if (/\b(?:need|requires?|waiting for|please provide|please approve)\b[^.]{0,80}\b(?:input|permission|approval|answer|choice)\b/i.test(lastMessage)) return 'approval';
   if (type.includes('start') || type.includes('begin') || type.includes('turn-start') || type.includes('working')) return 'working';
-  return 'done';
+  if (type.includes('complete') || type.includes('finish') || type.includes('turn-end') || type.includes('stop')
+    || type.includes('done') || type.includes('success') || type.includes('fail') || type.includes('error')) return 'done';
+  // Codex notification payloads vary by CLI version. An unknown notification
+  // is evidence that the process is active, not evidence of completion.
+  return 'working';
 }
 
 function notify() {

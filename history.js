@@ -142,13 +142,14 @@ function questionsFromText(value) {
   const text = String(value || '').trim();
   if (!text) return [];
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const options = lines.flatMap((line) => {
+  const questionIndex = lines.findIndex((line) => line.includes('?'));
+  if (questionIndex === -1) return [];
+  const options = lines.slice(questionIndex + 1).flatMap((line) => {
     const match = line.match(/^(?:[-*] |\d+[.)]\s+|[A-Z][.)]\s+)(.+)$/);
     return match ? [{ label: match[1].trim(), description: '' }] : [];
   });
-  const questionLine = [...lines].reverse().find((line) => line.includes('?'));
-  if (!questionLine && !options.length) return [];
-  return [{ header: '', question: questionLine || lines[0], options }];
+  if (options.length < 2) return [];
+  return [{ header: '', question: lines[questionIndex], options }];
 }
 
 function claudeSessionFile(sessionId, cwd) {

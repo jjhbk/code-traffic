@@ -84,6 +84,16 @@ function waitFor(board, predicate) {
   board.register('owned', '/tmp/owned');
   await post(port, 'state=working&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'working');
+  board.recordDelivery('owned', 'submitted', { channel: 'pty' });
+  let acknowledgementChange;
+  board.on('change', (change) => { if (change?.delivery?.status === 'acknowledged') acknowledgementChange = change; });
+  await post(port, 'state=working&tile=owned&submitted=1', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
+  assert.strictEqual(board.list().find((s) => s.key === 'owned').delivery.status, 'acknowledged');
+  assert.strictEqual(board.list().find((s) => s.key === 'owned').delivery.channel, 'agent-hook');
+  assert.strictEqual(acknowledgementChange.delivery.status, 'acknowledged');
+  board.recordDelivery('owned', 'submitted', { attemptId: 'attempt-timeout' });
+  board.recordDelivery('owned', 'unknown', { attemptId: 'attempt-timeout', reason: 'acknowledgement-timeout' });
+  assert.equal(board.list().find((s) => s.key === 'owned').delivery.status, 'unknown');
   pendingQuestions = [{ question: 'Choose an option.' }];
   await post(port, 'state=approval&tile=owned', JSON.stringify({ session_id: 's2', cwd: '/tmp/owned' }));
   await waitFor(board, () => board.list().find((s) => s.key === 'owned').state === 'approval');
@@ -111,6 +121,8 @@ function waitFor(board, predicate) {
   persistentBoard.handleHook('working', 'persisted', { session_id: 'saved-id', cwd: '/tmp/persisted' });
   persistentBoard.handleHook('working', 'persisted', { session_id: 'updated-id', cwd: '/tmp/persisted' });
   assert.strictEqual(new Board({ storagePath }).list()[0].sessionId, 'updated-id');
+  persistentBoard.recordDelivery('persisted', 'submitted', { attemptId: 'old-attempt' });
+  assert.strictEqual(new Board({ storagePath }).list()[0].delivery, null, 'in-flight delivery markers do not survive restart');
 
   const oldCodexHome = process.env.CODEX_HOME;
   try {

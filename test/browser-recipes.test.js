@@ -1,0 +1,32 @@
+const assert = require('node:assert/strict');
+const { BrowserRecipeExecutor } = require('../host/browser/executor');
+const { uberCabBooking, uberCabQuote } = require('../host/browser/recipes');
+const { BrowserAdapter } = require('../host/browser/adapter');
+const { PolicyEngine } = require('../host/policy/engine');
+
+(async () => {
+  const calls = [];
+  const browser = { perform: async (step) => { calls.push(step); return step.id === 'quote' ? 24 : { ok: true }; } };
+  const executor = new BrowserRecipeExecutor({ browser, policy: new PolicyEngine(), clock: () => 1000 });
+  const pending = await executor.run(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 });
+  assert.equal(pending.status, 'awaiting-approval');
+  assert.equal(calls.at(-1).id, 'quote');
+  const confirmed = await executor.run(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 }, { approve: async () => true });
+  assert.equal(confirmed.status, 'confirmed');
+  assert.equal(calls.at(-1).id, 'request');
+  await assert.rejects(() => executor.run(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: '40' }), /invalid browser input/);
+  const pageCalls = [];
+  const adapter = new BrowserAdapter({ allowedOrigins: ['https://m.uber.com'], page: { url: () => 'https://m.uber.com/looking', goto: async (url) => pageCalls.push(['goto', url]), fill: async (selector, value) => pageCalls.push(['fill', selector, value]), selectOption: async (selector, value) => pageCalls.push(['select', selector, value]), textContent: async () => '$24', click: async (selector) => pageCalls.push(['click', selector]) } });
+  const adapterExecutor = new BrowserRecipeExecutor({ browser: adapter, policy: new PolicyEngine(), clock: () => 1000 });
+  const adapterReceipt = await adapterExecutor.run(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 }, { approve: async () => true });
+  assert.equal(adapterReceipt.status, 'confirmed');
+  assert.equal(adapterReceipt.steps.find((step) => step.id === 'fare-check').status, 'completed');
+  const quoteReceipt = await adapterExecutor.run(uberCabQuote, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 }, { approve: async () => true });
+  assert.equal(quoteReceipt.status, 'confirmed');
+  assert.equal(quoteReceipt.steps.some((step) => step.id === 'request'), false);
+  await assert.rejects(() => adapterExecutor.run(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 10 }, { approve: async () => true }), /assertion failed/);
+  adapter.page.url = () => 'https://evil.example/changed';
+  await assert.rejects(() => adapter.perform({ kind: 'click', target: 'requestRide' }), /outside the recipe origin/);
+  assert.throws(() => adapter.assertAllowed('https://evil.example/'), /outside the recipe origin/);
+  console.log('browser recipe tests passed');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

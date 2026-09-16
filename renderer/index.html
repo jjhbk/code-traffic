@@ -10,7 +10,6 @@
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css?v=3">
   </head>
   <body>
-    <div id="wsl-cursor" aria-hidden="true"></div>
     <div class="app-chrome">
       <div class="chrome-brand"><img src="../branding/signal-box-loop-mark.png" alt=""><span>Signal Box</span></div>
       <div class="chrome-drag-region"></div>
@@ -35,10 +34,16 @@
             </select>
             <button id="clear-all" class="clear-all" type="button">Clear all</button>
             <button id="telegram-settings" type="button">Telegram settings</button>
-            <button id="gmail-settings" type="button">Gmail settings</button>
+            <button id="model-settings" type="button">AI settings</button>
+            <button id="activity-toggle" type="button">Activity</button>
+            <button id="graph-toggle" type="button">Task graph</button>
+            <button id="gmail-settings" type="button">Service connections</button>
             <button id="mail-toggle" type="button">Mail</button>
+            <button id="calendar-toggle" type="button">Calendar</button>
+            <button id="drive-toggle" type="button">Drive</button>
             <button id="tasks-toggle" type="button">Tasks</button>
             <button id="digest-settings" type="button">Digest settings</button>
+            <button id="browser-extension-settings" type="button">Set up browser access</button>
             <button id="new-session" class="new-session" type="button">+ New session</button>
           </div>
       </header>
@@ -46,14 +51,47 @@
         <div class="setup-heading"><div><p class="section-kicker">SETUP CENTER</p><h2>Make Signal Box useful</h2><p>Connect the services you want monitored and notified.</p></div><span class="setup-count" id="setup-count"></span></div>
         <div id="setup-list" class="setup-list"></div>
       </section>
+      <section id="activity-view" class="tasks-view activity-view" hidden>
+        <div class="tasks-heading"><div><h2>Assistant activity</h2><p class="field-hint">What Signal Box has recently ingested, decided, sent, or executed.</p></div><button id="activity-refresh" type="button">Refresh</button></div>
+        <div id="activity-list" class="activity-list" aria-live="polite"></div>
+      </section>
       <section id="board" class="board" aria-live="polite"></section>
       <section id="tasks-view" class="tasks-view" hidden>
         <div class="tasks-heading"><h2>Tasks</h2><button id="tasks-refresh" type="button">Refresh</button></div>
         <div id="tasks-list" class="tasks-list" aria-live="polite"></div>
       </section>
+      <section id="graph-view" class="tasks-view graph-view" hidden>
+        <div class="tasks-heading"><div><h2>Task graph</h2><p class="field-hint">Tasks connected to the source observations that created them.</p></div><button id="graph-refresh" type="button">Refresh</button></div>
+        <div id="graph-empty" class="tasks-empty" hidden>No task evidence is stored yet.</div>
+        <svg id="task-graph" class="task-graph" role="img" aria-label="Task and evidence graph" viewBox="0 0 900 500" preserveAspectRatio="xMidYMin meet"></svg>
+      </section>
       <section id="mail-view" class="tasks-view" hidden>
         <div class="tasks-heading"><h2>Gmail messages</h2><button id="mail-refresh" type="button">Refresh</button></div>
         <div id="mail-list" class="tasks-list" aria-live="polite"></div>
+      </section>
+      <section id="calendar-view" class="tasks-view" hidden>
+        <div class="tasks-heading"><h2>Calendar</h2><div><button id="calendar-sync" type="button">Sync now</button><button id="calendar-refresh" type="button">Refresh</button></div></div>
+        <div id="calendar-list" class="tasks-list" aria-live="polite"></div>
+      </section>
+      <div id="calendar-edit-modal" class="modal-backdrop" hidden>
+        <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-edit-title">
+          <h2 id="calendar-edit-title">Edit calendar event</h2>
+          <p id="calendar-edit-status">Review the changes before saving them to Google Calendar.</p>
+          <form id="calendar-edit-form">
+            <input id="calendar-edit-id" type="hidden"><input id="calendar-edit-etag" type="hidden">
+            <label for="calendar-edit-summary">Title</label><input id="calendar-edit-summary" type="text" required>
+            <label for="calendar-edit-start">Start</label><input id="calendar-edit-start" type="datetime-local" required>
+            <label for="calendar-edit-end">End</label><input id="calendar-edit-end" type="datetime-local" required>
+            <label for="calendar-edit-location">Location</label><input id="calendar-edit-location" type="text">
+            <label for="calendar-edit-description">Description</label><textarea id="calendar-edit-description" rows="4"></textarea>
+            <p id="calendar-edit-error" class="settings-error" hidden></p>
+            <div class="settings-actions"><button id="close-calendar-edit" type="button">Cancel</button><button class="primary-action" type="submit">Review and save</button></div>
+          </form>
+        </section>
+      </div>
+      <section id="drive-view" class="tasks-view" hidden>
+        <div class="tasks-heading"><h2>Drive files</h2><div><button id="drive-sync" type="button">Sync now</button><button id="drive-refresh" type="button">Refresh</button></div></div>
+        <div id="drive-list" class="tasks-list" aria-live="polite"></div>
       </section>
       <section id="terminal-view" class="terminal-view" hidden>
         <div class="terminal-bar">
@@ -65,6 +103,25 @@
       </section>
       <p id="error" class="error" role="alert" hidden></p>
     </main>
+    <div id="model-modal" class="modal-backdrop" hidden>
+      <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="model-title">
+        <h2 id="model-title">AI model settings</h2>
+        <p>Choose how Signal Box ranks tasks. Local processing handles privacy; frontier ranking receives only pseudonymized task data.</p>
+        <form id="model-form">
+          <label for="model-mode">Ranking mode</label>
+          <select id="model-mode" class="settings-select"><option value="local">Local Ollama</option><option value="frontier">Frontier model</option><option value="off">Deterministic only</option></select>
+          <label for="local-model">Local Ollama model</label><input id="local-model" type="text" placeholder="qwen3:1.7b" required>
+          <label for="frontier-model">Frontier model</label><input id="frontier-model" type="text" placeholder="gpt-4o-mini" required>
+          <label for="frontier-base-url">Frontier API base URL</label><input id="frontier-base-url" type="url" placeholder="https://api.openai.com/v1">
+          <label for="frontier-api-key">Frontier API key</label><input id="frontier-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved key">
+          <p id="model-key-status" class="field-hint"></p><p id="model-error" class="settings-error" hidden></p>
+          <h3 class="settings-subheading">Runtime diagnostics</h3>
+          <p id="model-diagnostics" class="digest-stats">No model call has been observed yet.</p>
+          <button id="probe-local-model" type="button">Run local privacy test</button>
+          <div class="settings-actions"><button id="close-model" type="button">Cancel</button><button class="primary-action" type="submit">Save AI settings</button></div>
+        </form>
+      </section>
+    </div>
     <div id="settings-modal" class="modal-backdrop" hidden>
       <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <h2 id="settings-title">Connect Signal Box</h2>
@@ -85,8 +142,9 @@
     </div>
     <div id="gmail-modal" class="modal-backdrop" hidden>
       <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="gmail-title">
-        <h2 id="gmail-title">Gmail connection</h2>
-        <p id="gmail-status">Gmail is not connected. Signal Box requests read access plus permission to send reviewed replies.</p>
+        <h2 id="gmail-title">Google service connection</h2>
+        <p id="gmail-status">Gmail is not connected. Signal Box requests read access, reviewed reply access, and Calendar event access for approved edits.</p>
+        <p id="gmail-credential-status" class="field-hint" aria-live="polite">Client secret status is unavailable until secure storage is initialized.</p>
         <form id="gmail-form">
           <div class="connect-explainer"><span class="connect-icon">G</span><div><strong>Secure browser connection</strong><p>Google will open in your browser. Signal Box never asks you to paste keys or passwords here.</p></div></div>
           <label for="gmail-client-id">Your Google Desktop client ID</label>
@@ -116,6 +174,47 @@
         </form>
       </section>
     </div>
+    <div id="browser-modal" class="modal-backdrop" hidden>
+      <section class="session-dialog settings-dialog browser-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="browser-title">
+        <h2 id="browser-title">Set up browser access</h2>
+        <p id="browser-setup-status">The bridge lets Signal Box work inside your logged-in browser session.</p>
+        <p id="browser-connection-status" class="field-hint">Browser status: checking…</p>
+        <ol class="browser-setup-steps">
+          <li>Open <strong>chrome://extensions</strong> in Chrome and turn on <strong>Developer mode</strong>.</li>
+          <li>Click <strong>Load unpacked</strong>, choose the copied folder, and click <strong>Select folder</strong>.</li>
+        </ol>
+        <div class="copy-field"><code id="browser-extension-path"></code><button id="copy-browser-path" type="button">Copy folder path</button></div>
+        <ol class="browser-setup-steps" start="3">
+          <li>Open the new extension's <strong>Extension options</strong> page.</li>
+          <li>Paste the pairing token and enter this browser session ID:</li>
+        </ol>
+        <div class="copy-field"><code id="browser-session-id"></code><button id="copy-browser-session" type="button">Copy ID</button></div>
+        <p class="field-hint">Signal Box host: <code id="browser-host-url"></code>. Enter this URL in the extension options if you changed the default port.</p>
+        <p class="field-hint">The path is ready for Chrome. The token is copied when this dialog opens and is used only to authenticate with Signal Box on this computer.</p>
+        <details class="setup-guide browser-test-guide">
+          <summary>Test a browser action</summary>
+          <p>Use this controlled test to verify pairing, approval, and browser execution. It opens the mobile Uber flow and stops if the page does not match the expected controls.</p>
+          <form id="browser-test-form">
+            <label for="browser-test-pickup">Pickup</label><input id="browser-test-pickup" type="text" value="Home" required>
+            <label for="browser-test-destination">Destination</label><input id="browser-test-destination" type="text" value="Airport" required>
+            <label for="browser-test-ride">Ride type</label><input id="browser-test-ride" type="text" value="UberX" required>
+            <label for="browser-test-max-fare">Maximum fare</label><input id="browser-test-max-fare" type="number" min="0" step="0.01" value="40" required>
+            <label class="check-row"><input id="browser-test-preflight" type="checkbox"> Check controls and fare only (do not request a ride)</label>
+            <div class="settings-actions"><button class="primary-action" type="submit">Queue test action</button></div>
+          </form>
+          <p id="browser-test-status" class="field-hint" aria-live="polite"></p>
+          <div id="browser-test-actions" class="settings-actions" hidden>
+            <button id="approve-browser-test" class="primary-action" type="button">Approve and run</button>
+            <button id="deny-browser-test" type="button">Cancel action</button>
+          </div>
+        </details>
+        <div class="settings-actions">
+          <button id="open-browser-manager" type="button">Open Chrome extensions</button>
+          <button id="copy-browser-token" type="button">Copy pairing token</button>
+          <button id="close-browser-setup" class="primary-action" type="button">Done</button>
+        </div>
+      </section>
+    </div>
     <div id="digest-modal" class="modal-backdrop" hidden>
       <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="digest-title">
         <h2 id="digest-title">Digest settings</h2>
@@ -131,7 +230,7 @@
           <input id="digest-cap" type="number" min="1" max="50" step="1">
           <h3 class="settings-subheading">Suppressions</h3>
           <div id="suppression-list" class="suppression-list"></div>
-          <h3 class="settings-subheading">Pilot metrics</h3>
+          <h3 class="settings-subheading">Digest activity</h3>
           <p id="digest-stats" class="digest-stats"></p>
           <h3 class="settings-subheading">Your data</h3>
           <p class="digest-stats">Exports include stored app data but never OS-protected credentials. Deleting Gmail data removes local messages, tasks, and digest history.</p>

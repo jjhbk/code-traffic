@@ -89,11 +89,20 @@ jobs:
       - name: Validate packaging assets
         run: npm run check:packaging
 
+      - name: Validate browser extension
+        run: npm run check:browser-extension
+
+      - name: Run regression suite
+        run: npm test
+
       - name: Validate signing configuration
         run: npm run check:signing
 
       - name: Build distributables
         run: npm run make -- --arch=${{ matrix.arch }}
+
+      - name: Validate packaged resources
+        run: npm run check:packaged-resources
 
       - name: Label artifacts with architecture
         run: node scripts/label-release-assets.js ${{ matrix.arch }}

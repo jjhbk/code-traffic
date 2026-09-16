@@ -24,6 +24,10 @@ class ProtectedCredentialStore {
     return this.safeStorage.decryptString(Buffer.from(encoded, 'base64'));
   }
 
+  has(name) {
+    return Boolean(name && this.read()[name]);
+  }
+
   delete(name) {
     const records = this.read();
     if (!(name in records)) return false;

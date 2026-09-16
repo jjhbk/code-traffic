@@ -6,12 +6,15 @@ Extend the existing application in place around the core idea in `signal-box-ove
 
 ### Current implementation status
 
-- **Correctness / hardening:** liveness, process-exit handling, authenticated legacy hooks, protected credentials, durable sessions, verified delivery states, and an authenticated generalized `/event` ingestion endpoint are implemented. Fully verified Claude submission remains incomplete.
-- **Vertical slice:** Gmail OAuth, incremental sync, normalization, task extraction, evidence, corrections, Telegram task controls, scheduled digests, and reviewed Gmail replies are implemented. Calendar, files, and browser recipes are not yet connected.
-- **Privacy/models:** deterministic pseudonymization and stable AES-256-GCM entity storage are implemented, with the vault key held in OS-protected storage. A schema-constrained local/frontier model router now performs local entity recognition before ranking pseudonymized tasks and falls back to deterministic ranking. An isolated remote-model process and measured entity-recognition evaluation remain incomplete.
-- **Protocol / policy / receipts:** durable approval requests, expiry, single resolution, execution attempts, audit records, generalized event envelopes, capability registration, unknown-capability rejection, and terminal desk-only restrictions are implemented. Full policy coverage for future browser/connector actions and generalized non-CLI actor routing still need completion.
-- **Pilot:** digest reporting, export, deletion, caps, quiet hours, and feedback are implemented. The seven-day real-user quality gate has not been observed and cannot be claimed from unit tests.
-- **Reach / acting:** one reviewed Gmail reply is implemented. Calendar, files, browser recipes, and broader host-owned actions remain future work after the pilot.
+- **Correctness / hardening:** liveness, process-exit handling, authenticated legacy hooks, protected credentials, durable sessions, bounded delivery tracking, verified delivery states, and an authenticated generalized `/event` ingestion endpoint are implemented. Claude `UserPromptSubmit` hooks now provide the delivery acknowledgement; Codex queue and generic PTY delivery move to visible `unknown` after the acknowledgement window when no matching agent event arrives.
+- **Vertical slice:** Gmail OAuth, incremental sync, normalization, spam/bulk classification, task extraction, evidence, corrections, Telegram task controls, scheduled digests, reviewed Gmail replies, editable Google Calendar events, selected Drive observations, and browser recipe execution are implemented.
+- **Privacy/models:** deterministic pseudonymization and stable AES-256-GCM entity storage are implemented, with the vault key held in OS-protected storage. A schema-constrained local/frontier model router now performs local entity recognition before ranking pseudonymized tasks and falls back to deterministic ranking; frontier ranking is disabled when the local privacy model is unavailable. Bounded model health checks report unavailable local inference instead of failing onboarding. An isolated frontier-model gateway is implemented.
+- **Protocol / policy / receipts:** durable approval requests, expiry, single resolution, execution attempts, redacted lifecycle audit records, generalized event envelopes, capability registration, unknown-capability rejection, terminal desk-only restrictions, and browser action approval-to-receipt execution are implemented. Browser operations recheck the active page origin before every operation, in both the native and extension adapters. Future connector actions and generalized non-CLI actor routing remain outside the supported single-user surface.
+- **Reach / acting:** one reviewed Gmail reply, editable Calendar events with ETag-checked approvals, selected Drive file observations, and a browser recipe executor example are implemented. Broader host-owned actions remain future work.
+- **Onboarding / recovery:** the setup center reports missing or removed Claude/Codex lifecycle hooks and gives a restart/new-session recovery path.
+- The setup center also explains when frontier ranking is paused because the local privacy model is unavailable, and reports WSL GPU access failures separately from Ollama availability.
+- **Observability:** AI settings now expose model call counters, the last ranking source/result, the last privacy boundary, and a local synthetic redaction probe. The tasks screen includes an evidence graph linking tasks to their source observations. Embedded Claude sessions use a focused command allowlist; embedded Codex sessions use Codex's global no-prompt policy because Codex has no per-command allowlist. Browser pairing carries the active loopback host URL, so custom ports work without editing extension code.
+- The Activity view exposes privacy-safe recent ingestion, model, approval, execution, notification, and connector events, with live refresh while open. This provides an in-app verification path for proactive behavior instead of relying on console output.
 - **Phase G:** payments and spend authority are excluded from this product cycle.
 - **Phase H:** multi-user functionality is excluded; this is a single-user, single-machine application.
 
@@ -21,12 +24,12 @@ This plan treats `signal-box-overview.md` and `signal-box-technical-design.md` a
 
 - Existing agent board and Telegram control, with liveness detection and verified delivery status.
 - Authenticated local API, protected credentials, durable approvals and audit records.
-- Official API connectors for one personal Gmail account; calendar and file connectors follow the same contract when the pilot justifies them.
+- Official API connectors for one personal Google account; Gmail, Calendar, and selected Drive files share one observation contract.
 - Local observations, privacy gateway, task extraction with provenance and corrections.
 - A tasks view, `/today`, and digest buttons for done, snooze, and not useful.
 - Single user, single machine; Telegram optional.
 
-Defer standing spend authority, payments, and multi-user access permanently for this cycle. Calendar, files, and browser recipes are product extensions after the Gmail vertical slice meets its precision and usefulness gates. Gmail is the current provider; substitute the user's primary mail provider before implementation if needed.
+Defer standing spend authority, payments, and multi-user access permanently for this cycle. Gmail, Calendar, selected Drive files, and browser recipes are the supported single-user integration surface. Gmail remains the primary provider.
 
 ## 1. Starting point in this repository
 
@@ -194,7 +197,7 @@ Effort ranges below assume one experienced full-time engineer familiar with this
 - Re-ingestion and re-extraction preserve user decisions and do not resurrect dismissed tasks.
 - Proposed release gate: at least 90% precision on proactively eligible tasks in a labeled, representative sample. Report sample size, missed commitments, and error classes alongside precision; do not treat model confidence as a measured probability.
 
-### Phase E — Digest and first release · 1–2 weeks plus a 7-day pilot
+### Phase E — Digest and first release · 1–2 weeks
 
 **Depends on:** D.
 
@@ -207,7 +210,7 @@ Effort ranges below assume one experienced full-time engineer familiar with this
 - Add `/today` and task buttons using stable IDs, not mutable list indexes. Apply suppression at the class/counterparty level with an undo/settings view.
 - Provide notification content settings, connector status, local-only model mode, pause, export, deletion, and recovery guidance.
 
-**Exit tests / pilot gate**
+**Exit checks**
 
 - Seven days of digests without cap or quiet-hour violations, including restarts, daylight-saving fixtures, and failed sends.
 - At least 90% of surfaced commitments judged correct as an initial target; separately record how many digest items were useful.
@@ -218,14 +221,14 @@ Effort ranges below assume one experienced full-time engineer familiar with this
 
 ### Phase F — Reach and one useful action · approximately 3–5 additional weeks
 
-**Depends on:** successful E pilot; executor foundation from B.
+**Depends on:** the durable approval and executor foundation from B.
 
 - Add calendar first, then selected files, using the same observation contract and explicit read scopes.
+- **Channel expansion priority after the current vertical slice:** GitHub issues and pull requests, Linear or Jira assignments, Slack or Microsoft Teams mentions, and a local browser notification adapter. These channels add actionable obligations and status changes; each should use the same normalized observation contract and task provenance. Discord and Notion are useful follow-ons for personal communities and notes, while WhatsApp should wait for a clearly supported official account integration.
 - Implement one host-owned write capability, such as sending a reviewed reply through an official API. Request write permission only when the user enables it.
 - Show exact destination, content, attachments, and consequences before approval. Bind them to the grant and verify preconditions at dispatch.
 - Track execution as prepared → authorized → dispatched → confirmed/failed/unknown. Use provider idempotency where available; otherwise reconcile before permitting another attempt.
-- Add browser recipes only after this official-API action works. The referenced Relay document is not present in the current file listing; obtain or write that specification before estimating its full scope.
-- Begin with one manually reviewed read-only recipe, explicit allowed endpoints/parameters, response validation, and a canary. A recipe's self-declared effects class is not sufficient authorization.
+- Browser recipe primitives, an allowlisted browser adapter, a Manifest V3 bridge, authenticated loopback request/result transport, renderer-guided extension installation and pairing, a persistent single-user browser session, and Telegram approval support approved Uber-style booking and read-only quote preflight flows with explicit inputs, preconditions, effect class, approval binding, and receipts. Bridge requests are single-claim, expose a heartbeat status, and expire with executor rejection. The setup UI can validate live controls and fare without reaching the committing booking step. Live provider markup validation is an external release check requiring a user-run browser session, rather than additional implementation scope.
 - For recipe writes, validate state immediately before the first committing request. Detect expired sessions, challenges, drift, and concurrent account changes; stop for manual handling.
 
 **Exit:** one real task is completed after one approval; changed parameters require a new approval; a timed-out commit remains unknown until reconciled and is not automatically repeated. Retry reversible operations only when their retry safety is explicitly established.
@@ -245,7 +248,11 @@ Multi-user identity, role-scoped permissions, approval assignment, shared state,
 - Test transaction races and process interruption at approval resolution, budget reservation, dispatch, and receipt persistence.
 - Use sanitized mail fixtures covering promises, requests, quoted replies, newsletters, ambiguous dates, alias collisions, and hostile instructions.
 - Inspect captured outbound model payloads and Telegram payloads separately; they have different disclosure policies.
-- Use an opt-in read-only account for connector integration tests. Initial action tests use fake executors; controlled live actions come only after the policy/recovery suite passes.
+- Use an opt-in read-only account for connector integration tests. Initial action tests use fake executors and authenticated loopback bridge tests; controlled live actions come only after the policy/recovery suite passes and require a browser-capable validation environment.
+- Run the cross-platform `npm test` runner, packaging checks, signing checks, and browser-extension checks in the tagged release workflow before building each OS/architecture artifact.
+- Verify the packaged resource list includes the browser extension and agent notification hook before building each artifact.
+- The release workflow runs a post-build packaged-resource check for both files.
+- Linux x64 packaging has been exercised locally; the packaged application, `.deb`, and `.rpm` resources contain `browser-extension/manifest.json` and `codex-notify.js`, and the ASAR contains the browser, model, store, main, preload, and renderer modules. A GUI startup probe is blocked in this WSL sandbox because Chromium sandbox initialization is denied; Windows and macOS packaging still require their native runners.
 - Test packaged secret storage, SQLite, PTY operation, and upgrades on supported operating systems. If only Linux/WSL is validated initially, label the new features accordingly.
 
 ## 6. Suggested first pull requests
@@ -257,18 +264,22 @@ Multi-user identity, role-scoped permissions, approval assignment, shared state,
 5. **Read-only Gmail connector:** normalized observations, sent/incoming support, checkpointed sync, no remote extraction yet.
 6. **Privacy gateway and evaluation corpus:** stable vault, detectors, offset mapping, outbound inspection, local-only behavior.
 7. **Tasks and corrections:** extraction, reconciliation, evidence UI, user-edit preservation.
-8. **Digest and pilot:** deterministic ranking, persisted budgets, Telegram task actions, quality reporting.
+8. **Digest and release hardening:** deterministic ranking, persisted budgets, Telegram task actions, and delivery recovery.
 
 ## 7. Effort and decisions
 
-Budget roughly **10–16 engineering weeks plus the 7-day pilot** for A–E with one experienced engineer, before contingency. Provider onboarding, privacy-model packaging, cross-platform secret storage, and extraction quality are the largest uncertainties. A local-only or synthetic-data prototype can demonstrate the flow sooner, but does not meet the release gates above.
+Budget roughly **10–16 engineering weeks** for A–E with one experienced engineer, before contingency. Provider onboarding, privacy-model packaging, cross-platform secret storage, extraction quality, and browser adapter drift are the largest uncertainties.
 
 Before each dependent implementation begins, settle:
 
-- **Mail provider and launch platform:** assume Gmail and a Linux/WSL pilot; preserve existing platform compatibility.
+- **Mail provider and launch platform:** assume Gmail and Linux/WSL initially; preserve existing platform compatibility.
 - **Cloud processing/content settings:** explicitly enable remote model use and separately choose what Telegram may carry.
 - **Retention and recovery:** choose observation lifetime and vault backup policy; losing the vault compromises stable identity and rehydration.
 - **Approval restrictions:** own a written default policy, including shell control and destructive database operations.
 - **Personal tool or distributed product:** provider verification, packaging/support, onboarding, and retention requirements affect product scope and estimates.
 
-The remaining release work is the Phase E pilot: collect a representative labeled sample, run the evaluator, and observe seven days of digest delivery without cap, quiet-hour, duplicate, or approval-recovery violations. After that, only the most useful Phase F connector should be added. Payments and multi-user access remain out of scope.
+The remaining work is live validation of the reviewed browser adapter against a controlled account, expansion of connector coverage, and verification of action receipts under provider drift and interruption. Payments and multi-user access remain out of scope.
+
+## 8. Frontier model use
+
+The frontier model is an optional reasoning layer, not an execution authority. Signal Box should use it for pseudonymized task ranking, deadline and blocker conflict analysis, digest wording, and candidate deduplication after local normalization. Local models remain responsible for entity recognition and privacy preparation; deterministic rules remain the fallback. Raw message bodies, credentials, and browser control data must never be sent to the frontier process. Any frontier output must be schema-validated and can only propose ranking or explanation changes.

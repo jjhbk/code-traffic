@@ -98,12 +98,12 @@ Signal Box is a working application, not a proposal. Being honest about the line
 | Read-only local history API | Built |
 | One-line install, six platform/arch targets | Built |
 | Staleness detection for silent agent loops | Built; per-session tuning remains open |
-| Event server authentication; keychain secret storage | Legacy hook authentication and OS-protected credentials built; generalized `/event` remains |
-| Ingest connectors (mail, calendar, files) | Gmail built; calendar and files remain |
-| Privacy vault and pseudonymization | Deterministic detectors and persistent encrypted vault built; local entity recognition remains |
-| Task graph, prioritizer, digest | Deterministic Gmail task graph and scheduled digest built; frontier ranking remains optional/future |
-| Browser recipes; standing authority; payments | Not built |
-| Audit log | Approval, execution, and notification audit records built; full append-only event audit remains |
+| Event server authentication; keychain secret storage | Authenticated hooks and generalized `/event` built; OS-protected credentials built |
+| Ingest connectors (mail, calendar, files) | Gmail with spam/bulk detection, editable Calendar, and selected Drive files built |
+| Privacy vault and pseudonymization | Deterministic detectors, persistent encrypted vault, and local entity recognition built |
+| Task graph, prioritizer, digest | Deterministic task graph, scheduled digest, and optional local/frontier ranking built; frontier ranking waits for local privacy processing |
+| Browser recipe primitives; standing authority; payments | Recipe validation/execution primitives and an allowlisted extension skeleton built with an Uber-style approval example; standing authority and payments excluded |
+| Audit log | Redacted append-only lifecycle records cover events, connectors, approvals, execution, notifications, and browser actions |
 
 The bolded row is load-bearing. A question with its real options, delivered to a phone, answered with one tap, returned to the right session — that is the primitive everything else in this document plugs into, and it works today.
 

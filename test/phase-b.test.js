@@ -20,6 +20,9 @@ assert.equal(normalizeIngestEvent({ source: 'fake', actor_id: 'actor-1', kind: '
 assert.throws(() => normalizeIngestEvent({ source: 'fake', actor_id: 'actor-1', kind: 'unknown' }), /Unsupported ingest/);
 const policy = new PolicyEngine();
 assert.deepEqual(policy.evaluate({ capability: 'terminal.exec' }, { surfaces: ['desktop', 'telegram'] }).surfaces, ['desktop']);
+assert.equal(policy.evaluate({ capability: 'gmail.read' }).requiresApproval, false);
+assert.equal(policy.evaluate({ capability: 'calendar.read' }).effects, 'read');
+assert.equal(policy.evaluate({ capability: 'drive.read' }).effects, 'read');
 assert.throws(() => policy.evaluate({ capability: 'missing' }), /Unknown capabilities/);
 assert.equal(store.ingestEvent({ eventId: 'e1', adapterId: 'fake', producerEpoch: 'p1', sequence: 1, type: 'working', payload: { tile: 'one' } }).accepted, true);
 assert.equal(store.ingestEvent({ eventId: 'e1', adapterId: 'fake', producerEpoch: 'p1', sequence: 1, type: 'working', payload: { tile: 'one' } }).duplicate, true);

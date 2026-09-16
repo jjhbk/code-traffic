@@ -31,7 +31,7 @@ function telegramErrorText(error) {
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
@@ -40,11 +40,13 @@ class TelegramControl {
     this.getHistory = getHistory;
     this.ensureSession = ensureSession;
     this.writeSession = writeSession;
+    this.markWorking = markWorking;
     this.executeTerminal = executeTerminal;
     this.interruptTerminal = interruptTerminal;
     this.sendPrompt = sendPrompt;
     this.approvalService = approvalService;
     this.approveMailReply = approveMailReply;
+    this.approveBrowserAction = approveBrowserAction;
     this.submitDelayMs = submitDelayMs;
     this.approvalRetryMs = approvalRetryMs;
     this.fetch = fetchImpl;
@@ -135,6 +137,15 @@ class TelegramControl {
         { text: 'Cancel', callback_data: deny },
       ]] },
     });
+    return true;
+  }
+
+  async sendBrowserApproval(request) {
+    if (!this.enabled || !this.configured || !request?.action) return false;
+    const action = request.action;
+    const approve = this.addAction({ type: 'browser-approval', requestId: request.request_id || request.requestId, optionId: 'allow', sessionId: action.sessionId });
+    const deny = this.addAction({ type: 'browser-denial', requestId: request.request_id || request.requestId, optionId: 'deny' });
+    await this.send(`🌐 Review browser action\n\nRecipe: ${action.recipeId}\nSite: ${action.origin}\nPickup: ${action.inputs?.pickup}\nDestination: ${action.inputs?.destination}\nRide: ${action.inputs?.rideType}\nMaximum fare: ${action.inputs?.maxFare}\n\n${action.consequences}`, { reply_markup: { inline_keyboard: [[{ text: 'Run once', callback_data: approve }, { text: 'Cancel', callback_data: deny }]] } });
     return true;
   }
 
@@ -339,6 +350,7 @@ class TelegramControl {
           this.actions.delete(query.data);
           throw new Error('This approval has expired. Wait for the current question.');
         }
+        this.waitForApprovalResolution(action.tile);
         if (this.approvalService && action.requestId) {
           this.approvalService.decide(action.requestId, action.optionId, {
             principal: this.chatId,
@@ -405,6 +417,16 @@ class TelegramControl {
         if (!this.approvalService) throw new Error('Reply controls are unavailable.');
         this.approvalService.decide(action.requestId, 'deny', { principal: 'signal-box-user', surface: 'telegram' });
         await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Reply cancelled.' });
+      } else if (action.type === 'browser-approval') {
+        if (!this.approveBrowserAction) throw new Error('Browser action controls are unavailable.');
+        if (!this.approvalService) throw new Error('Browser action controls are unavailable.');
+        this.approvalService.decide(action.requestId, 'allow', { principal: 'signal-box-user', surface: 'telegram' });
+        await this.approveBrowserAction(action.requestId, action.sessionId, this.chatId, 'telegram');
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Browser action started.' });
+      } else if (action.type === 'browser-denial') {
+        if (!this.approvalService) throw new Error('Browser action controls are unavailable.');
+        this.approvalService.decide(action.requestId, 'deny', { principal: 'signal-box-user', surface: 'telegram' });
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Browser action cancelled.' });
       } else if (action.type === 'select') {
         const session = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
         if (!session) throw new Error('That session is no longer available.');
@@ -607,6 +629,12 @@ class TelegramControl {
     } catch (error) {
       console.error(`[telegram] could not read pending question: ${error.message}`);
     }
+    // Agent hooks can announce approval before the question payload is flushed.
+    // Wait briefly rather than sending an amber message with no actionable options.
+    if (!questions.length) {
+      this.scheduleApprovalRetry(tile);
+      return;
+    }
 
     const approvalSignature = JSON.stringify(questions);
     if (this.approvalNotifications.get(tile) === approvalSignature
@@ -696,6 +724,21 @@ class TelegramControl {
       console.error(`[telegram] notification failed: ${error.message}`);
     });
   }
+
+  async waitForApprovalResolution(tile) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await delay(this.submitDelayMs);
+      const session = this.listSessions().find((item) => (item.tile || item.key) === tile);
+      if (!session || session.state !== 'approval') return;
+      let pending = [];
+      try { pending = this.getHistory?.(session)?.pendingQuestions || []; } catch (_) { pending = []; }
+      if (!pending.length) {
+        this.markWorking?.(session);
+        return;
+      }
+    }
+  }
+
 }
 
 module.exports = { TelegramControl, parseCommand, sessionListText };

@@ -205,6 +205,7 @@ class SqliteStore {
       VALUES (?, ?, ?, ?) ON CONFLICT(adapter_id) DO UPDATE SET producer_epoch = excluded.producer_epoch`).run(adapterId, adapterId, producerEpoch, this.clock());
     this.db.prepare(`INSERT INTO events(event_id, adapter_id, producer_epoch, sequence, event_type, payload_json, accepted_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`).run(eventId, adapterId, producerEpoch, sequence, type, JSON.stringify(payload), this.clock());
+    this.audit('event-ingested', null, null, { eventId, adapterId, type, sequence });
     return { accepted: true, duplicate: false, eventId };
   }
 
@@ -288,13 +289,24 @@ class SqliteStore {
     return row ? { ...row, details: JSON.parse(row.detailsJson) } : null;
   }
 
+  getExecutionAttempts(requestId) {
+    return this.db.prepare('SELECT attempt_id AS attemptId, request_id AS requestId, status, details_json AS detailsJson, created_at AS createdAt, updated_at AS updatedAt FROM execution_attempts WHERE request_id = ? ORDER BY created_at, attempt_id')
+      .all(requestId).map((row) => ({ ...row, details: JSON.parse(row.detailsJson) }));
+  }
+
   recordReceipt({ receiptId = crypto.randomUUID(), attemptId, receipt }) {
     if (!attemptId || !receipt || typeof receipt !== 'object') throw new Error('Invalid execution receipt.');
     const attempt = this.db.prepare('SELECT attempt_id FROM execution_attempts WHERE attempt_id = ?').get(attemptId);
     if (!attempt) throw new Error('Execution attempt not found.');
     this.db.prepare('INSERT INTO receipts(receipt_id, attempt_id, receipt_json, created_at) VALUES (?, ?, ?, ?)')
       .run(receiptId, attemptId, JSON.stringify(receipt), this.clock());
+    this.audit('execution-receipt', null, null, { receiptId, attemptId, status: receipt.status || null });
     return { receiptId, attemptId };
+  }
+
+  getReceipt(receiptId) {
+    const row = this.db.prepare('SELECT receipt_id AS receiptId, attempt_id AS attemptId, receipt_json AS receiptJson, created_at AS createdAt FROM receipts WHERE receipt_id = ?').get(receiptId);
+    return row ? { ...row, receipt: JSON.parse(row.receiptJson) } : null;
   }
 
   getConnectorCursor(adapterId) {
@@ -312,6 +324,7 @@ class SqliteStore {
     const result = this.db.prepare(`INSERT INTO observations(observation_id, adapter_id, message_id, thread_id, observation_json, observed_at)
       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(observation_id) DO NOTHING`)
       .run(observation.observationId, adapterId, observation.messageId, observation.threadId, JSON.stringify(observation), this.clock());
+    if (Number(result.changes) === 1) this.audit('observation-saved', null, null, { observationId: observation.observationId, adapterId, messageId: observation.messageId });
     return Number(result.changes) === 1;
   }
 
@@ -326,6 +339,7 @@ class SqliteStore {
     this.db.prepare(`INSERT INTO connector_health(adapter_id, status, details_json, updated_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(adapter_id) DO UPDATE SET status = excluded.status, details_json = excluded.details_json, updated_at = excluded.updated_at`)
       .run(adapterId, status, JSON.stringify(details), this.clock());
+    this.audit('connector-health', null, null, { adapterId, status });
   }
 
   getConnectorHealth(adapterId) {
@@ -362,6 +376,29 @@ class SqliteStore {
       ? 'SELECT task_id AS taskId, task_json AS taskJson, status FROM tasks ORDER BY updated_at DESC'
       : `SELECT task_id AS taskId, task_json AS taskJson, status FROM tasks WHERE status NOT IN ('dismissed', 'done') ORDER BY updated_at DESC`).all();
     return rows.map((row) => ({ ...JSON.parse(row.taskJson), taskId: row.taskId, status: row.status }));
+  }
+
+  taskGraph({ includeDismissed = true } = {}) {
+    const tasks = this.listTasks({ includeDismissed });
+    const taskIds = new Set(tasks.map((task) => task.taskId));
+    const evidenceRows = this.db.prepare(`SELECT te.task_id AS taskId, te.observation_id AS observationId,
+      te.evidence_text AS evidenceText, o.observation_json AS observationJson
+      FROM task_evidence te JOIN observations o ON o.observation_id = te.observation_id`).all();
+    const nodes = tasks.map((task) => ({ id: `task:${task.taskId}`, type: 'task', label: task.summary || 'Untitled task', status: task.status, owner: task.owner || null, dueDate: task.dueDate || null }));
+    const edges = [];
+    const seenObservations = new Set();
+    for (const row of evidenceRows) {
+      if (!taskIds.has(row.taskId)) continue;
+      const observationId = `observation:${row.observationId}`;
+      if (!seenObservations.has(observationId)) {
+        let observation = {};
+        try { observation = JSON.parse(row.observationJson); } catch (_) {}
+        nodes.push({ id: observationId, type: 'observation', label: observation.subject || observation.title || observation.source || 'Source observation', source: observation.source || null });
+        seenObservations.add(observationId);
+      }
+      edges.push({ from: `task:${row.taskId}`, to: observationId, type: 'evidence', label: row.evidenceText || '' });
+    }
+    return { nodes, edges };
   }
 
   setTaskStatus(taskId, status, details = {}) {
@@ -420,6 +457,7 @@ class SqliteStore {
     this.db.prepare(`INSERT INTO notification_feedback(notification_id, useful, details_json, created_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(notification_id) DO UPDATE SET useful = excluded.useful, details_json = excluded.details_json, created_at = excluded.created_at`)
       .run(notificationId, useful ? 1 : 0, JSON.stringify(details), this.clock());
+    this.audit('notification-feedback', null, null, { notificationId, useful });
   }
 
   notificationStats() {
@@ -428,32 +466,6 @@ class SqliteStore {
     return {
       delivery: Object.fromEntries(delivery.map((row) => [row.status, Number(row.count)])),
       feedback: Object.fromEntries(feedback.map((row) => [row.useful ? 'useful' : 'notUseful', Number(row.count)])),
-    };
-  }
-
-  pilotReport({ days = 7, timeZone = 'UTC' } = {}) {
-    if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('Pilot duration must be between 1 and 90 days.');
-    const cutoff = this.clock() - days * 24 * 60 * 60 * 1000;
-    const rows = this.db.prepare(`SELECT o.notification_id AS notificationId, o.date_key AS dateKey, o.status,
-      f.useful AS useful FROM notification_outbox o LEFT JOIN notification_feedback f ON f.notification_id = o.notification_id
-      WHERE o.notification_class = 'digest' AND o.created_at >= ? ORDER BY o.created_at`).all(cutoff);
-    const observedDays = [...new Set(rows.map((row) => row.dateKey))].sort();
-    const sent = rows.filter((row) => row.status === 'sent').length;
-    const failed = rows.filter((row) => row.status === 'failed').length;
-    const unknown = rows.filter((row) => row.status === 'unknown' || row.status === 'sending').length;
-    const feedbackRows = rows.filter((row) => row.useful !== null && row.useful !== undefined);
-    const useful = feedbackRows.filter((row) => Number(row.useful) === 1).length;
-    const notUseful = feedbackRows.filter((row) => Number(row.useful) === 0).length;
-    return {
-      days,
-      timeZone,
-      observedDays,
-      digestCount: rows.length,
-      delivery: { sent, failed, unknown },
-      feedback: { useful, notUseful, responseCount: feedbackRows.length },
-      feedbackRate: rows.length ? feedbackRows.length / rows.length : 0,
-      usefulnessRate: feedbackRows.length ? useful / feedbackRows.length : null,
-      readyForReview: observedDays.length >= days && failed === 0 && unknown === 0,
     };
   }
 
@@ -548,6 +560,7 @@ class SqliteStore {
     const result = this.db.prepare('UPDATE notification_outbox SET status = ?, payload_json = json_set(payload_json, \'$.delivery\', json(?)) WHERE notification_id = ?')
       .run(status, JSON.stringify(details), notificationId);
     if (Number(result.changes) !== 1) throw new Error('Notification not found.');
+    this.audit(`notification-${status}`, null, null, { notificationId });
     return { notificationId, status, details };
   }
 
@@ -557,6 +570,11 @@ class SqliteStore {
     const options = this.db.prepare('SELECT option_id AS optionId, option_json AS optionJson FROM approval_options WHERE request_id = ?').all(requestId)
       .map((row) => ({ ...JSON.parse(row.optionJson), optionId: row.optionId }));
     return { ...request, action: JSON.parse(request.action_json), surfaces: JSON.parse(request.surfaces_json), options };
+  }
+
+  getDecision(requestId) {
+    const row = this.db.prepare('SELECT decision_id AS decisionId, request_id AS requestId, option_id AS optionId, principal, surface, decided_at AS decidedAt FROM decisions WHERE request_id = ?').get(requestId);
+    return row || null;
   }
 
   decide({ requestId, optionId, principal, surface }) {
@@ -591,6 +609,12 @@ class SqliteStore {
   audit(kind, requestId, actionDigest, details) {
     this.db.prepare('INSERT INTO audit_entries(kind, request_id, action_digest, details_json, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(kind, requestId, actionDigest, JSON.stringify(details), this.clock());
+  }
+
+  recentAudit(limit = 50) {
+    const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+    return this.db.prepare('SELECT audit_id AS auditId, kind, details_json AS detailsJson, created_at AS createdAt FROM audit_entries ORDER BY audit_id DESC LIMIT ?')
+      .all(safeLimit).map((row) => ({ auditId: row.auditId, kind: row.kind, details: JSON.parse(row.detailsJson), createdAt: row.createdAt }));
   }
 }
 

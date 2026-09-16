@@ -1,7 +1,7 @@
 {
   "name": "signal-box",
   "productName": "Signal Box",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "author": "Signal Box contributors",
   "license": "MIT",
@@ -10,11 +10,14 @@
   "scripts": {
     "hooks:print": "node hooks.js --print",
     "start": "electron-forge start",
+    "test": "node scripts/run-tests.js",
     "install-hooks": "node hooks.js --install",
     "install-codex-hooks": "node codex-hooks.js --install",
     "probe:sqlite": "electron scripts/sqlite-electron-spike.js",
     "check:packaging": "node scripts/check-packaging.js",
     "check:signing": "node scripts/check-signing.js",
+    "check:browser-extension": "node scripts/check-browser-extension.js",
+    "check:packaged-resources": "node scripts/check-packaged-resources.js",
     "postinstall": "electron-rebuild -f -w node-pty || true",
     "package": "electron-forge package",
     "make": "electron-forge make",

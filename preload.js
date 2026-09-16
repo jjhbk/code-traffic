@@ -6,11 +6,17 @@ contextBridge.exposeInMainWorld('signalBox', {
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
   openExternal: (url) => ipcRenderer.invoke('external:open', url),
+  openBrowserExtensionFolder: () => ipcRenderer.invoke('browser:open-extension-folder'),
+  openBrowserExtensionManager: () => ipcRenderer.invoke('browser:open-extension-manager'),
+  getBrowserPairing: () => ipcRenderer.invoke('browser:get-pairing'),
+  getBrowserStatus: () => ipcRenderer.invoke('browser:get-status'),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   listArchivedSessions: () => ipcRenderer.invoke('sessions:archived-list'),
   listTasks: () => ipcRenderer.invoke('tasks:list'),
+  getTaskGraph: () => ipcRenderer.invoke('tasks:graph'),
+  getActivity: () => ipcRenderer.invoke('activity:list'),
   updateTask: (payload) => ipcRenderer.invoke('tasks:update', payload),
   snoozeTask: (payload) => ipcRenderer.invoke('tasks:snooze', payload),
   suppressCounterparty: (payload) => ipcRenderer.invoke('tasks:suppress-counterparty', payload),
@@ -22,7 +28,15 @@ contextBridge.exposeInMainWorld('signalBox', {
   exportData: () => ipcRenderer.invoke('data:export'),
   deleteMailData: () => ipcRenderer.invoke('data:delete-mail'),
   getModelStatus: () => ipcRenderer.invoke('model:get-status'),
+  getModelSettings: () => ipcRenderer.invoke('model:get-settings'),
+  saveModelSettings: (payload) => ipcRenderer.invoke('model:save-settings', payload),
   checkModel: () => ipcRenderer.invoke('model:check'),
+  getModelDiagnostics: () => ipcRenderer.invoke('model:diagnostics'),
+  probeLocalModel: () => ipcRenderer.invoke('model:probe'),
+  getIntegrationStatus: () => ipcRenderer.invoke('integrations:status'),
+  prepareUberBooking: (payload) => ipcRenderer.invoke('browser:prepare-uber', payload),
+  decideBrowserAction: (payload) => ipcRenderer.invoke('browser:decide', payload),
+  executeBrowserAction: (payload) => ipcRenderer.invoke('browser:execute', payload),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (payload) => ipcRenderer.invoke('settings:save', payload),
   getMailStatus: () => ipcRenderer.invoke('mail:status'),
@@ -33,6 +47,24 @@ contextBridge.exposeInMainWorld('signalBox', {
   proposeReply: (payload) => ipcRenderer.invoke('mail:propose-reply', payload),
   sendApprovedReply: (payload) => ipcRenderer.invoke('mail:send-approved-reply', payload),
   reconcileReply: (payload) => ipcRenderer.invoke('mail:reconcile-reply', payload),
+  syncCalendar: () => ipcRenderer.invoke('calendar:sync'),
+  getCalendarStatus: () => ipcRenderer.invoke('calendar:status'),
+  listCalendarEvents: () => ipcRenderer.invoke('calendar:events'),
+  prepareCalendarUpdate: (payload) => ipcRenderer.invoke('calendar:prepare-update', payload),
+  executeCalendarUpdate: (payload) => ipcRenderer.invoke('calendar:execute-update', payload),
+  onCalendarStatusChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('calendar:status-changed', listener);
+    return () => ipcRenderer.removeListener('calendar:status-changed', listener);
+  },
+  syncDrive: () => ipcRenderer.invoke('drive:sync'),
+  getDriveStatus: () => ipcRenderer.invoke('drive:status'),
+  listDriveFiles: () => ipcRenderer.invoke('drive:files'),
+  onDriveStatusChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('drive:status-changed', listener);
+    return () => ipcRenderer.removeListener('drive:status-changed', listener);
+  },
   onMailStatusChanged: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('mail:status-changed', listener);

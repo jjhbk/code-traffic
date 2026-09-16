@@ -1,5 +1,6 @@
 require('dotenv').config();
 const path = require('path');
+const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
@@ -16,11 +17,12 @@ const { queuePrompt } = require('./codex-control');
 const { sessionHistory } = require('./history');
 const { startCodexMonitor, terminalApprovalQuestion } = require('./codex-monitor');
 const { readSettings, writeSettings } = require('./app-settings');
-const { install: installClaudeHooks } = require('./hooks');
-const { install: installCodexHooks } = require('./codex-hooks');
+const { install: installClaudeHooks, settingsPaths: claudeSettingsPaths } = require('./hooks');
+const { install: installCodexHooks, paths: codexConfigPaths } = require('./codex-hooks');
+const { integrationStatus } = require('./host/integrations/status');
 const { SqliteStore } = require('./host/store/sqlite-store');
 const { ApprovalService } = require('./host/approvals/service');
-const { GoogleOAuth, GmailProvider } = require('./host/mail/google');
+const { GoogleOAuth, GmailProvider, GoogleCalendarProvider, GoogleDriveProvider } = require('./host/mail/google');
 const { createReplyProposal } = require('./host/actions/mail-reply');
 const { ProtectedCredentialStore } = require('./host/mail/credentials');
 const { createOAuthState, waitForOAuthCallback } = require('./host/mail/oauth-callback');
@@ -28,9 +30,15 @@ const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
 const { DigestScheduler } = require('./host/scheduling/digest');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
-const { OllamaClient, OpenAICompatibleClient } = require('./host/models/clients');
+const { OllamaClient } = require('./host/models/clients');
+const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
+const { BrowserBridge } = require('./host/browser/bridge');
+const { BrowserActionService } = require('./host/browser/service');
+const { BrowserRecipeExecutor } = require('./host/browser/executor');
+const { BridgeBrowserAdapter } = require('./host/browser/bridge-adapter');
+const { uberCabBooking, uberCabQuote } = require('./host/browser/recipes');
 const { ModelRouter } = require('./host/models/router');
-const { recommendLocalModel } = require('./host/models/profile');
+const { recommendLocalModel, detectGpuProfile } = require('./host/models/profile');
 
 const GOOGLE_CLIENT_ID = process.env.SIGNAL_BOX_GOOGLE_CLIENT_ID || '';
 
@@ -78,16 +86,24 @@ let hostStore;
 let approvalService;
 let mailCredentials;
 let mailSync;
+let calendarSync;
+let driveSync;
 let taskService;
 let digestScheduler;
 let mailSyncTimer;
+let calendarSyncTimer;
+let driveSyncTimer;
 let digestTimer;
 let privacyGateway;
 let modelRouter;
+let modelHardware = { available: false, vendor: null, devices: [], memoryBytes: 0, reason: 'not-checked', wsl: false };
+let browserBridge;
 let appSettings = {};
 const codexTerminalQuestions = new Map();
 const terminals = new Map();
 const remoteCommands = new Map();
+const deliveryTimers = new Map();
+const DELIVERY_ACK_TIMEOUT_MS = Number.parseInt(process.env.SIGNAL_BOX_DELIVERY_TIMEOUT_MS || '15000', 10) || 15000;
 const boardPort = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
 const desktopNotificationsEnabled = false;
 const SESSION_TYPES = new Set(['claude', 'codex', 'terminal']);
@@ -186,6 +202,30 @@ function openExternalUrl(url) {
   return shell.openExternal(url).then(() => true);
 }
 
+function openChromeExtensionManager() {
+  if (process.platform === 'linux' && process.env.WSL_INTEROP) {
+    return new Promise((resolve, reject) => {
+      const child = spawn('powershell.exe', [
+        '-NoProfile', '-Command',
+        "Start-Process chrome.exe -ArgumentList 'chrome://extensions'",
+      ], { stdio: 'ignore' });
+      child.once('error', reject);
+      child.once('exit', (code) => {
+        if (code === 0) resolve(true);
+        else reject(new Error(`Windows Chrome launcher exited with code ${code}`));
+      });
+    });
+  }
+  return openExternalUrl('chrome://extensions');
+}
+
+function withTimeout(operation, fallback, timeoutMs = 1200) {
+  return Promise.race([
+    Promise.resolve().then(operation),
+    new Promise((resolve) => { const timer = setTimeout(() => resolve(fallback), timeoutMs); timer.unref?.(); }),
+  ]);
+}
+
 function wireIpc() {
   if (typeof Menu !== 'undefined') Menu.setApplicationMenu?.(null);
   ipcMain.handle('window:minimize', () => { windowRef?.minimize(); return true; });
@@ -197,15 +237,50 @@ function wireIpc() {
   ipcMain.handle('window:close', () => { windowRef?.close(); return true; });
   ipcMain.handle('external:open', (_event, target) => {
     const url = new URL(String(target || ''));
-    const allowedHosts = ['console.cloud.google.com', 'support.google.com', 'developers.google.com', 'cloud.google.com'];
+    const allowedHosts = ['console.cloud.google.com', 'support.google.com', 'developers.google.com', 'cloud.google.com', 'ollama.com'];
     const isAllowedHost = allowedHosts.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
     if (url.protocol !== 'https:' || !isAllowedHost) {
-      throw new Error('Signal Box can only open official Google setup pages.');
+      throw new Error('Signal Box can only open approved setup pages.');
     }
     return openExternalUrl(url.toString()).catch((error) => {
       throw new Error(`Could not open your default browser: ${error.message}`);
     });
   });
+  ipcMain.handle('browser:open-extension-folder', async () => {
+    const extensionPath = path.join(app.isPackaged ? process.resourcesPath : __dirname, 'browser-extension');
+    if (!fs.existsSync(path.join(extensionPath, 'manifest.json'))) throw new Error('The browser bridge extension is missing from this Signal Box build.');
+    let windowsPath = '';
+    if (process.platform === 'linux' && process.env.WSL_DISTRO_NAME) {
+      const converted = spawnSync('wslpath', ['-w', extensionPath], { encoding: 'utf8' });
+      if (converted.status === 0) windowsPath = converted.stdout.trim();
+    }
+    const error = await withTimeout(() => {
+      if (windowsPath) {
+        const child = spawn('explorer.exe', [windowsPath], { stdio: 'ignore' });
+        return new Promise((resolve) => child.once('error', () => resolve('Windows Explorer could not be opened.')).once('exit', (code) => resolve(code === 0 ? '' : `Windows Explorer exited with code ${code}.`)));
+      }
+      return shell.openPath(extensionPath);
+    }, 'The folder opener did not respond.');
+    // Browser security requires the user to confirm a local unpacked
+    // extension. Open the manager beside the folder so the in-app action is
+    // still a complete, guided install flow on every supported desktop.
+    let managerOpened = false;
+    try {
+      const opened = await withTimeout(() => openChromeExtensionManager(), false);
+      managerOpened = opened !== false;
+    } catch (_) { /* Chromium may not be the default browser. */ }
+    return { path: extensionPath, windowsPath, folderOpened: !error, folderError: error || null, managerOpened };
+ });
+  ipcMain.handle('browser:open-extension-manager', async () => {
+    try { await withTimeout(() => openChromeExtensionManager(), false); return true; }
+    catch (error) { throw new Error(`Could not open Chrome extensions: ${error.message}`); }
+  });
+  ipcMain.handle('browser:get-pairing', () => {
+    const pairing = ensureHookToken();
+    const port = Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747;
+    return { token: pairing.token, sessionId: appSettings.browserSessionId || '', hostUrl: `http://127.0.0.1:${port}` };
+  });
+  ipcMain.handle('browser:get-status', () => browserBridge?.status(appSettings.browserSessionId || '') || { sessionId: appSettings.browserSessionId || '', connected: false, lastSeenAt: null, pending: 0 });
   ipcMain.handle('clipboard:read', () => clipboard.readText());
   ipcMain.handle('clipboard:write', (_event, text = '') => { clipboard.writeText(String(text)); return true; });
   ipcMain.handle('sessions:list', () => board.list());
@@ -241,7 +316,6 @@ function wireIpc() {
     dailyCap: Number.isInteger(appSettings.dailyDigestCap) ? appSettings.dailyDigestCap : 5,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     stats: hostStore?.notificationStats() || { delivery: {}, feedback: {} },
-    pilot: hostStore?.pilotReport({ days: 7, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) || null,
     history: hostStore?.listNotifications() || [],
   }));
   ipcMain.handle('digest:save-settings', (_event, { quietHoursStart = '', quietHoursEnd = '', digestAt = '08:30', dailyCap = 5 } = {}) => {
@@ -259,8 +333,82 @@ function wireIpc() {
     }
     return { quietHoursStart, quietHoursEnd, digestAt, dailyCap: cap };
   });
-  ipcMain.handle('model:get-status', () => modelRouter?.status() || { mode: 'off', local: false, frontier: false, active: false });
-  ipcMain.handle('model:check', async () => modelRouter?.availability() || { mode: 'off', local: false, frontier: false, active: false, localAvailable: false });
+  ipcMain.handle('model:get-status', () => ({ ...(modelRouter?.status() || { mode: 'off', local: false, frontier: false, active: false }), hardware: modelHardware }));
+  ipcMain.handle('model:get-settings', () => ({
+    mode: modelRouter?.mode || appSettings.modelMode || 'local',
+    localModel: modelRouter?.localClient?.model || appSettings.localModel || '',
+    frontierModel: modelRouter?.frontierClient?.model || appSettings.frontierModel || 'gpt-4o-mini',
+    frontierBaseUrl: appSettings.frontierBaseUrl || process.env.SIGNAL_BOX_FRONTIER_BASE_URL || 'https://api.openai.com/v1',
+    hasFrontierKey: Boolean(mailCredentials?.has('frontier-api-key') || process.env.SIGNAL_BOX_FRONTIER_API_KEY),
+    storageAvailable: Boolean(mailCredentials),
+  }));
+  ipcMain.handle('model:save-settings', (_event, { mode = 'local', localModel = '', frontierModel = 'gpt-4o-mini', frontierBaseUrl = '', frontierApiKey = '' } = {}) => {
+    if (!['local', 'frontier', 'off'].includes(mode)) throw new Error('Choose local, frontier, or off model mode.');
+    const cleanLocal = String(localModel || '').trim();
+    const cleanFrontier = String(frontierModel || '').trim();
+    const cleanBase = String(frontierBaseUrl || '').trim();
+    const cleanKey = String(frontierApiKey || '').trim();
+    if (!cleanLocal || !cleanFrontier) throw new Error('Both model names are required.');
+    if (mode === 'frontier' && !cleanKey && !mailCredentials?.has('frontier-api-key') && !process.env.SIGNAL_BOX_FRONTIER_API_KEY) throw new Error('Enter a frontier API key before enabling frontier mode.');
+    if (cleanKey) {
+      if (!mailCredentials) throw new Error('Secure credential storage is unavailable. Start the OS keyring before saving the frontier API key.');
+      mailCredentials.save('frontier-api-key', cleanKey);
+    }
+    appSettings = { ...appSettings, modelMode: mode, localModel: cleanLocal, frontierModel: cleanFrontier, ...(cleanBase ? { frontierBaseUrl: cleanBase } : {}) };
+    writeSettings(app.getPath('userData'), appSettings);
+    configureModelRouter();
+    return { mode: modelRouter.mode, localModel: modelRouter.localClient?.model || cleanLocal, frontierModel: modelRouter.frontierClient?.model || cleanFrontier, hasFrontierKey: Boolean(mailCredentials?.has('frontier-api-key') || process.env.SIGNAL_BOX_FRONTIER_API_KEY) };
+  });
+  ipcMain.handle('model:check', async () => ({ ...(await (modelRouter?.availability() || { mode: 'off', local: false, frontier: false, active: false, localAvailable: false })), hardware: modelHardware }));
+  ipcMain.handle('model:diagnostics', () => modelRouter?.diagnostics() || { mode: 'off', metrics: {} });
+  ipcMain.handle('model:probe', async () => modelRouter?.probe() || { localCall: false, redacted: false });
+  ipcMain.handle('tasks:graph', () => hostStore?.taskGraph({ includeDismissed: true }) || { nodes: [], edges: [] });
+  ipcMain.handle('activity:list', () => {
+    const entries = hostStore?.recentAudit(60) || [];
+    const diagnostics = modelRouter?.diagnostics();
+    const modelEvents = [];
+    if (diagnostics?.metrics?.lastPrivacyCheck) modelEvents.push({ kind: 'model-privacy', details: diagnostics.metrics.lastPrivacyCheck, createdAt: diagnostics.metrics.lastPrivacyCheck.at });
+    if (diagnostics?.metrics?.lastLocalCall) modelEvents.push({ kind: 'model-local', details: diagnostics.metrics.lastLocalCall, createdAt: diagnostics.metrics.lastLocalCall.at });
+    if (diagnostics?.metrics?.lastRanking) modelEvents.push({ kind: 'model-ranking', details: diagnostics.metrics.lastRanking, createdAt: diagnostics.metrics.lastRanking.at });
+    return [...entries, ...modelEvents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 60).map((entry) => ({
+      kind: entry.kind,
+      createdAt: entry.createdAt,
+      details: entry.kind === 'connector-health' ? { status: entry.details.status, provider: String(entry.details.adapterId || '').split(':')[0] || 'connector' }
+        : entry.kind === 'event-ingested' ? { status: 'received', type: entry.details.type || 'event' }
+          : entry.kind === 'observation-saved' ? { status: 'stored', provider: String(entry.details.adapterId || '').split(':')[0] || 'source' }
+            : entry.kind.startsWith('execution-') ? { status: entry.kind.slice('execution-'.length), capability: entry.details.capability || entry.details.provider || 'action' }
+              : entry.kind.startsWith('notification-') ? { status: entry.kind.slice('notification-'.length), type: entry.details.notificationClass || 'notification' }
+                : entry.details,
+    }))
+  });
+  ipcMain.handle('integrations:status', () => integrationStatus({
+    claudeConfig: claudeSettingsPaths().settings,
+    codexConfig: codexConfigPaths().config,
+    hookMarker: `127.0.0.1:${Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747}/hook?state=`,
+  }));
+  ipcMain.handle('browser:prepare-uber', async (_event, { pickup, destination, rideType = 'UberX', maxFare, sessionId = null, preflight = false } = {}) => {
+    if (!hostStore || !approvalService) throw new Error('Durable browser action storage is unavailable.');
+    const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null });
+    const recipe = preflight ? uberCabQuote : uberCabBooking;
+    const request = service.prepare(recipe, { pickup, destination, rideType, maxFare }, { principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], sessionId: sessionId || appSettings.browserSessionId });
+    try { await telegram?.sendBrowserApproval(request); } catch (error) { console.error(`[telegram] browser approval notification failed: ${error.message}`); }
+    return request;
+  });
+  ipcMain.handle('browser:decide', async (_event, { requestId, optionId = 'allow', sessionId = null } = {}) => {
+    if (!approvalService) throw new Error('Browser approval storage is unavailable.');
+    const decision = approvalService.decide(requestId, optionId, { principal: 'signal-box-user', surface: 'desktop' });
+    if (optionId !== 'allow') return { status: 'cancelled', decision };
+    return { status: 'approved', decision, ...(await dispatchBrowserAction(requestId, sessionId, 'desktop')) };
+  });
+  ipcMain.handle('browser:execute', async (_event, { requestId, sessionId, surface = 'desktop' } = {}) => {
+    if (!hostStore || !approvalService || !browserBridge) throw new Error('Browser action execution is unavailable.');
+    const activeSessionId = sessionId || appSettings.browserSessionId;
+    if (!activeSessionId) throw new Error('A browser session ID is required.');
+    const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: uberCabBooking.origin });
+    const executor = new BrowserRecipeExecutor({ browser: adapter });
+    const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
+    return service.executeApproved(requestId, { executor, principal: 'signal-box-user', surface });
+  });
   ipcMain.handle('data:export', async () => {
     if (!hostStore) throw new Error('Durable storage is unavailable.');
     const result = await dialog.showSaveDialog(windowRef, { title: 'Export Signal Box data', defaultPath: 'signal-box-export.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
@@ -307,9 +455,39 @@ function wireIpc() {
   ipcMain.handle('mail:status', () => {
     const account = mailCredentials?.load('gmail-account') || '';
     const adapterId = account ? `gmail:${account}` : null;
-    return { paired: Boolean(mailCredentials?.load('gmail-refresh-token')), provider: 'gmail', account, clientId: mailCredentials?.load('gmail-client-id') || GOOGLE_CLIENT_ID || '', storageAvailable: Boolean(mailCredentials), storageMessage: mailCredentials ? null : 'Signal Box cannot access the OS credential store. Start a desktop keyring service, then restart Signal Box.', health: adapterId ? hostStore?.getConnectorHealth(adapterId) || null : null };
+    return { paired: Boolean(mailCredentials?.load('gmail-refresh-token')), provider: 'gmail', account, clientId: mailCredentials?.load('gmail-client-id') || GOOGLE_CLIENT_ID || '', hasClientSecret: Boolean(mailCredentials?.has('gmail-client-secret')), storageAvailable: Boolean(mailCredentials), storageMessage: mailCredentials ? null : 'Signal Box cannot access the OS credential store. Start a desktop keyring service, then restart Signal Box.', health: adapterId ? hostStore?.getConnectorHealth(adapterId) || null : null };
   });
   ipcMain.handle('mail:sync', async () => runMailSync());
+  ipcMain.handle('calendar:sync', async () => runCalendarSync());
+  ipcMain.handle('calendar:status', () => {
+    const account = mailCredentials?.load('gmail-account') || '';
+    const adapterId = account ? `calendar:${account}` : null;
+    return { paired: Boolean(calendarSync), provider: 'google-calendar', account, health: adapterId ? hostStore?.getConnectorHealth(adapterId) || null : null };
+  });
+  ipcMain.handle('calendar:events', () => {
+    const account = mailCredentials?.load('gmail-account') || '';
+    return hostStore?.observations(account ? `calendar:${account}` : null).sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)) || [];
+  });
+  ipcMain.handle('calendar:prepare-update', (_event, { eventId, changes = {}, etag = null } = {}) => {
+    if (!hostStore || !approvalService) throw new Error('Durable calendar action storage is unavailable.');
+    if (!eventId || !changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('A calendar event and edit fields are required.');
+    const allowed = ['summary', 'description', 'location', 'start', 'end'];
+    const sanitized = Object.fromEntries(Object.entries(changes).filter(([key, value]) => allowed.includes(key) && typeof value === 'string'));
+    if (!Object.keys(sanitized).length || !sanitized.summary?.trim() || !sanitized.start || !sanitized.end) throw new Error('Calendar title, start, and end are required.');
+    const action = { capability: 'calendar.update', autonomous: false, eventId: String(eventId), etag: etag || null, changes: sanitized, consequences: 'Update this Google Calendar event and notify its guests according to Google Calendar settings.', options: [{ optionId: 'update', label: 'Save calendar edit' }, { optionId: 'deny', label: 'Cancel' }] };
+    return approvalService.request(action, { principal: 'signal-box-user', surfaces: ['desktop'], expiresAt: Date.now() + 10 * 60 * 1000 });
+  });
+  ipcMain.handle('calendar:execute-update', async (_event, { requestId } = {}) => dispatchCalendarUpdate(requestId, 'signal-box-user', 'desktop'));
+  ipcMain.handle('drive:sync', async () => runDriveSync());
+  ipcMain.handle('drive:status', () => {
+    const account = mailCredentials?.load('gmail-account') || '';
+    const adapterId = account ? `drive:${account}` : null;
+    return { paired: Boolean(driveSync), provider: 'google-drive', account, health: adapterId ? hostStore?.getConnectorHealth(adapterId) || null : null };
+  });
+  ipcMain.handle('drive:files', () => {
+    const account = mailCredentials?.load('gmail-account') || '';
+    return hostStore?.observations(account ? `drive:${account}` : null).sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)) || [];
+  });
   ipcMain.handle('mail:messages', () => {
     if (!hostStore) return [];
     const account = mailCredentials?.load('gmail-account') || '';
@@ -342,6 +520,8 @@ function wireIpc() {
     }
     for (const name of ['gmail-refresh-token', 'gmail-client-id', 'gmail-client-secret', 'gmail-account']) mailCredentials.delete(name);
     mailSync = null;
+    calendarSync = null;
+    driveSync = null;
     return { paired: false, provider: 'gmail' };
   });
   ipcMain.handle('mail:pair', async (_event, { clientId: submittedClientId = '', clientSecret: submittedClientSecret = '' } = {}) => {
@@ -419,12 +599,17 @@ function wireIpc() {
   ipcMain.on('pty:write', (_event, { tile, data } = {}) => {
     if (typeof data === 'string') {
       terminals.get(tile)?.write(data);
+      const session = board.sessions.get(tile);
+      if (session?.agent !== 'terminal' && /[\r\n]$/.test(data)) {
+        submitDelivery(tile, { channel: 'desktop-pty', sessionId: session.sessionId });
+        board.handleHook('working', tile, { cwd: session.cwd, session_id: session.sessionId });
+      }
     }
   });
   ipcMain.on('session:working', (_event, { tile } = {}) => {
     const session = board.sessions.get(tile);
     if (tile && terminals.has(tile) && session?.agent !== 'terminal') {
-      board.handleHook('working', tile, { cwd: session.cwd, submitted: true });
+      board.handleHook('working', tile, { cwd: session.cwd, session_id: session.sessionId });
     }
   });
   ipcMain.on('pty:resize', (_event, { tile, cols, rows } = {}) => {
@@ -455,6 +640,36 @@ async function dispatchApprovedReply(requestId, principal, surface) {
       error.attemptId = attempt.attemptId;
       error.requestId = requestId;
     }
+    throw error;
+  }
+}
+
+async function dispatchCalendarUpdate(requestId, principal, surface) {
+  if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
+  const request = hostStore.getApproval(requestId);
+  if (!request || request.action?.capability !== 'calendar.update') throw new Error('Calendar edit approval not found.');
+  const action = request.action;
+  const account = mailCredentials?.load('gmail-account') || '';
+  const refreshToken = mailCredentials?.load('gmail-refresh-token') || '';
+  const clientId = mailCredentials?.load('gmail-client-id') || GOOGLE_CLIENT_ID || '';
+  const clientSecret = mailCredentials?.load('gmail-client-secret') || null;
+  if (!account || !refreshToken || !clientId) throw new Error('Connect Google before editing Calendar.');
+  const provider = new GoogleCalendarProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
+  const decision = approvalService.decide(requestId, 'update', { principal, surface });
+  const attempt = approvalService.execution({ requestId, status: 'prepared', details: { capability: action.capability, eventId: action.eventId, surface } });
+  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: decision.decisionId, surface } });
+  try {
+    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'google-calendar', eventId: action.eventId, surface } });
+    const changes = { ...action.changes };
+    for (const key of ['start', 'end']) if (typeof changes[key] === 'string') changes[key] = { dateTime: new Date(changes[key]).toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+    const updated = await provider.updateEvent(action.eventId, changes, { etag: action.etag });
+    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: 'google-calendar', eventId: updated.id || action.eventId, surface } });
+    approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'google-calendar', eventId: updated.id || action.eventId, etag: updated.etag || null, changedFields: Object.keys(changes) } });
+    return { status: 'confirmed', attemptId: attempt.attemptId, eventId: updated.id || action.eventId };
+  } catch (error) {
+    const status = error.name === 'AbortError' || /timeout|network|fetch/i.test(error.message) ? 'unknown' : 'failed';
+    approvalService.execution({ attemptId: attempt.attemptId, requestId, status, details: { provider: 'google-calendar', eventId: action.eventId, error: error.message, surface } });
+    if (status === 'unknown') { error.code = 'EXECUTION_UNKNOWN'; error.attemptId = attempt.attemptId; error.requestId = requestId; }
     throw error;
   }
 }
@@ -578,6 +793,28 @@ function interruptRemoteTerminal(session) {
   return true;
 }
 
+function clearDeliveryTimer(tile) {
+  const timer = deliveryTimers.get(tile);
+  if (timer) clearTimeout(timer);
+  deliveryTimers.delete(tile);
+}
+
+function submitDelivery(tile, details = {}) {
+  const attemptId = details.attemptId || crypto.randomUUID();
+  clearDeliveryTimer(tile);
+  board.recordDelivery(tile, 'submitted', { ...details, attemptId });
+  const timer = setTimeout(() => {
+    const session = board.sessions.get(tile);
+    if (session?.delivery?.status === 'submitted' && session.delivery.attemptId === attemptId) {
+      board.recordDelivery(tile, 'unknown', { ...session.delivery, attemptId, reason: 'acknowledgement-timeout' });
+    }
+    deliveryTimers.delete(tile);
+  }, DELIVERY_ACK_TIMEOUT_MS);
+  timer.unref?.();
+  deliveryTimers.set(tile, timer);
+  return attemptId;
+}
+
 async function sendRemoteAgentPrompt(session, message) {
   if (session.agent !== 'codex') return false;
   const threadId = resolveCodexTileSessionId(session.sessionId, session.cwd, session.sessionIdVerified ? null : session.created);
@@ -595,14 +832,19 @@ async function sendRemoteAgentPrompt(session, message) {
   const binary = findAgent('codex');
   if (!binary) throw new Error('Codex CLI was not found on PATH.');
   const tile = session.tile || session.key;
-  board.recordDelivery(tile, 'submitted', { channel: 'codex-queue' });
+  const attemptId = submitDelivery(tile, { channel: 'codex-queue', sessionId: threadId });
   try {
     await queuePrompt({ binary, threadId, message, cwd: session.cwd });
   } catch (error) {
-    board.recordDelivery(tile, 'failed', { error: error.message });
+    clearDeliveryTimer(tile);
+    board.recordDelivery(tile, 'failed', { attemptId, channel: 'codex-queue', error: error.message });
     throw error;
   }
-  board.handleHook('working', tile, { session_id: threadId, cwd: session.cwd, submitted: true });
+  // `codex queue` succeeding proves that the local Codex queue accepted the
+  // prompt. Codex does not provide the Claude-style UserPromptSubmit hook,
+  // so acknowledge this delivery here to avoid a permanent waiting label.
+  board.recordDelivery(tile, 'acknowledged', { attemptId, channel: 'codex-queue', sessionId: threadId });
+  board.handleHook('working', tile, { session_id: threadId, cwd: session.cwd });
   return true;
 }
 
@@ -643,6 +885,32 @@ function sessionHistoryWithTerminalQuestions(session) {
   return history;
 }
 
+async function dispatchBrowserAction(requestId, sessionId = null, surface = 'desktop') {
+  if (!hostStore || !approvalService || !browserBridge) throw new Error('Browser action execution is unavailable.');
+  const activeSessionId = sessionId || appSettings.browserSessionId;
+  if (!activeSessionId) throw new Error('A browser session ID is required.');
+  const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: uberCabBooking.origin });
+  const executor = new BrowserRecipeExecutor({ browser: adapter });
+  const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
+  return service.executeApproved(requestId, { executor, principal: 'signal-box-user', surface });
+}
+
+function configureModelRouter() {
+  const gpuProfile = detectGpuProfile({ wsl: Boolean(process.env.WSL_DISTRO_NAME) });
+  const cpuInfo = os.cpus();
+  const cpuProfile = { model: cpuInfo[0]?.model || 'Unknown CPU', cores: cpuInfo.length, architecture: process.arch };
+  modelHardware = { ...gpuProfile, cpu: cpuProfile, wsl: Boolean(process.env.WSL_DISTRO_NAME) };
+  const localProfile = recommendLocalModel({ gpuMemoryBytes: gpuProfile.memoryBytes, cpuCores: cpuProfile.cores, cpuModel: cpuProfile.model, architecture: cpuProfile.architecture });
+  const localModel = appSettings.localModel || process.env.SIGNAL_BOX_LOCAL_MODEL || localProfile.model;
+  const frontierModel = appSettings.frontierModel || process.env.SIGNAL_BOX_FRONTIER_MODEL || 'gpt-4o-mini';
+  const frontierKey = mailCredentials?.load('frontier-api-key') || process.env.SIGNAL_BOX_FRONTIER_API_KEY || '';
+  const localClient = new OllamaClient({ model: localModel });
+  const frontierClient = frontierKey ? new IsolatedFrontierClient({ model: frontierModel, baseUrl: appSettings.frontierBaseUrl || process.env.SIGNAL_BOX_FRONTIER_BASE_URL || 'https://api.openai.com/v1', apiKey: frontierKey }) : null;
+  modelRouter?.frontierClient?.close?.();
+  modelRouter = new ModelRouter({ privacyGateway, localClient, frontierClient, mode: appSettings.modelMode || process.env.SIGNAL_BOX_MODEL_MODE || 'local' });
+  console.error(`[models] mode=${modelRouter.mode} local=${localModel} (${localProfile.tier}) gpu=${gpuProfile.available ? `${gpuProfile.devices.map((device) => `${device.name}/${Math.round(device.memoryBytes / 1024 ** 3)}GiB`).join(',')}` : 'unavailable'} frontier=${modelRouter.status().frontier}`);
+}
+
 function hasPendingApproval(session) {
   if (!session) return false;
   try { return (sessionHistoryWithTerminalQuestions(session).pendingQuestions || []).length > 0; }
@@ -651,9 +919,13 @@ function hasPendingApproval(session) {
 
 async function start() {
   appSettings = readSettings(app.getPath('userData'));
+  if (!appSettings.browserSessionId) {
+    appSettings = { ...appSettings, browserSessionId: `browser-${crypto.randomUUID()}` };
+    writeSettings(app.getPath('userData'), appSettings);
+  }
   try {
     mailCredentials = new ProtectedCredentialStore({ filename: path.join(app.getPath('userData'), 'mail-credentials.json'), safeStorage });
-    console.error(`[mail] protected credential storage ready: ${safeStorage.getSelectedStorageBackend?.() || 'available'}`);
+    console.error(`[mail] protected credential storage ready: ${safeStorage.getSelectedStorageBackend?.() || 'available'}; profile=${path.join(app.getPath('userData'), 'mail-credentials.json')}`);
     let vaultKey = mailCredentials.load('privacy-vault-key');
     if (!vaultKey) { vaultKey = crypto.randomBytes(32).toString('base64'); mailCredentials.save('privacy-vault-key', vaultKey); }
     privacyGateway = new PrivacyGateway({ vault: new EntityVault({ filename: path.join(app.getPath('userData'), 'privacy-vault.json'), key: Buffer.from(vaultKey, 'base64') }), localOnly: true });
@@ -663,16 +935,9 @@ async function start() {
     privacyGateway = new PrivacyGateway({ localOnly: true });
     console.error(`[mail] protected credential storage unavailable: ${error.message}; backend=${safeStorage.getSelectedStorageBackend?.() || 'unknown'}`);
   }
-  const localProfile = recommendLocalModel();
-  const localModel = process.env.SIGNAL_BOX_LOCAL_MODEL || localProfile.model;
-  const localClient = new OllamaClient({ model: localModel });
-  let frontierClient = null;
-  if (process.env.SIGNAL_BOX_FRONTIER_API_KEY) {
-    frontierClient = new OpenAICompatibleClient({ model: process.env.SIGNAL_BOX_FRONTIER_MODEL || 'gpt-4o-mini', baseUrl: process.env.SIGNAL_BOX_FRONTIER_BASE_URL || 'https://api.openai.com/v1', apiKey: process.env.SIGNAL_BOX_FRONTIER_API_KEY });
-  }
-  modelRouter = new ModelRouter({ privacyGateway, localClient, frontierClient, mode: process.env.SIGNAL_BOX_MODEL_MODE || 'local' });
-  console.error(`[models] mode=${modelRouter.mode} local=${localModel} (${localProfile.tier}) frontier=${modelRouter.status().frontier}`);
+  configureModelRouter();
   const hookAuth = ensureHookToken();
+  browserBridge = new BrowserBridge();
   try { installClaudeHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
   try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
   try {
@@ -687,6 +952,7 @@ async function start() {
     historyProvider: sessionHistoryWithTerminalQuestions,
     authToken: hookAuth.token,
     store: hostStore,
+    browserBridge,
   });
   if (hostStore) {
     try {
@@ -727,6 +993,12 @@ async function start() {
     sendPrompt: sendRemoteAgentPrompt,
     approvalService,
     approveMailReply: (requestId, _principal, surface) => dispatchApprovedReply(requestId, 'signal-box-user', surface),
+    approveBrowserAction: async (requestId, sessionId, _principal, surface) => {
+      const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId, origin: uberCabBooking.origin });
+      const executor = new BrowserRecipeExecutor({ browser: adapter });
+      const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
+      return service.executeApproved(requestId, { executor, principal: 'signal-box-user', surface });
+    },
     ensureSession: async (tile) => {
       const session = board.sessions.get(tile);
       if (!session || !session.owned) throw new Error('That session is not remotely controllable.');
@@ -739,16 +1011,21 @@ async function start() {
       const session = board.sessions.get(tile);
       if ((approval || data.endsWith('\r')) && session?.agent === 'codex') codexTerminalQuestions.delete(tile);
       child.write(data);
-      if (!approval && data.trim()) board.recordDelivery(tile, 'submitted', { channel: 'pty' });
+      if (!approval && /[\r\n]$/.test(data)) submitDelivery(tile, { channel: 'telegram-pty', sessionId: session.sessionId });
       if (approval && session?.agent !== 'terminal') {
-        board.handleHook('working', tile, { session_id: session.sessionId, cwd: session.cwd, submitted: true });
+        submitDelivery(tile, { channel: 'approval-pty', sessionId: session.sessionId });
       }
       if (!approval && data.endsWith('\r') && session?.agent !== 'terminal') {
-        board.handleHook('working', tile, { cwd: session?.cwd, submitted: true });
+        board.handleHook('working', tile, { cwd: session?.cwd, session_id: session.sessionId });
       }
     },
+    markWorking: (session) => {
+      if (!session?.owned || session.agent === 'terminal') return;
+      board.handleHook('working', session.tile || session.key, { cwd: session.cwd, session_id: session.sessionId });
+    }
   });
   board.on('change', (changed) => {
+    if (changed?.delivery && ['acknowledged', 'failed', 'unknown'].includes(changed.delivery.status)) clearDeliveryTimer(changed.key);
     const changedSession = changed?.key ? board.list().find((session) => session.key === changed.key) : null;
     const approvalStillPending = hasPendingApproval(changedSession);
     if (windowRef && !windowRef.isDestroyed()) {
@@ -783,6 +1060,12 @@ async function start() {
   runMailSync().catch((error) => console.error(`[mail] initial sync failed: ${error.message}`));
   mailSyncTimer = setInterval(() => runMailSync().catch((error) => console.error(`[mail] scheduled sync failed: ${error.message}`)), 5 * 60 * 1000);
   mailSyncTimer.unref?.();
+  runCalendarSync().catch((error) => console.error(`[calendar] initial sync failed: ${error.message}`));
+  calendarSyncTimer = setInterval(() => runCalendarSync().catch((error) => console.error(`[calendar] scheduled sync failed: ${error.message}`)), 5 * 60 * 1000);
+  calendarSyncTimer.unref?.();
+  runDriveSync().catch((error) => console.error(`[drive] initial sync failed: ${error.message}`));
+  driveSyncTimer = setInterval(() => runDriveSync().catch((error) => console.error(`[drive] scheduled sync failed: ${error.message}`)), 10 * 60 * 1000);
+  driveSyncTimer.unref?.();
   digestTimer = setInterval(() => runScheduledDigest().catch((error) => console.error(`[digest] scheduled delivery failed: ${error.message}`)), 30 * 1000);
   digestTimer.unref?.();
   if (appSettings.telegramEnabled !== false) telegram.start();
@@ -802,6 +1085,8 @@ function wireMailSync() {
   const oauth = new GoogleOAuth({ clientId, clientSecret });
   const provider = new GmailProvider({ refreshToken, oauth });
   mailSync = new MailSync({ store: hostStore, provider });
+  calendarSync = new MailSync({ store: hostStore, provider: new GoogleCalendarProvider({ refreshToken, oauth }) });
+  driveSync = new MailSync({ store: hostStore, provider: new GoogleDriveProvider({ refreshToken, oauth }) });
 }
 
 function createGmailProvider() {
@@ -828,6 +1113,42 @@ async function runMailSync() {
   } catch (error) {
     hostStore.setConnectorHealth(adapterId, 'error', { message: error.message, code: error.code || null });
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('mail:status-changed', { status: 'error', error: error.message });
+    throw error;
+  }
+}
+
+async function runCalendarSync() {
+  if (!calendarSync || !mailCredentials) return { paired: false, provider: 'google-calendar', reason: 'Google Calendar sync is not initialized. Connect Google after the secure credential store is ready.' };
+  const account = mailCredentials.load('gmail-account');
+  const adapterId = `calendar:${account}`;
+  try {
+    const result = await calendarSync.run({ adapterId, accountAddress: account });
+    const tasks = taskService?.processAll(adapterId) || [];
+    const syncResult = { ...result, taskCandidates: tasks.length };
+    hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);
+    if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('calendar:status-changed', { status: 'healthy', result: syncResult });
+    return syncResult;
+  } catch (error) {
+    hostStore.setConnectorHealth(adapterId, 'error', { message: error.message, code: error.code || null });
+    if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('calendar:status-changed', { status: 'error', error: error.message });
+    throw error;
+  }
+}
+
+async function runDriveSync() {
+  if (!driveSync || !mailCredentials) return { paired: false, provider: 'google-drive', reason: 'Google Drive sync is not initialized. Connect Google after the secure credential store is ready.' };
+  const account = mailCredentials.load('gmail-account');
+  const adapterId = `drive:${account}`;
+  try {
+    const result = await driveSync.run({ adapterId, accountAddress: account, boundedWindow: 100 });
+    const tasks = taskService?.processAll(adapterId) || [];
+    const syncResult = { ...result, taskCandidates: tasks.length };
+    hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);
+    if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('drive:status-changed', { status: 'healthy', result: syncResult });
+    return syncResult;
+  } catch (error) {
+    hostStore.setConnectorHealth(adapterId, 'error', { message: error.message, code: error.code || null });
+    if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('drive:status-changed', { status: 'error', error: error.message });
     throw error;
   }
 }
@@ -882,8 +1203,11 @@ app.on('before-quit', async () => {
   stopCodexMonitor?.();
   if (livenessTimer) clearInterval(livenessTimer);
   if (mailSyncTimer) clearInterval(mailSyncTimer);
+  if (calendarSyncTimer) clearInterval(calendarSyncTimer);
+  if (driveSyncTimer) clearInterval(driveSyncTimer);
   if (digestTimer) clearInterval(digestTimer);
   telegram?.stop();
+  modelRouter?.frontierClient?.close?.();
   for (const child of remoteCommands.values()) {
     try { child.kill(); } catch (_) { /* Process may already have exited. */ }
   }

@@ -2,6 +2,9 @@ const { URL, URLSearchParams } = require('url');
 
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+const GOOGLE_CALENDAR_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+const GOOGLE_CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const GOOGLE_DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const API_ROOT = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -36,7 +39,7 @@ class GoogleOAuth {
       client_id: this.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: `${GMAIL_SCOPE} ${GMAIL_SEND_SCOPE}`,
+      scope: `${GMAIL_SCOPE} ${GMAIL_SEND_SCOPE} ${GOOGLE_CALENDAR_READ_SCOPE} ${GOOGLE_CALENDAR_EVENTS_SCOPE} ${GOOGLE_DRIVE_READ_SCOPE}`,
       access_type: 'offline',
       include_granted_scopes: 'true',
       state,
@@ -64,8 +67,120 @@ class GoogleOAuth {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: this.clientId, ...(this.clientSecret ? { client_secret: this.clientSecret } : {}), ...parameters }).toString(),
     });
-    const body = await response.json();
+    let body = {};
+    try { body = await response.json(); } catch (_) { body = {}; }
     if (!response.ok) throw new Error(`Google OAuth token request failed: ${body.error_description || body.error || response.status}`);
+    return body;
+  }
+}
+
+class GoogleCalendarProvider {
+  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch } = {}) {
+    if (!accessToken && !refreshToken) throw new Error('A Google Calendar access or refresh token is required.');
+    this.accessToken = accessToken;
+    this.refreshToken = refreshToken;
+    this.oauth = oauth;
+    this.fetch = fetchImpl;
+  }
+
+  async sync({ cursor = null, boundedWindow = 100 } = {}) {
+    const events = [];
+    let pageToken = null;
+    let result;
+    do {
+      const parameters = new URLSearchParams({ singleEvents: 'true', maxResults: String(Math.min(2500, boundedWindow)) });
+      if (cursor) parameters.set('syncToken', cursor);
+      else parameters.set('orderBy', 'startTime');
+      if (pageToken) parameters.set('pageToken', pageToken);
+      try { result = await this.request(`/events?${parameters}`); } catch (error) {
+        if (error.status === 410 && cursor) { const expired = new Error('Google Calendar sync cursor expired.'); expired.code = 'CURSOR_EXPIRED'; throw expired; }
+        throw error;
+      }
+      events.push(...(result.items || []));
+      pageToken = result.nextPageToken || null;
+    } while (pageToken && events.length < boundedWindow);
+    return { messages: events.slice(0, boundedWindow).map((event) => this.normalizeEvent(event)), nextCursor: result?.nextSyncToken || cursor || null };
+  }
+
+  normalizeEvent(event = {}) {
+    const start = event.start?.dateTime || event.start?.date || null;
+    const end = event.end?.dateTime || event.end?.date || null;
+    return {
+      provider: 'google-calendar', id: event.id, threadId: `calendar:${event.id}`, etag: event.etag || event.updated || null,
+      subject: event.summary || '(untitled event)', body: [event.description, event.location, start && `Starts: ${start}`, end && `Ends: ${end}`].filter(Boolean).join('\n'),
+      description: event.description || '', location: event.location || '', start, end,
+      timestamp: start, labels: event.status ? [event.status] : [], direction: 'incoming', from: event.organizer?.email || '', to: [],
+    };
+  }
+
+  async getEvent(eventId) {
+    if (!eventId) throw new Error('A Google Calendar event ID is required.');
+    return this.request(`/events/${encodeURIComponent(eventId)}`);
+  }
+
+  async updateEvent(eventId, changes = {}, { etag = null } = {}) {
+    const current = await this.getEvent(eventId);
+    if (etag && current.etag && etag !== current.etag) {
+      const error = new Error('This calendar event changed elsewhere. Refresh the calendar and review the edit again.');
+      error.code = 'PRECONDITION_FAILED';
+      throw error;
+    }
+    const allowed = ['summary', 'description', 'location', 'start', 'end'];
+    const updated = { ...current };
+    for (const key of allowed) if (Object.prototype.hasOwnProperty.call(changes, key)) updated[key] = changes[key];
+    return this.request(`/events/${encodeURIComponent(eventId)}`, { method: 'PUT', headers: { 'If-Match': current.etag || '' }, body: JSON.stringify(updated) });
+  }
+
+  async deleteEvent(eventId, { etag = null } = {}) {
+    const current = await this.getEvent(eventId);
+    if (etag && current.etag && etag !== current.etag) {
+      const error = new Error('This calendar event changed elsewhere. Refresh before deleting it.');
+      error.code = 'PRECONDITION_FAILED';
+      throw error;
+    }
+    return this.request(`/events/${encodeURIComponent(eventId)}`, { method: 'DELETE', headers: { 'If-Match': current.etag || '' } });
+  }
+
+  async request(pathname, options = {}) {
+    if (!this.accessToken) {
+      if (!this.oauth || !this.refreshToken) throw new Error('Google Calendar access token is unavailable.');
+      const tokens = await this.oauth.refresh(this.refreshToken); this.accessToken = tokens.access_token;
+    }
+    let response = await this.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+    if (response.status === 401 && this.oauth && this.refreshToken) {
+      const tokens = await this.oauth.refresh(this.refreshToken); this.accessToken = tokens.access_token;
+      response = await this.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+    }
+    let body = {};
+    try { body = await response.json(); } catch (_) { body = {}; }
+    if (!response.ok) { const error = new Error(`Google Calendar API request failed: ${body.error?.message || response.status}`); error.status = response.status; throw error; }
+    return body;
+  }
+}
+
+class GoogleDriveProvider {
+  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch } = {}) {
+    if (!accessToken && !refreshToken) throw new Error('A Google Drive access or refresh token is required.');
+    this.accessToken = accessToken; this.refreshToken = refreshToken; this.oauth = oauth; this.fetch = fetchImpl;
+  }
+
+  async sync({ cursor = null, boundedWindow = 100 } = {}) {
+    const query = new URLSearchParams({ q: 'trashed = false', pageSize: String(Math.min(1000, boundedWindow)), orderBy: 'modifiedTime desc', fields: 'nextPageToken,files(id,name,mimeType,description,modifiedTime,webViewLink,owners(emailAddress))' });
+    if (cursor) query.set('pageToken', cursor);
+    let result;
+    try { result = await this.request(`/files?${query}`); } catch (error) {
+      if (cursor && [400, 410].includes(error.status)) { const expired = new Error('Google Drive sync cursor expired.'); expired.code = 'CURSOR_EXPIRED'; throw expired; }
+      throw error;
+    }
+    return { messages: (result.files || []).slice(0, boundedWindow).map((file) => ({ provider: 'google-drive', id: file.id, threadId: `drive:${file.id}`, etag: file.modifiedTime, subject: file.name || '(unnamed file)', body: [file.mimeType, file.description, file.webViewLink].filter(Boolean).join('\n'), timestamp: file.modifiedTime, from: file.owners?.[0]?.emailAddress || '', to: [], labels: [file.mimeType].filter(Boolean) })), nextCursor: result.nextPageToken || null };
+  }
+
+  async request(pathname, options = {}) {
+    if (!this.accessToken) { if (!this.oauth || !this.refreshToken) throw new Error('Google Drive access token is unavailable.'); this.accessToken = (await this.oauth.refresh(this.refreshToken)).access_token; }
+    let response = await this.fetch(`https://www.googleapis.com/drive/v3${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+    if (response.status === 401 && this.oauth && this.refreshToken) { this.accessToken = (await this.oauth.refresh(this.refreshToken)).access_token; response = await this.fetch(`https://www.googleapis.com/drive/v3${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } }); }
+    const body = await response.json();
+    if (!response.ok) { const error = new Error(`Google Drive API request failed: ${body.error?.message || response.status}`); error.status = response.status; throw error; }
     return body;
   }
 }
@@ -168,4 +283,4 @@ class GmailProvider {
   }
 }
 
-module.exports = { GMAIL_SCOPE, GMAIL_SEND_SCOPE, GoogleOAuth, GmailProvider, bodyFromPayload };
+module.exports = { GMAIL_SCOPE, GMAIL_SEND_SCOPE, GOOGLE_CALENDAR_READ_SCOPE, GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_DRIVE_READ_SCOPE, GoogleOAuth, GmailProvider, GoogleCalendarProvider, GoogleDriveProvider, bodyFromPayload };

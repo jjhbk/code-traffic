@@ -23,11 +23,12 @@ function settingsPaths() {
 
 function shellQuote(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
 
-function hookCommand(state, tokenFile = null) {
+function hookCommand(state, tokenFile = null, { submitted = false } = {}) {
   const tokenHeader = tokenFile
     ? ` -H "X-Signal-Box-Token: $(cat ${shellQuote(tokenFile)})"`
     : '';
-  return `curl -sS -m 2 -X POST -H 'Content-Type: application/json'${tokenHeader} --data-binary @- "http://127.0.0.1:${port()}/hook?state=${state}&tile=$SIGNAL_TILE" >/dev/null 2>&1 || true`;
+  const marker = submitted ? '&submitted=1' : '';
+  return `curl -sS -m 2 -X POST -H 'Content-Type: application/json'${tokenHeader} --data-binary @- "http://127.0.0.1:${port()}/hook?state=${state}${marker}&tile=$SIGNAL_TILE" >/dev/null 2>&1 || true`;
 }
 
 function ours(entry) {
@@ -52,7 +53,7 @@ function ourHooks(tokenFile = null) {
   });
 
   return {
-    UserPromptSubmit: [command('working')],
+    UserPromptSubmit: [{ hooks: [{ type: 'command', async: true, command: hookCommand('working', tokenFile, { submitted: true }) }] }],
     PermissionRequest: [command('approval')],
     Notification: [{
       matcher: 'permission_prompt|agent_needs_input|elicitation_dialog|elicitation_url_dialog',

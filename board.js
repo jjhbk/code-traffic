@@ -84,7 +84,7 @@ function sessionDetails(key, tile, sessionId, cwd, owned, agent = null, now = Da
 }
 
 class Board extends EventEmitter {
-  constructor({ storagePath = null, historyProvider = null, liveness = {}, clock = () => Date.now(), authToken = null, store = null } = {}) {
+  constructor({ storagePath = null, historyProvider = null, liveness = {}, clock = () => Date.now(), authToken = null, store = null, browserBridge = null } = {}) {
     super();
     this.storagePath = storagePath;
     this.archivePath = storagePath ? `${storagePath}.archive` : null;
@@ -92,6 +92,7 @@ class Board extends EventEmitter {
     this.clock = clock;
     this.authToken = authToken || null;
     this.store = store;
+    this.browserBridge = browserBridge;
     this.livenessLimits = { ...LIVENESS_DEFAULTS, ...liveness };
     this.sessions = new Map();
     this.archived = new Map();
@@ -116,7 +117,9 @@ class Board extends EventEmitter {
           livenessLevel: record.livenessLevel || null,
           hardEscalationAt: record.hardEscalationAt || null,
           processStatus: record.processStatus || (record.owned ? 'unknown' : 'unknown'),
-          delivery: record.delivery || null,
+          // A submitted delivery cannot be resumed safely after restart because
+          // its in-memory acknowledgement timer no longer exists.
+          delivery: record.delivery?.status === 'submitted' ? null : record.delivery || null,
         });
       }
     } catch (_) { /* A missing or corrupt cache must not prevent startup. */ }
@@ -283,6 +286,7 @@ class Board extends EventEmitter {
       this.emit('change', { key, state });
     } else {
       let metadataChanged = bindingChanged;
+      let deliveryChanged = false;
       session.lastObservedAt = this.clock();
       session.processStatus = 'running';
       const previousLiveness = session.liveness;
@@ -295,8 +299,10 @@ class Board extends EventEmitter {
           ...(session.delivery || {}),
           status: 'acknowledged',
           at: this.clock(),
+          channel: payload.delivery_channel || 'agent-hook',
         };
         metadataChanged = true;
+        deliveryChanged = true;
       }
       if (sessionId && session.sessionId !== sessionId) {
         session.sessionId = sessionId;
@@ -334,15 +340,21 @@ class Board extends EventEmitter {
         }
       }
       session.pendingDone = false;
+      if ((state === 'done' || state === 'closed') && session.delivery) {
+        session.delivery = null;
+        metadataChanged = true;
+      }
       const nextState = state === 'closed' ? null : state;
       if (session.state !== nextState) {
         session.state = nextState;
         session.since = this.clock();
         this.persist();
-        this.emit('change', { key, state: nextState });
+        this.emit('change', { key, state: nextState, ...(deliveryChanged ? { delivery: session.delivery } : {}) });
       } else {
         if (metadataChanged) this.persist();
-        this.emit('change', nextState === 'approval' ? { key, state: nextState, repeated: true } : undefined);
+        if (nextState === 'approval' || metadataChanged) {
+          this.emit('change', { key, state: nextState, ...(nextState === 'approval' ? { repeated: true } : {}), ...(deliveryChanged ? { delivery: session.delivery } : {}) });
+        }
       }
     }
   }
@@ -447,6 +459,20 @@ class Board extends EventEmitter {
         });
         return;
       }
+      if (this.browserBridge && request.method === 'GET' && url.pathname === '/browser/next') {
+        sendJson(response, 200, { request: this.browserBridge.next({ sessionId: url.searchParams.get('sessionId') || '' }) });
+        return;
+      }
+      if (this.browserBridge && request.method === 'POST' && url.pathname === '/browser/result') {
+        let body = '';
+        request.setEncoding('utf8');
+        request.on('data', (chunk) => { body += chunk; if (body.length > 256 * 1024) body = ''; });
+        request.on('end', () => {
+          try { sendJson(response, 200, { ok: true, result: this.browserBridge.complete(JSON.parse(body || '{}')) }); }
+          catch (error) { sendJson(response, 400, { error: error.message }); }
+        });
+        return;
+      }
       if (request.method !== 'POST' || url.pathname !== '/hook') {
         response.writeHead(404);
         response.end();
@@ -455,6 +481,7 @@ class Board extends EventEmitter {
 
       const state = url.searchParams.get('state');
       const tile = url.searchParams.get('tile') || null;
+      const submitted = url.searchParams.get('submitted') === '1';
       let body = '';
       let bytes = 0;
       let tooLarge = false;
@@ -482,6 +509,7 @@ class Board extends EventEmitter {
           }
         }
         try {
+          if (submitted) payload.submitted = true;
           this.handleHook(state, tile, payload);
           sendJson(response, 200, { ok: true });
         } catch (error) {

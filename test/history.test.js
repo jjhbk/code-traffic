@@ -72,6 +72,7 @@ assert.deepStrictEqual(questionsFromText('How should this run?\n1. Fast\n2. Safe
   question: 'How should this run?',
   options: [{ label: 'Fast', description: '' }, { label: 'Safely', description: '' }],
 }]);
+assert.deepStrictEqual(questionsFromText('Completed steps:\n1. Install dependencies\n2. Run tests'), []);
 
 fs.rmSync(directory, { recursive: true });
 console.log('history tests passed');

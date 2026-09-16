@@ -5,7 +5,7 @@ const path = require('node:path');
 const { SqliteStore } = require('../host/store/sqlite-store');
 const { DigestScheduler, dateKey } = require('../host/scheduling/digest');
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-pilot-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-notification-'));
 const filename = path.join(directory, 'signal-box.db');
 const first = new SqliteStore({ filename, clock: () => 1000 });
 const digest = first.reserveDigest({ dateKey: '2026-09-16', items: [{ taskId: 'task-1', summary: 'Test', reasons: [] }], cap: 5 });
@@ -21,4 +21,4 @@ assert.equal(scheduler.isQuiet(), true);
 assert.equal(dateKey(Date.parse('2026-11-01T05:30:00Z'), 'America/New_York'), '2026-11-01');
 restarted.close();
 fs.rmSync(directory, { recursive: true, force: true });
-console.log('pilot recovery tests passed');
+console.log('notification recovery tests passed');

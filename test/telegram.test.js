@@ -219,6 +219,22 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   assert.strictEqual(pairingMessages[0].chat_id, '8675309');
   assert.match(pairingMessages[0].text, /TELEGRAM_CHAT_ID=8675309/);
   pairing.stop();
+  const browserMessages = [];
+  const browserDecisions = [];
+  let browserExecuted = null;
+  const browserControl = new TelegramControl({
+    token: 'test-token', chatId: '42', listSessions: () => [], getHistory: () => ({ pendingQuestions: [] }),
+    approvalService: { decide: (...args) => browserDecisions.push(args) },
+    approveBrowserAction: async (...args) => { browserExecuted = args; },
+    fetchImpl: async (_url, options) => { browserMessages.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ ok: true, result: {} }) }; },
+  });
+  browserControl.stopped = false;
+  await browserControl.sendBrowserApproval({ request_id: 'browser-request', action: { recipeId: 'uber.book-cab.v1', origin: 'https://m.uber.com', sessionId: 'browser-session', inputs: { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 }, consequences: 'Run once.' } });
+  const browserButton = browserMessages[0].reply_markup.inline_keyboard[0][0].callback_data;
+  await browserControl.handleUpdate({ callback_query: { id: 'browser-approval', data: browserButton, message: { chat: { id: 42 } } } });
+  assert.deepStrictEqual(browserDecisions[0], ['browser-request', 'allow', { principal: 'signal-box-user', surface: 'telegram' }]);
+  assert.deepStrictEqual(browserExecuted, ['browser-request', 'browser-session', '42', 'telegram']);
+  browserControl.stop();
   console.log('telegram tests passed');
 })().catch((error) => {
   console.error(error);

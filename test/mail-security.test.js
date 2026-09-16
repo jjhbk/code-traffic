@@ -15,6 +15,8 @@ const safeStorage = {
 const credentials = new ProtectedCredentialStore({ filename, safeStorage });
 credentials.save('gmail-refresh-token', 'secret-token');
 assert.equal(credentials.load('gmail-refresh-token'), 'secret-token');
+assert.equal(credentials.has('gmail-refresh-token'), true);
+assert.equal(credentials.has('missing'), false);
 assert.doesNotMatch(fs.readFileSync(filename, 'utf8'), /secret-token/);
 assert.throws(() => new ProtectedCredentialStore({ filename, safeStorage: { isEncryptionAvailable: () => false } }), /Refusing to store/);
 

@@ -30,6 +30,10 @@ assert.equal(outgoing.direction, 'outgoing');
 assert.equal(candidateFilters(outgoing).outgoingCommitment, true);
 assert.equal(candidateFilters(outgoing, { existingTaskThreadIds: new Set(['t1']) }).existingTaskUpdate, true);
 assert.equal(candidateFilters({ direction: 'incoming', subject: 'Attachment', body: 'Please find attached the report.' }).eligible, false);
+const bulk = normalizeMessage({ id: 'bulk', threadId: 'bulk', headers: [{ name: 'From', value: 'news@marketing.example' }, { name: 'List-Unsubscribe', value: '<https://example.test/u>' }], subject: 'Weekly sale', body: 'Unsubscribe here' });
+assert.equal(bulk.isBulk, true);
+assert.equal(candidateFilters(bulk).eligible, false);
+assert.equal(candidateFilters(bulk, { existingTaskThreadIds: new Set(['bulk']) }).eligible, true);
 assert.equal(candidateFromObservation({ observationId: 'update', threadId: 'existing', subject: 'Status', body: 'The report is attached.', direction: 'incoming' }, {
   filters: { eligible: true, existingTaskUpdate: true },
 }).candidateId, 'update:local-1');

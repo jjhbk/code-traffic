@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Signal Box Browser Bridge",
+  "version": "0.1.0",
+  "description": "Allowlisted browser bridge for Signal Box recipes.",
+  "permissions": ["tabs", "scripting", "storage"],
+  "host_permissions": ["https://m.uber.com/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html",
+  "content_scripts": [{
+    "matches": ["https://m.uber.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}

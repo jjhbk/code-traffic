@@ -157,6 +157,15 @@ menu. Claude Code or Codex must be installed separately. Signal Box installs
 its integration hooks automatically when it starts, and Telegram remote
 control is optional.
 
+Claude sessions started by Signal Box automatically allow common read-only
+inspection and test operations: `Read`, `Glob`, `Grep`, Git commands, read-mode
+`sed`, and common npm, Node, pytest, and unittest runners. Codex currently
+offers a global approval policy rather than a per-command allowlist, so Signal
+Box starts embedded Codex sessions with Codex's `never` approval policy to
+prevent duplicate CLI prompts. The defaults apply when Signal Box starts or
+resumes a session; close and reopen an existing tile after upgrading to pick
+them up.
+
 ## Schematic
 
 ```mermaid
@@ -280,6 +289,8 @@ and attaches them to the release. Signing certificates and credentials should
 be added as GitHub Actions secrets before public distribution. The workflow
 uses cross-architecture Forge builds; test the arm64 artifacts on their target
 systems, especially where native `node-pty` compilation is required.
+After each build, CI also verifies that the packaged application contains the
+browser bridge and Codex notification hook under its installed resources.
 
 ## Telegram control setup
 
@@ -301,6 +312,35 @@ Your Signal Box chat ID is 123456789.
    after both values are saved, and only messages from that chat are accepted.
 
 Keep the bot token secret.
+
+## Google connections and browser actions
+
+Open **Service connections** in Signal Box and enter your own Google Desktop OAuth
+client ID. Signal Box opens Google in the default browser, stores the refresh
+credential in the operating system credential store, and reuses that account
+for Gmail, Calendar, and selected Drive observations. If the OS credential
+store is unavailable, Signal Box refuses to store the credential and explains
+the platform setup.
+
+To enable the reviewed browser action example, click **Install browser bridge**
+inside Signal Box. The app opens the packaged extension folder, copies a local
+pairing token, and shows the browser session ID. In Chrome or Chromium, enable
+Developer mode, choose **Load unpacked**, select that folder, then enter the
+token and session ID in the extension options. The bridge is restricted to
+allowlisted pages and every committing action still requires Signal Box
+approval.
+
+Signal Box uses the configured local Ollama model for entity recognition and
+local ranking when available. Frontier ranking is optional and receives only
+pseudonymized task fields; it remains disabled until local privacy processing
+is available. Deterministic ranking remains active when either model path is
+unavailable. Gmail messages are classified for provider spam, mailing-list, and
+promotional signals; likely spam and bulk mail remain reviewable but do not
+create new proactive tasks.
+
+If the selected Ollama model is missing, the setup center shows the exact
+`ollama pull <model>` command, copies it to the clipboard, and opens Ollama's
+installation page.
 
 ## Start
 
@@ -668,6 +708,7 @@ Then restart Signal Box.
 ## Development checks
 
 ```bash
+npm test
 node --check hooks.js
 node --check codex-hooks.js
 node --check codex-notify.js
@@ -722,7 +763,9 @@ test/telegram.test.js       Telegram command and routing test
 - Process discovery targets Linux and WSL.
 - The embedded view launches Claude or Codex directly, not arbitrary shell
   commands.
-- Codex notification payloads vary by CLI version, so mapping is heuristic.
-- The VS Code Codex panel requires a companion integration; the CLI adapter
-  does not observe it.
-- Silent agent loops without lifecycle events are not detected.
+- Browser recipes still require live site validation because provider markup
+  can change.
+- The browser extension requires a one-time manual Chrome/Chromium unpacked
+  extension install; desktop applications cannot silently install it.
+- Telegram delivery can be unknown after a network timeout and is not
+  guaranteed exactly once.

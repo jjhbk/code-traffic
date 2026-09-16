@@ -15,7 +15,7 @@ This document describes the components, data formats, and execution model for Si
 
 ### Implementation alignment note
 
-The current application is the single-user Gmail vertical slice of this design. The board, Telegram approval surface, liveness handling, authenticated legacy hooks and generalized `/event` endpoint, durable SQLite approvals/tasks/notifications, Gmail OAuth and sync, deterministic task extraction, scheduled digests, data export/deletion, reviewed Gmail replies, AES-256-GCM entity storage backed by OS-protected key storage, schema-constrained local entity recognition and local/frontier ranking over pseudonymized tasks, capability registration, unknown-capability rejection, and terminal desk-only policy are built. An isolated enforced frontier-model gateway, measured entity-recognition evaluation, complete future-action policy coverage, calendar/files, browser recipes, standing authority, payments, and multi-user operation remain proposed or explicitly excluded from this implementation cycle. The default model mode is local with deterministic fallback; no remote model call occurs unless explicitly configured.
+The current application is the single-user Gmail, Calendar, selected Drive, and browser-recipe vertical slice of this design. The board, Telegram approval surface, liveness handling, authenticated legacy hooks and generalized `/event` endpoint, durable SQLite approvals/tasks/notifications, redacted lifecycle audit records, Google OAuth and read-only connectors, deterministic task extraction, scheduled digests, data export/deletion, reviewed Gmail replies, AES-256-GCM entity storage backed by OS-protected key storage, schema-constrained local entity recognition and local/frontier ranking over pseudonymized tasks, capability registration, unknown-capability rejection, terminal desk-only policy, an isolated frontier-model gateway, browser recipe primitives, approval binding, durable browser execution attempts, and receipts are built. Complete site-specific browser adapters, complete future-action policy coverage, standing authority, payments, and multi-user operation remain proposed or explicitly excluded from this implementation cycle. The default model mode is local with deterministic fallback; no remote model call is required unless explicitly configured.
 
 ## Contents
 
@@ -164,13 +164,13 @@ Most mail is not a commitment, and running extraction over everything is both sl
 
 Only survivors reach extraction. This keeps cost near zero and, more importantly, keeps precision high by never asking the extractor about material that could only produce noise.
 
-### 3.4 Browser recipes **[proposed]**
+### 3.4 Browser recipes **[primitives built; site adapters proposed]**
 
 For tier 1 and 2, a browser extension records a task once as the sequence of API calls the site makes, maps the variable parts into named inputs, and replays it later from inside the user's logged-in page so the site's own code signs the requests.
 
 Recipes have an `effects` class — `read`, `reversible`, `commit` — which is the input to policy. Read recipes run freely, reversible ones are logged, commit ones require an approval before the first committing request. Response schemas are recorded so drift is detected before an action rather than after.
 
-Full design for capture, mapping, recipe format, and execution lives in the companion Relay document; from Signal Box's side a recipe is an executor capability with an effects class and a schema.
+Signal Box now validates recipe structure, evaluates assertions in the trusted host before a commit step, binds inputs and recipe digests to the action, stops before commit for approval, and records prepared/authorized/confirmed/awaiting-approval receipt states. The `uber.book-cab.v1` example demonstrates the complete flow against an injected browser adapter, and a Manifest V3 extension provides allowlisted navigation and page operations over authenticated loopback request/result endpoints with renderer-guided pairing and a persistent single-user browser session. Each bridge request is claimed once, exposes a polling heartbeat for setup diagnostics, expires safely, and rejects an abandoned executor wait. Frontier ranking is gated on local privacy-model availability and falls back to deterministic ranking otherwise. Calendar events can be edited through an ETag-checked, approval-bound Google Calendar action. A read-only quote preflight supports live selector validation without committing a booking; running it against a real provider account remains an external release check.
 
 ## 4. Privacy vault
 
@@ -372,12 +372,12 @@ Decision:
 | Actor | Mechanism | Reliability |
 |---|---|---|
 | Codex | `codex queue` with the saved thread ID | High; purpose-built command |
-| Claude Code | Prompt text and Enter as separate PTY events | Lower; terminal keystroke emulation |
+| Claude Code | Prompt text and Enter as separate PTY events, confirmed by the installed `UserPromptSubmit` hook | Medium; acknowledgement depends on the hook being installed and reachable |
 | Terminal | Fresh non-interactive shell in the saved directory | High; stdout and stderr returned |
 
-The Claude path is the one place the system violates its own principle, and it fails silently: a dropped or reordered Enter leaves an amber tile amber with no signal that the answer never landed.
+The Claude path still depends on the installed hook being reachable, but the board distinguishes local PTY submission from the hook acknowledgement and can surface an unknown outcome when that acknowledgement does not arrive.
 
-**[proposed]** Until a structured path exists, submission is *verified* rather than assumed. After writing, wait for a state transition or history entry within a bounded window; if neither appears, report delivery failure to the surface that asked. A known failure is recoverable; a silent one is not.
+For Claude, the installed `UserPromptSubmit` hook marks the delivery as acknowledged after the agent accepts the prompt. Generic PTY writes and Codex queue submissions remain `submitted` until a matching agent event arrives; if the event never arrives, the surface must show the outcome as unknown rather than treating the local write as proof.
 
 Terminal sessions run each command in a fresh shell, so `cd` and exported variables do not persist between commands. That isolation is deliberate.
 
@@ -515,7 +515,7 @@ Caps are enforced in code. Precision over recall: a missed task costs almost not
 
 ## 14. Audit log
 
-**[proposed]** Append-only, local, covering every request, decision, action, and receipt.
+**[built]** Redacted append-only local records cover accepted events, connector health and observations, requests, decisions, actions, notifications, feedback, and receipts. The log is reconstructable on the user's machine, not tamper-proof against its owner.
 
 ```jsonc
 { "ts": 1789546341102, "kind": "decision",
@@ -607,7 +607,7 @@ GET /api/approvals                 → { pending[] }
 
 **Extraction precision on real mail.** The number that decides whether anything downstream is worth building, and it is measurable in two weeks. Precision matters far more than recall: a plausible wrong task costs attention and trust, a missed one costs almost nothing.
 
-**Verifying Claude prompt delivery.** Keystroke emulation has no acknowledgement. A bounded wait detects failure but cannot distinguish a dropped Enter from a slow turn. A structured submission path would remove the problem; whether one is available is unknown.
+**Verifying non-Claude prompt delivery.** Generic PTY writes and Codex queue acceptance are local submission signals. Signal Box now moves them to visible `unknown` after a bounded acknowledgement window without duplicate resubmission; live sessions still need to confirm that installed agent notifications reliably arrive for those paths.
 
 **Soft-limit tuning.** One working-state timeout cannot serve both a lint fix and a long test run. Per-source defaults help; learned per-session baselines are themselves a guess.
 

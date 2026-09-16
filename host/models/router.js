@@ -29,49 +29,142 @@ class ModelRouter {
     this.localClient = localClient;
     this.frontierClient = frontierClient;
     this.mode = ['off', 'local', 'frontier'].includes(mode) ? mode : 'local';
+    this.metrics = {
+      rankingCalls: 0,
+      localCalls: 0,
+      frontierCalls: 0,
+      privacyTransforms: 0,
+      lastLocalCall: null,
+      lastRanking: null,
+      lastPrivacyCheck: null,
+    };
   }
 
   status() {
-    return { mode: this.mode, local: Boolean(this.localClient), frontier: Boolean(this.frontierClient), active: this.mode === 'frontier' ? Boolean(this.frontierClient) : this.mode === 'local' && Boolean(this.localClient) };
+    return { mode: this.mode, local: Boolean(this.localClient), frontier: Boolean(this.frontierClient), active: this.mode === 'frontier' ? Boolean(this.frontierClient && this.localClient) : this.mode === 'local' && Boolean(this.localClient) };
+  }
+
+  diagnostics() {
+    return {
+      ...this.status(),
+      localModel: this.localClient?.model || null,
+      frontierModel: this.frontierClient?.model || null,
+      metrics: JSON.parse(JSON.stringify(this.metrics)),
+    };
   }
 
   async rank(tasks = []) {
-    if (this.mode === 'off' || !tasks.length) return { items: [], source: 'deterministic' };
+    this.metrics.rankingCalls += 1;
+    if (this.mode === 'off' || !tasks.length) {
+      this.metrics.lastRanking = { source: 'deterministic', taskCount: tasks.length, at: Date.now() };
+      return { items: [], source: 'deterministic' };
+    }
     const client = this.mode === 'frontier' ? this.frontierClient : this.localClient;
-    if (!client) return { items: [], source: 'deterministic' };
+    if (!client) {
+      this.metrics.lastRanking = { source: 'deterministic', reason: 'model-not-configured', taskCount: tasks.length, at: Date.now() };
+      return { items: [], source: 'deterministic' };
+    }
+    // Do not call an unavailable local model. This keeps an uninstalled Ollama
+    // model from producing a request error on every scheduled digest.
+    if (typeof this.localClient?.availabilityDetails === 'function') {
+      let localDetails;
+      try { localDetails = await this.localClient.availabilityDetails(); } catch (_) { localDetails = { available: false, reason: 'local-model-unavailable' }; }
+      if (!localDetails.available) {
+        const reason = this.mode === 'frontier' ? 'local-privacy-model-unavailable' : localDetails.reason || 'local-model-unavailable';
+        this.metrics.lastRanking = { source: 'deterministic', reason, taskCount: tasks.length, at: Date.now() };
+        return { items: [], source: 'deterministic', reason };
+      }
+    } else if (this.mode === 'frontier' && typeof this.localClient?.available === 'function') {
+      let localAvailable = false;
+      try { localAvailable = await this.localClient.available(); } catch (_) { localAvailable = false; }
+      if (!localAvailable) {
+        this.metrics.lastRanking = { source: 'deterministic', reason: 'local-privacy-model-unavailable', taskCount: tasks.length, at: Date.now() };
+        return { items: [], source: 'deterministic', reason: 'local-privacy-model-unavailable' };
+      }
+    }
     const safeTasks = await Promise.all(tasks.map(async (task) => {
       const source = { taskId: task.taskId, summary: task.summary, owner: task.owner, blocker: task.blocker, counterparty: task.counterparty, dueDate: task.dueDate, confidence: task.confidence };
       const safe = { ...source };
       for (const key of ['summary', 'counterparty']) {
-        if (typeof source[key] === 'string') safe[key] = (await this.privacyGateway.pseudonymizeWithRecognizer(source[key], (text) => this.recognizeEntities(text))).text;
+        if (typeof source[key] === 'string') {
+          safe[key] = (await this.privacyGateway.pseudonymizeWithRecognizer(source[key], (text) => this.recognizeEntities(text))).text;
+          this.metrics.privacyTransforms += 1;
+        }
       }
       return this.privacyGateway.prepareRemotePayload(safe);
     }));
-    const result = await client.complete({
-      system: 'Rank personal obligations for a daily assistant. Return only JSON matching the schema. Never propose an action or change task state. Prefer precision over recall.',
-      prompt: JSON.stringify({ tasks: safeTasks }),
-      schema: RANK_SCHEMA,
-    });
-    return { items: validateRanking(result, tasks), source: this.mode };
+    const payloadText = JSON.stringify({ tasks: safeTasks });
+    this.metrics.lastPrivacyCheck = {
+      at: Date.now(),
+      fields: safeTasks.length,
+      redacted: !payloadText.match(/@[A-Z0-9.-]+\.[A-Z]{2,}/i),
+      payloadBytes: Buffer.byteLength(payloadText),
+      boundary: this.mode === 'frontier' ? 'pseudonymized-to-frontier' : 'local-model-only',
+    };
+    try {
+      if (this.mode === 'frontier') this.metrics.frontierCalls += 1;
+      else this.metrics.localCalls += 1;
+      const result = await client.complete({
+        system: 'Rank personal obligations for a daily assistant. Return only JSON matching the schema. Never propose an action or change task state. Prefer precision over recall.',
+        prompt: payloadText,
+        schema: RANK_SCHEMA,
+      });
+      const items = validateRanking(result, tasks);
+      this.metrics.lastRanking = { source: this.mode, taskCount: tasks.length, returned: items.length, at: Date.now(), status: 'ok' };
+      return { items, source: this.mode };
+    } catch (error) {
+      this.metrics.lastRanking = { source: this.mode, taskCount: tasks.length, at: Date.now(), status: 'error', error: error.message };
+      throw error;
+    }
   }
 
   async availability() {
-    const localAvailable = this.localClient?.available ? await this.localClient.available() : null;
-    return { ...this.status(), localAvailable, localModel: this.localClient?.model || null };
+    let localAvailable = null;
+    let localError = null;
+    if (this.localClient?.available) {
+      try {
+        if (typeof this.localClient.availabilityDetails === 'function') {
+          const details = await this.localClient.availabilityDetails();
+          localAvailable = details.available;
+          localError = details.reason;
+        } else localAvailable = await this.localClient.available();
+      }
+      catch (error) { localAvailable = false; localError = error.message; }
+    }
+    return { ...this.status(), localAvailable, localError, localModel: this.localClient?.model || null };
   }
 
   async recognizeEntities(text) {
     if (!this.localClient) return [];
-    const result = await this.localClient.complete({
-      system: 'Find named entities in the text. Return only exact spans from the text. Do not infer entities that are not present.',
-      prompt: String(text || ''),
-      schema: ENTITY_SCHEMA,
-    });
-    if (!Array.isArray(result?.entities)) return [];
-    const input = String(text || '');
-    return result.entities.filter((entity) => entity && ['person', 'organization', 'location', 'project'].includes(entity.type)
-      && Number.isInteger(entity.start) && Number.isInteger(entity.end) && entity.start >= 0 && entity.end > entity.start && entity.end <= input.length
-      && input.slice(entity.start, entity.end) === entity.value);
+    this.metrics.localCalls += 1;
+    try {
+      const result = await this.localClient.complete({
+        system: 'Find named entities in the text. Return only exact spans from the text. Do not infer entities that are not present.',
+        prompt: String(text || ''),
+        schema: ENTITY_SCHEMA,
+      });
+      this.metrics.lastLocalCall = { at: Date.now(), purpose: 'entity-recognition', status: 'ok' };
+      if (!Array.isArray(result?.entities)) return [];
+      const input = String(text || '');
+      return result.entities.filter((entity) => entity && ['person', 'organization', 'location', 'project'].includes(entity.type)
+        && Number.isInteger(entity.start) && Number.isInteger(entity.end) && entity.start >= 0 && entity.end > entity.start && entity.end <= input.length
+        && input.slice(entity.start, entity.end) === entity.value);
+    } catch (error) {
+      this.metrics.lastLocalCall = { at: Date.now(), purpose: 'entity-recognition', status: 'error', error: error.message };
+      throw error;
+    }
+  }
+
+  async probe() {
+    if (!this.localClient) throw new Error('No local model is configured.');
+    const marker = 'diagnostic.person@example.com';
+    const source = `Follow up with Morgan at ${marker} about the launch. Todo for Project Aurora.`;
+    const entities = await this.recognizeEntities(source);
+    const safe = (await this.privacyGateway.pseudonymizeWithRecognizer(source, (text) => this.recognizeEntities(text))).text;
+    const payload = JSON.stringify({ summary: safe });
+    const redacted = !payload.includes(marker) && !payload.includes('Morgan');
+    this.metrics.lastPrivacyCheck = { at: Date.now(), fields: 1, redacted, payloadBytes: Buffer.byteLength(payload), boundary: 'local-recognition-to-pseudonymized-payload' };
+    return { localCall: true, entitiesDetected: entities.length, redacted, sample: safe.replace(/ent_[a-f0-9]+/g, 'ent_[stable-id]') };
   }
 }
 
