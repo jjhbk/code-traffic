@@ -1,9 +1,25 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 const { preparePtyHelpers } = require('./scripts/prepare-pty-helpers');
+const path = require('node:path');
+
+const windowsCertificateFile = process.env.WINDOWS_CERTIFICATE_FILE || '';
+const windowsCertificatePassword = process.env.WINDOWS_CERTIFICATE_PASSWORD || '';
+const macIdentity = process.env.MACOS_SIGNING_IDENTITY || '';
+const appleId = process.env.APPLE_ID || '';
+const appleIdPassword = process.env.APPLE_APP_SPECIFIC_PASSWORD || '';
+const appleTeamId = process.env.APPLE_TEAM_ID || '';
 
 module.exports = {
   packagerConfig: {
+    name: 'signal-box',
+    executableName: 'signal-box',
+    appBundleId: 'com.signalbox.desktop',
+    productName: 'Signal Box',
+    icon: path.join(__dirname, 'branding', 'signal-box'),
+    ...(macIdentity ? { osxSign: { identity: macIdentity } } : {}),
+    ...(appleId && appleIdPassword && appleTeamId ? { osxNotarize: { appleId, appleIdPassword, teamId: appleTeamId } } : {}),
+    ...(windowsCertificateFile ? { windowsSign: { certificateFile: windowsCertificateFile, certificatePassword: windowsCertificatePassword } } : {}),
     // node-pty launches this executable by its app.asar.unpacked path.
     // AutoUnpackNatives only handles .node libraries, not spawn-helper.
     asar: { unpack: '**/node-pty/**/spawn-helper' },
@@ -17,7 +33,12 @@ module.exports = {
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
-      config: {},
+      config: {
+        name: 'signal_box',
+        setupExe: 'SignalBoxSetup.exe',
+        setupIcon: path.join(__dirname, 'branding', 'signal-box.ico'),
+        ...(windowsCertificateFile ? { certificateFile: windowsCertificateFile, certificatePassword: windowsCertificatePassword } : {}),
+      },
     },
     {
       name: '@electron-forge/maker-zip',
@@ -25,11 +46,28 @@ module.exports = {
     },
     {
       name: '@electron-forge/maker-deb',
-      config: {},
+      config: {
+        options: {
+          name: 'signal-box',
+          productName: 'Signal Box',
+          icon: path.join(__dirname, 'branding', 'signal-box.png'),
+          categories: ['Utility', 'Development'],
+          maintainer: 'Signal Box contributors',
+          homepage: 'https://github.com/jjhbk/code-traffic',
+        },
+      },
     },
     {
       name: '@electron-forge/maker-rpm',
-      config: {},
+      config: {
+        options: {
+          name: 'signal-box',
+          productName: 'Signal Box',
+          icon: path.join(__dirname, 'branding', 'signal-box.png'),
+          categories: ['Utility', 'Development'],
+          homepage: 'https://github.com/jjhbk/code-traffic',
+        },
+      },
     },
   ],
   plugins: [

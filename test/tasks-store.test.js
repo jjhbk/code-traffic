@@ -1,0 +1,27 @@
+const assert = require('node:assert/strict');
+const { SqliteStore } = require('../host/store/sqlite-store');
+const { TaskService } = require('../host/tasks/service');
+
+const store = new SqliteStore();
+store.saveObservation({ observationId: 'o1', messageId: 'm1', threadId: 't1', subject: 'Friday handoff', body: "I'll send the handoff by Friday.", direction: 'outgoing', to: ['client@example.com'] }, 'fake');
+const service = new TaskService({ store });
+const first = service.processAll('fake');
+assert.equal(first.length, 1);
+assert.equal(first[0].status, 'active');
+const taskId = first[0].taskId;
+assert.equal(service.processAll('fake')[0].preserved, true);
+assert.equal(store.correctTask(taskId, { summary: 'Corrected handoff' }).summary, 'Corrected handoff');
+store.setTaskStatus(taskId, 'dismissed', { reason: 'not useful' });
+assert.equal(store.listTasks().length, 0);
+assert.equal(store.listTasks({ includeDismissed: true })[0].status, 'dismissed');
+store.saveObservation({ observationId: 'o-snooze', messageId: 'm-snooze', threadId: 't-snooze', subject: 'Snoozed', body: "I'll send this by Friday.", direction: 'outgoing', to: ['client@example.com'] }, 'fake');
+const snoozed = service.processAll('fake').find((task) => task.summary === 'Snoozed');
+store.snoozeTask(snoozed.taskId, Date.now() + 60_000);
+assert.equal(store.listTasks().find((task) => task.taskId === snoozed.taskId).status, 'snoozed');
+store.setSuppression('counterparty', 'client@example.com');
+assert.equal(store.isSuppressed('counterparty', 'client@example.com'), true);
+store.saveObservation({ observationId: 'o2', messageId: 'm2', threadId: 't1', subject: 'Friday handoff', body: "I'll send the handoff by Friday.", direction: 'outgoing' }, 'fake');
+assert.equal(service.processAll('fake').length, 3, 'new evidence is tracked without changing the dismissed task');
+assert.equal(store.listTasks({ includeDismissed: true }).filter((task) => task.status === 'dismissed').length, 1);
+store.close();
+console.log('task store tests passed');

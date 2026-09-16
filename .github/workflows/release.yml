@@ -13,6 +13,17 @@ jobs:
   build:
     name: ${{ matrix.platform }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    env:
+      # Signing is optional until production certificates are provisioned.
+      RELEASE_SIGNING_REQUIRED: '0'
+      WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +63,34 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Prepare Windows signing certificate
+        if: matrix.platform == 'windows' && env.WINDOWS_CERTIFICATE_BASE64 != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:GITHUB_WORKSPACE\windows-signing.pfx", [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          "WINDOWS_CERTIFICATE_FILE=$env:GITHUB_WORKSPACE\windows-signing.pfx" >> $env:GITHUB_ENV
+
+      - name: Prepare macOS signing certificate
+        if: matrix.platform == 'macos' && env.MACOS_CERTIFICATE_BASE64 != ''
+        shell: bash
+        run: |
+          CERT_PATH="$RUNNER_TEMP/signal-box-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/signal-box-build.keychain-db"
+          printf '%s' "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$MACOS_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$MACOS_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Validate packaging assets
+        run: npm run check:packaging
+
+      - name: Validate signing configuration
+        run: npm run check:signing
 
       - name: Build distributables
         run: npm run make -- --arch=${{ matrix.arch }}

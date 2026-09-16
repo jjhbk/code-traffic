@@ -3,6 +3,14 @@
 Signal Box is an Electron desktop board for monitoring Claude Code and Codex CLI
 sessions and opening remotely controllable shell terminals.
 
+Signal Box puts your agent sessions in your pocket. When Claude needs a real
+answer, Telegram sends the question to your phone with inline buttons—tap an
+option and keep the work moving.
+
+<p align="center">
+  <img src="branding/telegram-claude-question.png" alt="Telegram showing a Claude question with inline answer buttons" width="480">
+</p>
+
 ## Quick Install
 
 The scripts detect your processor architecture and select the matching release.
@@ -273,6 +281,27 @@ be added as GitHub Actions secrets before public distribution. The workflow
 uses cross-architecture Forge builds; test the arm64 artifacts on their target
 systems, especially where native `node-pty` compilation is required.
 
+## Telegram control setup
+
+1. Open **@BotFather** in Telegram. Use `/newbot` to create a bot, or `/token`
+   to generate a token for an existing bot.
+2. Start Signal Box. Telegram is optional, so you can use Signal Box locally
+   without configuring it. To enable remote control, open **Telegram settings**
+   and enable it. Signal Box stores the credentials in the per-user application
+   data directory.
+3. After saving the token, open your bot in Telegram and send `/start`. The app
+   asks you to initialize the bot before accepting the chat ID. It replies with
+   that conversation's numeric chat ID:
+
+```text
+Your Signal Box chat ID is 123456789.
+```
+
+4. Enter the returned chat ID in the setup window. The app becomes ready only
+   after both values are saved, and only messages from that chat are accepted.
+
+Keep the bot token secret.
+
 ## Start
 
 ```bash
@@ -433,29 +462,7 @@ remain available.
 
 ## Telegram remote control
 
-1. Open **@BotFather** in Telegram. Use `/newbot` to create a bot, or `/token`
-   to generate a token for an existing bot.
-2. Start Signal Box. Telegram is optional, so you can use Signal Box locally
-   without configuring it. To enable remote control, open **Telegram settings**
-   and enable it. Signal Box stores the credentials in the per-user application
-   data directory:
-
-```bash
-npm start
-```
-
-3. After saving the token, open your bot in Telegram and send `/start`. The app
-   asks you to initialize the bot before accepting the chat ID. It replies with
-   that conversation's numeric chat ID:
-
-```text
-Your Signal Box chat ID is 123456789.
-```
-
-4. Enter the returned chat ID in the setup window. The app becomes ready only
-   after both values are saved, and only messages from that chat are accepted.
-
-Only messages from that chat are accepted. Keep the bot token secret.
+Only messages from the configured chat are accepted.
 
 Use `/sessions` once to open the session picker. Tap a session to select an owned session or view an external session, then use the inline **Recent**, **History**, **Status**, **Sessions**, and **Interrupt** buttons. Typed commands remain available for keyboard-oriented use.
 

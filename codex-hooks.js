@@ -29,9 +29,11 @@ function paths() {
   };
 }
 
-function command() { return JSON.stringify([nodeExecutable(), notifierPath()]); }
+function command(tokenFile = null) {
+  return JSON.stringify([nodeExecutable(), notifierPath(), ...(tokenFile ? ['--token-file', tokenFile] : [])]);
+}
 
-function install() {
+function install({ tokenFile = null } = {}) {
   const target = paths();
   fs.mkdirSync(target.directory, { recursive: true });
   const original = fs.existsSync(target.config) ? fs.readFileSync(target.config, 'utf8') : '';
@@ -43,7 +45,7 @@ function install() {
   // `tui.model_availability_nux.notify`) and Codex would reject the config.
   const firstTable = lines.findIndex((line) => /^\s*\[/.test(line));
   const insertAt = firstTable === -1 ? lines.length : firstTable;
-  lines.splice(insertAt, 0, `notify = ${command()}`, '');
+  lines.splice(insertAt, 0, `notify = ${command(tokenFile)}`, '');
   fs.writeFileSync(target.config, `${lines.join('\n')}\n`);
 }
 

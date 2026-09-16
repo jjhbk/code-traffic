@@ -4,6 +4,8 @@ const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { resolveCodexSessionId, findUniqueCodexSessionSince } = require('./codex-sessions');
+const { DEFAULTS: LIVENESS_DEFAULTS, livenessFor } = require('./liveness');
+const { normalizeEvent } = require('./host/events/event-contract');
 
 const STATES = new Set(['working', 'approval', 'done', 'closed']);
 
@@ -59,8 +61,7 @@ function userQuestionsFromHook(payload) {
   })).filter((question) => question.question);
 }
 
-function sessionDetails(key, tile, sessionId, cwd, owned, agent = null) {
-  const now = Date.now();
+function sessionDetails(key, tile, sessionId, cwd, owned, agent = null, now = Date.now()) {
   return {
     key,
     tile: tile || null,
@@ -73,15 +74,25 @@ function sessionDetails(key, tile, sessionId, cwd, owned, agent = null) {
     created: now,
     owned: Boolean(owned),
     agent,
+    lastObservedAt: now,
+    liveness: 'inactive',
+    livenessLevel: null,
+    hardEscalationAt: null,
+    processStatus: owned ? 'starting' : 'unknown',
+    delivery: null,
   };
 }
 
 class Board extends EventEmitter {
-  constructor({ storagePath = null, historyProvider = null } = {}) {
+  constructor({ storagePath = null, historyProvider = null, liveness = {}, clock = () => Date.now(), authToken = null, store = null } = {}) {
     super();
     this.storagePath = storagePath;
     this.archivePath = storagePath ? `${storagePath}.archive` : null;
     this.historyProvider = historyProvider;
+    this.clock = clock;
+    this.authToken = authToken || null;
+    this.store = store;
+    this.livenessLimits = { ...LIVENESS_DEFAULTS, ...liveness };
     this.sessions = new Map();
     this.archived = new Map();
     this.restore();
@@ -100,6 +111,12 @@ class Board extends EventEmitter {
           owned: Boolean(record.owned),
           state: record.state || null,
           agent: record.agent || null,
+          lastObservedAt: Number(record.lastObservedAt || record.since || this.clock()),
+          liveness: record.liveness || 'inactive',
+          livenessLevel: record.livenessLevel || null,
+          hardEscalationAt: record.hardEscalationAt || null,
+          processStatus: record.processStatus || (record.owned ? 'unknown' : 'unknown'),
+          delivery: record.delivery || null,
         });
       }
     } catch (_) { /* A missing or corrupt cache must not prevent startup. */ }
@@ -134,7 +151,7 @@ class Board extends EventEmitter {
     if (!tile) throw new Error('A tile id is required');
     const existing = this.sessions.get(tile);
     if (existing) return existing;
-    const session = sessionDetails(tile, tile, null, cwd, true, agent);
+    const session = sessionDetails(tile, tile, null, cwd, true, agent, this.clock());
     this.sessions.set(tile, session);
     this.persist();
     this.emit('change');
@@ -145,7 +162,7 @@ class Board extends EventEmitter {
     if (!key || this.sessions.has(key)) return this.sessions.get(key);
     const existing = [...this.sessions.values()].find((session) => !session.owned && session.cwd === cwd);
     if (existing) return existing;
-    const session = sessionDetails(key, null, null, cwd, false, agent);
+    const session = sessionDetails(key, null, null, cwd, false, agent, this.clock());
     this.sessions.set(key, session);
     this.persist();
     this.emit('change', { key, state: null });
@@ -204,6 +221,19 @@ class Board extends EventEmitter {
 
   handleHook(state, tile, payload) {
     if (!STATES.has(state)) return;
+    const event = normalizeEvent({
+      state,
+      tile,
+      eventId: payload?.event_id || payload?.eventId,
+      adapterId: payload?.adapter_id || payload?.adapterId || payload?.agent || 'hook',
+      producerEpoch: payload?.producer_epoch || payload?.producerEpoch || null,
+      sequence: payload?.sequence,
+      payload,
+    });
+    if (this.store) {
+      const accepted = this.store.ingestEvent(event);
+      if (!accepted.accepted && (accepted.duplicate || accepted.stale)) return;
+    }
     let sessionId = payload && typeof payload.session_id === 'string' ? payload.session_id : null;
     const cwd = payload && typeof payload.cwd === 'string' ? payload.cwd : '';
     const key = tile || sessionId;
@@ -244,13 +274,30 @@ class Board extends EventEmitter {
     }
     if (!session) {
       if (state === 'closed') return;
-      session = sessionDetails(key, tile || null, sessionId, cwd, false);
+      session = sessionDetails(key, tile || null, sessionId, cwd, false, null, this.clock());
       session.state = state;
+      session.liveness = ['working', 'approval'].includes(state) ? 'healthy' : 'inactive';
+      session.livenessLevel = null;
       this.sessions.set(key, session);
       this.persist();
       this.emit('change', { key, state });
     } else {
       let metadataChanged = bindingChanged;
+      session.lastObservedAt = this.clock();
+      session.processStatus = 'running';
+      const previousLiveness = session.liveness;
+      session.liveness = ['working', 'approval'].includes(state) ? 'healthy' : 'inactive';
+      session.livenessLevel = null;
+      if (session.liveness === 'healthy') session.hardEscalationAt = null;
+      if (previousLiveness !== 'healthy') metadataChanged = true;
+      if (payload?.submitted) {
+        session.delivery = {
+          ...(session.delivery || {}),
+          status: 'acknowledged',
+          at: this.clock(),
+        };
+        metadataChanged = true;
+      }
       if (sessionId && session.sessionId !== sessionId) {
         session.sessionId = sessionId;
         metadataChanged = true;
@@ -290,7 +337,7 @@ class Board extends EventEmitter {
       const nextState = state === 'closed' ? null : state;
       if (session.state !== nextState) {
         session.state = nextState;
-        session.since = Date.now();
+        session.since = this.clock();
         this.persist();
         this.emit('change', { key, state: nextState });
       } else {
@@ -298,6 +345,51 @@ class Board extends EventEmitter {
         this.emit('change', nextState === 'approval' ? { key, state: nextState, repeated: true } : undefined);
       }
     }
+  }
+
+  checkLiveness(now = this.clock()) {
+    const changes = [];
+    for (const session of this.sessions.values()) {
+      const next = livenessFor(session, now, this.livenessLimits);
+      const changed = session.liveness !== next.status || session.livenessLevel !== next.level;
+      if (!changed) continue;
+      const recovered = ['stale', 'unknown'].includes(session.liveness) && next.status === 'healthy';
+      session.liveness = next.status;
+      session.livenessLevel = next.level;
+      if (next.level === 'hard' && !session.hardEscalationAt) {
+        session.hardEscalationAt = now;
+        changes.push({ key: session.key, state: session.state, liveness: next.status, livenessLevel: next.level, escalation: true });
+      } else if (recovered) {
+        session.hardEscalationAt = null;
+        changes.push({ key: session.key, state: session.state, liveness: next.status, recovered: true });
+      } else {
+        changes.push({ key: session.key, state: session.state, liveness: next.status, livenessLevel: next.level });
+      }
+      this.persist();
+      this.emit('change', changes.at(-1));
+    }
+    return changes;
+  }
+
+  processExited(tile, { code = null, signal = null } = {}) {
+    const session = this.sessions.get(tile);
+    if (!session) return false;
+    session.processStatus = 'exited';
+    session.exit = { code, signal, at: this.clock() };
+    session.liveness = 'unknown';
+    session.livenessLevel = 'process-exited';
+    this.persist();
+    this.emit('change', { key: tile, state: session.state, liveness: 'unknown', processExited: true });
+    return true;
+  }
+
+  recordDelivery(tile, status, details = {}) {
+    const session = this.sessions.get(tile);
+    if (!session || !['submitted', 'acknowledged', 'failed', 'unknown'].includes(status)) return false;
+    session.delivery = { status, at: this.clock(), ...details };
+    this.persist();
+    this.emit('change', { key: tile, state: session.state, delivery: session.delivery });
+    return true;
   }
 
   completePendingDone(tile) {
@@ -309,6 +401,10 @@ class Board extends EventEmitter {
 
   listen(port = 4747, host = '127.0.0.1') {
     this.server = http.createServer((request, response) => {
+      if (this.authToken && request.headers['x-signal-box-token'] !== this.authToken) {
+        sendJson(response, 401, { error: 'Signal Box authentication required.' });
+        return;
+      }
       let url;
       try { url = new URL(request.url, `http://${host}`); }
       catch (_) { sendJson(response, 400, { error: 'Invalid request URL.' }); return; }
@@ -364,8 +460,12 @@ class Board extends EventEmitter {
             payload = {};
           }
         }
-        this.handleHook(state, tile, payload);
-        sendJson(response, 200, { ok: true });
+        try {
+          this.handleHook(state, tile, payload);
+          sendJson(response, 200, { ok: true });
+        } catch (error) {
+          sendJson(response, 400, { error: error.message });
+        }
       });
     });
     return new Promise((resolve, reject) => {

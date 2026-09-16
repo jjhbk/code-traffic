@@ -31,16 +31,20 @@ function telegramErrorText(error) {
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, sendPrompt, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, getHistory, ensureSession, writeSession, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
+    this.listTasks = listTasks;
+    this.updateTask = updateTask;
     this.getHistory = getHistory;
     this.ensureSession = ensureSession;
     this.writeSession = writeSession;
     this.executeTerminal = executeTerminal;
     this.interruptTerminal = interruptTerminal;
     this.sendPrompt = sendPrompt;
+    this.approvalService = approvalService;
+    this.approveMailReply = approveMailReply;
     this.submitDelayMs = submitDelayMs;
     this.approvalRetryMs = approvalRetryMs;
     this.fetch = fetchImpl;
@@ -120,6 +124,20 @@ class TelegramControl {
     }
   }
 
+  async sendReplyApproval(request) {
+    if (!this.enabled || !this.configured || !request?.action) return false;
+    const action = request.action;
+    const approve = this.addAction({ type: 'mail-reply-approval', requestId: request.request_id || request.requestId, optionId: 'send' });
+    const deny = this.addAction({ type: 'mail-reply-denial', requestId: request.request_id || request.requestId, optionId: 'deny' });
+    await this.send(`✉️ Review Gmail reply\n\nTo: ${action.destination}\nSubject: ${action.content.subject}\n\n${action.content.body}\n\n${action.consequences}`, {
+      reply_markup: { inline_keyboard: [[
+        { text: 'Send reply', callback_data: approve },
+        { text: 'Cancel', callback_data: deny },
+      ]] },
+    });
+    return true;
+  }
+
   addAction(action) {
     const token = `action:${crypto.randomBytes(8).toString("hex")}`;
     this.actions.set(token, action);
@@ -178,7 +196,13 @@ class TelegramControl {
       await this.send('There are no pending permissions or questions.');
       return;
     }
-    for (const session of approvals) this.notifyState(session, 'approval');
+    for (const session of approvals) {
+      // Refresh is an explicit request for a new approval surface. Clear the
+      // in-memory buttons and signature cache first so an unchanged question
+      // is still reissued with a fresh durable request and callback token.
+      this.clearApproval(session.tile || session.key);
+      this.notifyState(session, 'approval');
+    }
     await this.send(`Refreshed ${approvals.length} pending approval${approvals.length === 1 ? '' : 's'}.`);
   }
 
@@ -315,6 +339,12 @@ class TelegramControl {
           this.actions.delete(query.data);
           throw new Error('This approval has expired. Wait for the current question.');
         }
+        if (this.approvalService && action.requestId) {
+          this.approvalService.decide(action.requestId, action.optionId, {
+            principal: this.chatId,
+            surface: 'telegram',
+          });
+        }
         if (action.questionSignature) {
           if (!this.answeredApprovals.has(action.tile)) this.answeredApprovals.set(action.tile, new Set());
           this.answeredApprovals.get(action.tile).add(action.questionSignature);
@@ -330,14 +360,51 @@ class TelegramControl {
         try {
           this.writeSession(action.tile, action.keys, { approval: true });
         } catch (error) {
+          if (this.approvalService && action.requestId) {
+            try {
+              this.approvalService.execution({
+                requestId: action.requestId,
+                status: 'failed',
+                details: { channel: 'telegram', tile: action.tile, error: error.message },
+              });
+            } catch (_) { /* Preserve the original dispatch error for the user. */ }
+          }
           this.answeredApprovals.get(action.tile)?.delete(action.questionSignature);
           this.approvalNotifications.delete(action.tile);
           this.notifyState(session, 'approval');
           throw error;
         }
+        if (this.approvalService && action.requestId) {
+          try {
+            this.approvalService.execution({
+              requestId: action.requestId,
+              status: 'dispatched',
+              details: { channel: 'telegram', tile: action.tile, optionId: action.optionId },
+            });
+          } catch (error) {
+            // The agent input was already written. Keep the approval resolved
+            // and report the persistence problem without retrying the input.
+            console.error(`[telegram] could not record approval dispatch: ${error.message}`);
+          }
+        }
         this.selectedTile = action.tile;
         await this.acknowledgeAnswer(query, action.label, action.questionSignature, answeredTokens);
         this.approvalNotifications.delete(action.tile);
+      } else if (action.type === 'digest-feedback') {
+        this.recordDigestFeedback?.(action.notificationId, action.useful);
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Thanks for the feedback.' });
+      } else if (action.type === 'task-status') {
+        if (!this.updateTask) throw new Error('Task controls are unavailable.');
+        await this.updateTask(action.taskId, action.status);
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Task updated.' });
+      } else if (action.type === 'mail-reply-approval') {
+        if (!this.approveMailReply) throw new Error('Reply controls are unavailable.');
+        await this.approveMailReply(action.requestId, this.chatId, 'telegram');
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Reply sent.' });
+      } else if (action.type === 'mail-reply-denial') {
+        if (!this.approvalService) throw new Error('Reply controls are unavailable.');
+        this.approvalService.decide(action.requestId, 'deny', { principal: 'signal-box-user', surface: 'telegram' });
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Reply cancelled.' });
       } else if (action.type === 'select') {
         const session = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
         if (!session) throw new Error('That session is no longer available.');
@@ -379,6 +446,17 @@ class TelegramControl {
     }
     if (name === 'refresh') {
       await this.refreshApprovals();
+      return;
+    }
+    if (name === 'today') {
+      const tasks = this.listTasks().filter((task) => task.status === 'active');
+      if (!tasks.length) { await this.send('There are no active tasks.'); return; }
+      const text = tasks.map((task, index) => `${index + 1}. ${task.summary}${task.dueDate ? ` — due ${task.dueDate}` : ''}${task.evidence?.text ? `\n   Evidence: ${task.evidence.text.slice(0, 180)}` : ''}`).join('\n\n');
+      const inline_keyboard = tasks.flatMap((task) => [[
+        { text: `Done · ${task.summary}`.slice(0, 64), callback_data: this.addAction({ type: 'task-status', taskId: task.taskId, status: 'done' }) },
+        { text: 'Not useful', callback_data: this.addAction({ type: 'task-status', taskId: task.taskId, status: 'dismissed' }) },
+      ]]);
+      await this.send(`Today\n\n${text}`, { reply_markup: { inline_keyboard } });
       return;
     }
     if (name === 'sessions') {
@@ -551,11 +629,36 @@ class TelegramControl {
       questions.forEach((question, questionIndex) => {
         const questionSignature = JSON.stringify(question);
         if (this.answeredApprovals.get(tile)?.has(questionSignature)) return;
+        let persistedApproval = null;
+        if (this.approvalService) {
+          try {
+            persistedApproval = this.approvalService.request({
+              capability: 'agent.input',
+              target: tile,
+              question: question.question,
+              questionSignature,
+              options: (question.options || []).map((option, index) => ({
+                optionId: `option-${index + 1}`,
+                label: option.label,
+                description: option.description || '',
+              })),
+            }, {
+              principal: this.chatId,
+              surfaces: ['telegram'],
+            });
+          } catch (error) {
+            console.error(`[telegram] could not persist approval: ${error.message}`);
+            return;
+          }
+        }
         (question.options || []).forEach((option, optionIndex) => {
+          const optionId = `option-${optionIndex + 1}`;
           const token = this.addAction({
             type: 'answer',
             tile,
             label: option.label,
+            optionId,
+            requestId: persistedApproval?.request_id || null,
             questionSignature,
             keys: option.keys || `${'\x1b[B'.repeat(optionIndex)}${question.multiSelect ? ' \r' : '\r'}`,
           });

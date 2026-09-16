@@ -1,0 +1,52 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { SqliteStore } = require('../host/store/sqlite-store');
+const { ApprovalService } = require('../host/approvals/service');
+const { normalizeEvent } = require('../host/events/event-contract');
+
+let now = 1000;
+const store = new SqliteStore({ clock: () => now });
+const imported = store.importSessions([{ key: 'legacy-1', tile: 'legacy-1', owned: true, cwd: '/tmp/project' }]);
+assert.equal(imported.imported, true);
+assert.equal(imported.count, 1);
+assert.equal(store.importSessions([{ key: 'legacy-2', owned: false }]).imported, false);
+assert.deepEqual(store.importedSessions()[0].key, 'legacy-1');
+assert.equal(normalizeEvent({ state: 'working', eventId: 'event-1', sequence: 2 }).type, 'working');
+assert.throws(() => normalizeEvent({ state: 'not-a-state' }), /Unsupported event/);
+assert.equal(store.ingestEvent({ eventId: 'e1', adapterId: 'fake', producerEpoch: 'p1', sequence: 1, type: 'working', payload: { tile: 'one' } }).accepted, true);
+assert.equal(store.ingestEvent({ eventId: 'e1', adapterId: 'fake', producerEpoch: 'p1', sequence: 1, type: 'working', payload: { tile: 'one' } }).duplicate, true);
+assert.equal(store.ingestEvent({ eventId: 'e0', adapterId: 'fake', producerEpoch: 'p1', sequence: 0, type: 'working', payload: { tile: 'one' } }).stale, true);
+assert.equal(store.ingestEvent({ eventId: 'e2', adapterId: 'fake', producerEpoch: 'p2', sequence: 1, type: 'done', payload: { tile: 'one' } }).accepted, true);
+
+const approvals = new ApprovalService({ store, clock: () => now });
+const request = approvals.request({ capability: 'desk.prompt', target: 'session:one' }, { principal: 'local-user', surfaces: ['desktop', 'telegram'], expiresAt: 2000 });
+assert.equal(request.status, 'pending');
+const decision = approvals.decide(request.request_id, 'allow', { principal: 'local-user', surface: 'desktop' });
+assert.equal(decision.optionId, 'allow');
+const attempt = approvals.execution({ requestId: request.request_id, status: 'dispatched', details: { channel: 'test' } });
+assert.equal(attempt.status, 'dispatched');
+assert.equal(approvals.execution({ attemptId: attempt.attemptId, requestId: request.request_id, status: 'confirmed' }).status, 'confirmed');
+assert.throws(() => approvals.execution({ attemptId: attempt.attemptId, requestId: request.request_id, status: 'failed' }), /Invalid execution transition/);
+assert.equal(approvals.receipt({ attemptId: attempt.attemptId, receipt: { result: 'ok' } }).attemptId, attempt.attemptId);
+assert.throws(() => approvals.decide(request.request_id, 'allow', { principal: 'local-user', surface: 'desktop' }), /already resolved/);
+
+const expiring = approvals.request({ capability: 'desk.prompt', target: 'session:two' }, { principal: 'local-user', expiresAt: 1100 });
+now = 1100;
+assert.throws(() => approvals.decide(expiring.request_id, 'allow', { principal: 'local-user', surface: 'desktop' }), /expired/);
+assert.throws(() => approvals.request({ capability: 'unknown' }, { principal: 'local-user' }), /Unknown capabilities/);
+assert.throws(() => approvals.decide(expiring.request_id, 'allow', { principal: 'other-user', surface: 'desktop' }), /already resolved|expired/);
+store.close();
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-store-'));
+const filename = path.join(directory, 'signal-box.db');
+const first = new SqliteStore({ filename });
+first.importSessions([{ key: 'persisted', owned: true, cwd: '/tmp/persisted' }]);
+first.close();
+const reopened = new SqliteStore({ filename });
+assert.equal(reopened.importSessions([{ key: 'new-record' }]).imported, false);
+assert.equal(reopened.importedSessions()[0].key, 'persisted');
+reopened.close();
+fs.rmSync(directory, { recursive: true, force: true });
+console.log('phase B tests passed');

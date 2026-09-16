@@ -1,8 +1,9 @@
+require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
-const { app, BrowserWindow, dialog, ipcMain, Notification, screen } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, safeStorage, screen, shell } = require('electron');
 const { Board } = require('./board');
 const { runningAgents } = require('./processes');
 const { sessionArgs } = require('./session-command');
@@ -17,6 +18,17 @@ const { startCodexMonitor, terminalApprovalQuestion } = require('./codex-monitor
 const { readSettings, writeSettings } = require('./app-settings');
 const { install: installClaudeHooks } = require('./hooks');
 const { install: installCodexHooks } = require('./codex-hooks');
+const { SqliteStore } = require('./host/store/sqlite-store');
+const { ApprovalService } = require('./host/approvals/service');
+const { GoogleOAuth, GmailProvider } = require('./host/mail/google');
+const { createReplyProposal } = require('./host/actions/mail-reply');
+const { ProtectedCredentialStore } = require('./host/mail/credentials');
+const { createOAuthState, waitForOAuthCallback } = require('./host/mail/oauth-callback');
+const { MailSync } = require('./host/mail/sync');
+const { TaskService } = require('./host/tasks/service');
+const { DigestScheduler } = require('./host/scheduling/digest');
+
+const GOOGLE_CLIENT_ID = process.env.SIGNAL_BOX_GOOGLE_CLIENT_ID || '';
 
 const hasSingleInstance = app.requestSingleInstanceLock();
 if (!hasSingleInstance) {
@@ -36,6 +48,15 @@ if (disableSandbox) {
   app.commandLine.appendSwitch('no-sandbox');
 }
 
+// WSL has a D-Bus Secret Service from GNOME Keyring but usually does not
+// advertise a desktop environment, so Electron can otherwise select basic_text.
+if (process.platform === 'linux' && process.env.WSL_INTEROP) {
+  app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
+  // WSLg's Wayland path can lose the native cursor in Electron windows.
+  // X11 is the stable WSLg backend for Signal Box's desktop window.
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+}
+
 // WSLg/Wayland can expose a display while the GPU shared-image path is unavailable.
 // Electron's software renderer is reliable for this small board and xterm view.
 if (process.platform === 'linux' && (process.env.WSL_DISTRO_NAME || process.env.WAYLAND_DISPLAY)) {
@@ -48,6 +69,14 @@ let board;
 let pty;
 let telegram;
 let stopCodexMonitor;
+let livenessTimer;
+let hostStore;
+let approvalService;
+let mailCredentials;
+let mailSync;
+let taskService;
+let digestScheduler;
+let mailSyncTimer;
 let appSettings = {};
 const codexTerminalQuestions = new Map();
 const terminals = new Map();
@@ -80,9 +109,8 @@ function createWindow() {
     y,
     minWidth,
     minHeight,
-    maxWidth,
-    maxHeight,
     backgroundColor: '#10141a',
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -90,10 +118,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  windowRef.webContents.on('console-message', (_event, detailsOrLevel, message, lineNumber, sourceId) => {
-    const details = typeof detailsOrLevel === 'object'
-      ? detailsOrLevel
-      : { level: detailsOrLevel, message, lineNumber, sourceId };
+  windowRef.webContents.on('console-message', (_event, details) => {
     console.error(`[renderer:${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})`);
   });
   windowRef.webContents.on('did-finish-load', () => console.error('[renderer] loaded'));
@@ -106,6 +131,12 @@ function createWindow() {
 }
 
 function windowStatePath() { return path.join(app.getPath('userData'), 'window.json'); }
+
+function configureUserDataPath() {
+  app.setName('signal-box');
+  app.setPath('userData', path.join(app.getPath('appData'), 'signal-box'));
+}
+
 function readWindowState() {
   try { return JSON.parse(fs.readFileSync(windowStatePath(), 'utf8')); } catch (_) { return {}; }
 }
@@ -116,9 +147,108 @@ function saveWindowState(bounds) {
   } catch (_) { /* Window persistence is best effort. */ }
 }
 
+function hookTokenPath() { return path.join(app.getPath('userData'), 'hook-token'); }
+function ensureHookToken() {
+  const file = hookTokenPath();
+  try {
+    const current = fs.readFileSync(file, 'utf8').trim();
+    if (current) {
+      try { fs.chmodSync(file, 0o600); } catch (_) { /* Windows ACLs are managed by the user profile. */ }
+      return { file, token: current };
+    }
+  } catch (_) { /* Create it below. */ }
+  const token = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${token}\n`, { mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch (_) { /* Windows ACLs are managed by the user profile. */ }
+  return { file, token };
+}
+
+function openExternalUrl(url) {
+  if (process.platform === 'linux' && process.env.WSL_INTEROP) {
+    return new Promise((resolve, reject) => {
+      const escaped = url.replace(/'/g, "''");
+      const child = spawn('powershell.exe', ['-NoProfile', '-Command', `Start-Process -FilePath '${escaped}'`], { stdio: 'ignore' });
+      child.once('error', reject);
+      child.once('exit', (code) => {
+        if (code === 0) return resolve(true);
+        shell.openExternal(url).then(() => resolve(true)).catch((error) => reject(new Error(`Windows browser launcher exited with code ${code}: ${error.message}`)));
+      });
+    });
+  }
+  return shell.openExternal(url).then(() => true);
+}
+
 function wireIpc() {
+  if (typeof Menu !== 'undefined') Menu.setApplicationMenu?.(null);
+  ipcMain.handle('window:minimize', () => { windowRef?.minimize(); return true; });
+  ipcMain.handle('window:toggle-maximize', () => {
+    if (windowRef?.isMaximized()) windowRef.unmaximize();
+    else windowRef?.maximize();
+    return Boolean(windowRef?.isMaximized());
+  });
+  ipcMain.handle('window:close', () => { windowRef?.close(); return true; });
+  ipcMain.handle('external:open', (_event, target) => {
+    const url = new URL(String(target || ''));
+    const allowedHosts = ['console.cloud.google.com', 'support.google.com', 'developers.google.com', 'cloud.google.com'];
+    const isAllowedHost = allowedHosts.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
+    if (url.protocol !== 'https:' || !isAllowedHost) {
+      throw new Error('Signal Box can only open official Google setup pages.');
+    }
+    return openExternalUrl(url.toString()).catch((error) => {
+      throw new Error(`Could not open your default browser: ${error.message}`);
+    });
+  });
+  ipcMain.handle('clipboard:read', () => clipboard.readText());
+  ipcMain.handle('clipboard:write', (_event, text = '') => { clipboard.writeText(String(text)); return true; });
   ipcMain.handle('sessions:list', () => board.list());
   ipcMain.handle('sessions:archived-list', () => board.listArchived());
+  ipcMain.handle('tasks:list', () => hostStore?.listTasks() || []);
+  ipcMain.handle('tasks:update', (_event, { taskId, status } = {}) => {
+    if (!hostStore) throw new Error('Task storage is unavailable.');
+    return hostStore.setTaskStatus(taskId, status);
+  });
+  ipcMain.handle('tasks:snooze', (_event, { taskId, untilAt } = {}) => {
+    if (!hostStore) throw new Error('Task storage is unavailable.');
+    return hostStore.snoozeTask(taskId, untilAt);
+  });
+  ipcMain.handle('tasks:suppress-counterparty', (_event, { counterparty, untilAt = null } = {}) => {
+    if (!hostStore) throw new Error('Task storage is unavailable.');
+    hostStore.setSuppression('counterparty', counterparty, untilAt, 'user');
+    return true;
+  });
+  ipcMain.handle('tasks:list-suppressions', () => hostStore?.listSuppressions() || []);
+  ipcMain.handle('tasks:remove-suppression', (_event, { scopeType, scopeKey } = {}) => {
+    if (!hostStore) throw new Error('Task storage is unavailable.');
+    hostStore.removeSuppression(scopeType, scopeKey);
+    return true;
+  });
+  ipcMain.handle('tasks:correct', (_event, { taskId, changes } = {}) => {
+    if (!hostStore) throw new Error('Task storage is unavailable.');
+    return hostStore.correctTask(taskId, changes);
+  });
+  ipcMain.handle('digest:get-settings', () => ({
+    quietHoursStart: appSettings.quietHoursStart || '',
+    quietHoursEnd: appSettings.quietHoursEnd || '',
+    dailyCap: Number.isInteger(appSettings.dailyDigestCap) ? appSettings.dailyDigestCap : 5,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    stats: hostStore?.notificationStats() || { delivery: {}, feedback: {} },
+    history: hostStore?.listNotifications() || [],
+  }));
+  ipcMain.handle('digest:save-settings', (_event, { quietHoursStart = '', quietHoursEnd = '', dailyCap = 5 } = {}) => {
+    const validTime = (value) => value === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+    const cap = Number(dailyCap);
+    if (!validTime(quietHoursStart) || !validTime(quietHoursEnd)) throw new Error('Quiet hours must use HH:MM format.');
+    if (!Number.isInteger(cap) || cap < 1 || cap > 50) throw new Error('Daily digest cap must be between 1 and 50.');
+    appSettings = { ...appSettings, quietHoursStart, quietHoursEnd, dailyDigestCap: cap };
+    writeSettings(app.getPath('userData'), appSettings);
+    if (digestScheduler) {
+      digestScheduler.quietStart = quietHoursStart || null;
+      digestScheduler.quietEnd = quietHoursEnd || null;
+      digestScheduler.dailyCap = cap;
+    }
+    return { quietHoursStart, quietHoursEnd, dailyCap: cap };
+  });
   ipcMain.handle('settings:get', () => ({
     configured: Boolean(appSettings.telegramBotToken && appSettings.telegramChatId),
     enabled: appSettings.telegramEnabled === true
@@ -147,6 +277,84 @@ function wireIpc() {
       chatId: savedChatId,
       tokenChanged,
     };
+  });
+  ipcMain.handle('mail:status', () => {
+    const account = mailCredentials?.load('gmail-account') || '';
+    const adapterId = account ? `gmail:${account}` : null;
+    return { paired: Boolean(mailCredentials?.load('gmail-refresh-token')), provider: 'gmail', account, clientId: mailCredentials?.load('gmail-client-id') || GOOGLE_CLIENT_ID || '', storageAvailable: Boolean(mailCredentials), storageMessage: mailCredentials ? null : 'Signal Box cannot access the OS credential store. Start a desktop keyring service, then restart Signal Box.', health: adapterId ? hostStore?.getConnectorHealth(adapterId) || null : null };
+  });
+  ipcMain.handle('mail:sync', async () => runMailSync());
+  ipcMain.handle('mail:propose-reply', async (_event, { taskId, subject, body } = {}) => {
+    if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
+    const task = hostStore.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
+    if (!task) throw new Error('Task not found.');
+    const action = createReplyProposal({
+      to: task.counterparty,
+      subject: subject || (String(task.summary || '').startsWith('Re:') ? task.summary : `Re: ${task.summary || 'Follow up'}`),
+      body,
+      threadId: task.threadId,
+    });
+    const approval = approvalService.request(action, { principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], expiresAt: Date.now() + 10 * 60 * 1000 });
+    try { await telegram?.sendReplyApproval(approval); } catch (error) { console.error(`[telegram] reply approval notification failed: ${error.message}`); }
+    return approval;
+  });
+  ipcMain.handle('mail:send-approved-reply', async (_event, { requestId } = {}) => {
+    return dispatchApprovedReply(requestId, 'signal-box-user', 'desktop');
+  });
+  ipcMain.handle('mail:reconcile-reply', async (_event, { requestId, attemptId } = {}) => reconcileApprovedReply(requestId, attemptId, 'desktop'));
+  ipcMain.handle('mail:disconnect', () => {
+    if (!mailCredentials) {
+      const error = new Error('Secure credential storage is unavailable. Start your desktop keyring service (GNOME Keyring, KDE Wallet, or Secret Service), then restart Signal Box.');
+      error.code = 'CREDENTIAL_STORAGE_UNAVAILABLE';
+      throw error;
+    }
+    for (const name of ['gmail-refresh-token', 'gmail-client-id', 'gmail-client-secret', 'gmail-account']) mailCredentials.delete(name);
+    mailSync = null;
+    return { paired: false, provider: 'gmail' };
+  });
+  ipcMain.handle('mail:pair', async (_event, { clientId: submittedClientId = '', clientSecret: submittedClientSecret = '' } = {}) => {
+    if (!mailCredentials) throw new Error('Protected credential storage is unavailable.');
+    const clientId = String(submittedClientId || GOOGLE_CLIENT_ID || mailCredentials.load('gmail-client-id') || '').trim();
+    const clientSecret = String(submittedClientSecret || mailCredentials.load('gmail-client-secret') || '').trim();
+    if (!clientId) throw new Error('Google connection is not configured in this Signal Box build.');
+    const codeVerifier = crypto.randomBytes(48).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+    const state = createOAuthState();
+    let ready;
+    let rejectReady;
+    const readyPromise = new Promise((resolve, reject) => { ready = resolve; rejectReady = reject; });
+    const callback = waitForOAuthCallback({
+      expectedState: state,
+      onReady: ({ host, port }) => {
+        ready({ host, port });
+        windowRef?.webContents.send('mail:pair-progress', { stage: 'waiting-for-google', redirectUri: `http://${host}:${port}/oauth/callback` });
+      },
+      onError: (error) => {
+        windowRef?.webContents.send('mail:pair-progress', { stage: 'error', message: error.message });
+        rejectReady(error);
+      },
+    });
+    const { port } = await readyPromise;
+    const redirectUri = `http://127.0.0.1:${port}/oauth/callback`;
+    const oauth = new GoogleOAuth({ clientId, clientSecret: clientSecret || null });
+    await openExternalUrl(oauth.authorizationUrl({ redirectUri, state, codeChallenge }));
+    windowRef?.webContents.send('mail:pair-progress', { stage: 'browser-opened' });
+    const code = await callback;
+    windowRef?.webContents.send('mail:pair-progress', { stage: 'callback-received' });
+    const tokens = await oauth.exchangeCode(code, redirectUri, codeVerifier);
+    if (!tokens.refresh_token) throw new Error('Google did not return a refresh token. Reauthorize with offline access.');
+    windowRef?.webContents.send('mail:pair-progress', { stage: 'saving-credentials' });
+    mailCredentials.save('gmail-refresh-token', tokens.refresh_token);
+    mailCredentials.save('gmail-client-id', clientId);
+    if (clientSecret) mailCredentials.save('gmail-client-secret', clientSecret);
+    let account = '';
+    try {
+      const profile = await new GmailProvider({ accessToken: tokens.access_token }).request('/profile');
+      account = profile.emailAddress || '';
+      if (account) mailCredentials.save('gmail-account', account);
+    } catch (error) { console.error(`[mail] could not read Gmail profile: ${error.message}`); }
+    wireMailSync();
+    return { paired: true, provider: 'gmail', account };
   });
   ipcMain.handle('session:create', async (_event, { cwd, agent = 'claude' } = {}) => {
     if (!SESSION_TYPES.has(agent)) throw new Error('Choose Claude Code, Codex, or Terminal.');
@@ -190,6 +398,48 @@ function wireIpc() {
   ipcMain.on('pty:resize', (_event, { tile, cols, rows } = {}) => {
     if (Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0) terminals.get(tile)?.resize(cols, rows);
   });
+}
+
+async function dispatchApprovedReply(requestId, principal, surface) {
+  if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
+  const request = hostStore.getApproval(requestId);
+  if (!request || request.action?.capability !== 'gmail.send') throw new Error('Reply approval not found.');
+  const action = request.action;
+  const provider = createGmailProvider();
+  const decision = approvalService.decide(requestId, 'send', { principal, surface });
+  const attempt = approvalService.execution({ requestId, status: 'prepared', details: { capability: action.capability, destination: action.destination, surface } });
+  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: decision.decisionId, surface } });
+  try {
+    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'gmail', surface } });
+    const sent = await provider.sendReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId, inReplyTo: action.inReplyTo, references: action.references });
+    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId } });
+    approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId, destination: action.destination } });
+    return { status: 'confirmed', attemptId: attempt.attemptId, messageId: sent.id || null };
+  } catch (error) {
+    const status = error.name === 'AbortError' || /timeout|network|fetch/i.test(error.message) ? 'unknown' : 'failed';
+    approvalService.execution({ attemptId: attempt.attemptId, requestId, status, details: { provider: 'gmail', error: error.message, surface } });
+    if (status === 'unknown') {
+      error.code = 'EXECUTION_UNKNOWN';
+      error.attemptId = attempt.attemptId;
+      error.requestId = requestId;
+    }
+    throw error;
+  }
+}
+
+async function reconcileApprovedReply(requestId, attemptId, surface) {
+  if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
+  const request = hostStore.getApproval(requestId);
+  const attempt = hostStore.getExecutionAttempt(attemptId);
+  if (!request || !attempt || attempt.requestId !== requestId) throw new Error('Reply execution record not found.');
+  if (attempt.status !== 'unknown') return { status: attempt.status, attemptId };
+  const action = request.action;
+  const provider = createGmailProvider();
+  const result = await provider.reconcileReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId });
+  if (!result.found) return { status: 'unknown', attemptId, reconciled: false };
+  approvalService.execution({ attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', surface, reconciled: true, messageId: result.messageId } });
+  approvalService.receipt({ attemptId, receipt: { provider: 'gmail', messageId: result.messageId, threadId: result.threadId, destination: action.destination, reconciled: true } });
+  return { status: 'confirmed', attemptId, messageId: result.messageId, reconciled: true };
 }
 
 async function spawnSession(tile, cwd, agent, sessionId, reopening) {
@@ -244,7 +494,11 @@ async function spawnSession(tile, cwd, agent, sessionId, reopening) {
     }
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('pty:data', { tile, data });
   });
-  child.onExit(() => { terminals.delete(tile); codexTerminalQuestions.delete(tile); });
+  child.onExit(({ exitCode = null, signal = null } = {}) => {
+    terminals.delete(tile);
+    codexTerminalQuestions.delete(tile);
+    board.processExited(tile, { code: exitCode, signal });
+  });
 }
 
 function findAgent(agent) {
@@ -308,8 +562,15 @@ async function sendRemoteAgentPrompt(session, message) {
   }
   const binary = findAgent('codex');
   if (!binary) throw new Error('Codex CLI was not found on PATH.');
-  await queuePrompt({ binary, threadId, message, cwd: session.cwd });
-  board.handleHook('working', session.tile || session.key, { session_id: threadId, cwd: session.cwd, submitted: true });
+  const tile = session.tile || session.key;
+  board.recordDelivery(tile, 'submitted', { channel: 'codex-queue' });
+  try {
+    await queuePrompt({ binary, threadId, message, cwd: session.cwd });
+  } catch (error) {
+    board.recordDelivery(tile, 'failed', { error: error.message });
+    throw error;
+  }
+  board.handleHook('working', tile, { session_id: threadId, cwd: session.cwd, submitted: true });
   return true;
 }
 
@@ -350,14 +611,53 @@ function sessionHistoryWithTerminalQuestions(session) {
   return history;
 }
 
+function hasPendingApproval(session) {
+  if (!session) return false;
+  try { return (sessionHistoryWithTerminalQuestions(session).pendingQuestions || []).length > 0; }
+  catch (_) { return false; }
+}
+
 async function start() {
   appSettings = readSettings(app.getPath('userData'));
-  try { installClaudeHooks(); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
-  try { installCodexHooks(); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
+  try {
+    mailCredentials = new ProtectedCredentialStore({ filename: path.join(app.getPath('userData'), 'mail-credentials.json'), safeStorage });
+    console.error(`[mail] protected credential storage ready: ${safeStorage.getSelectedStorageBackend?.() || 'available'}`);
+  } catch (error) {
+    mailCredentials = null;
+    console.error(`[mail] protected credential storage unavailable: ${error.message}; backend=${safeStorage.getSelectedStorageBackend?.() || 'unknown'}`);
+  }
+  const hookAuth = ensureHookToken();
+  try { installClaudeHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
+  try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
+  try {
+    hostStore = new SqliteStore({ filename: path.join(app.getPath('userData'), 'signal-box.db') });
+    approvalService = new ApprovalService({ store: hostStore });
+  } catch (error) {
+    hostStore = null;
+    console.error(`[store] SQLite unavailable; durable event storage is disabled: ${error.message}`);
+  }
   board = new Board({
     storagePath: path.join(app.getPath('userData'), 'sessions.json'),
     historyProvider: sessionHistoryWithTerminalQuestions,
+    authToken: hookAuth.token,
+    store: hostStore,
   });
+  if (hostStore) {
+    try {
+      const imported = hostStore.importSessions([...board.list(), ...board.listArchived()]);
+      if (imported.imported) console.error(`[store] imported ${imported.count} legacy session record${imported.count === 1 ? '' : 's'}`);
+    } catch (error) {
+      console.error(`[store] legacy session import failed: ${error.message}`);
+    }
+  }
+  wireMailSync();
+  taskService = hostStore ? new TaskService({ store: hostStore }) : null;
+  digestScheduler = hostStore ? new DigestScheduler({
+    store: hostStore,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    quietStart: appSettings.quietHoursStart || null,
+    quietEnd: appSettings.quietHoursEnd || null,
+  }) : null;
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
   try {
     await board.listen(Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747);
@@ -371,10 +671,15 @@ async function start() {
     token: appSettings.telegramEnabled === false ? '' : appSettings.telegramBotToken,
     chatId: appSettings.telegramChatId,
     listSessions: () => board.list(),
+    listTasks: () => hostStore?.listTasks() || [],
+    updateTask: (taskId, status) => hostStore?.setTaskStatus(taskId, status),
+    recordDigestFeedback: (notificationId, useful) => hostStore?.recordNotificationFeedback(notificationId, useful, { channel: 'telegram' }),
     getHistory: sessionHistoryWithTerminalQuestions,
     executeTerminal: executeRemoteTerminal,
     interruptTerminal: interruptRemoteTerminal,
     sendPrompt: sendRemoteAgentPrompt,
+    approvalService,
+    approveMailReply: (requestId, _principal, surface) => dispatchApprovedReply(requestId, 'signal-box-user', surface),
     ensureSession: async (tile) => {
       const session = board.sessions.get(tile);
       if (!session || !session.owned) throw new Error('That session is not remotely controllable.');
@@ -387,6 +692,7 @@ async function start() {
       const session = board.sessions.get(tile);
       if ((approval || data.endsWith('\r')) && session?.agent === 'codex') codexTerminalQuestions.delete(tile);
       child.write(data);
+      if (!approval && data.trim()) board.recordDelivery(tile, 'submitted', { channel: 'pty' });
       if (approval && session?.agent !== 'terminal') {
         board.handleHook('working', tile, { session_id: session.sessionId, cwd: session.cwd, submitted: true });
       }
@@ -396,13 +702,22 @@ async function start() {
     },
   });
   board.on('change', (changed) => {
+    const changedSession = changed?.key ? board.list().find((session) => session.key === changed.key) : null;
+    const approvalStillPending = hasPendingApproval(changedSession);
     if (windowRef && !windowRef.isDestroyed()) {
       windowRef.webContents.send('sessions:changed', { sessions: board.list(), archivedSessions: board.listArchived(), changed });
     }
     if (desktopNotificationsEnabled && changed && changed.state && !changed.navigation) notifyUser(changed);
-    if (changed?.state && changed.state !== 'approval') telegram.clearApproval(changed.key);
-    if (['approval', 'done'].includes(changed?.state) && !changed.navigation && !changed.repeated) {
-      telegram.notifyState(board.list().find((session) => session.key === changed.key), changed.state);
+    // A lifecycle event can arrive while the agent is still waiting for the
+    // same question. Keep its Telegram buttons valid until the question is
+    // answered, replaced, cancelled, or actually disappears from history.
+    if (changed?.state && changed.state !== 'approval' && !approvalStillPending) telegram.clearApproval(changed.key);
+    if (changed?.state === 'approval' && !changed.navigation) {
+      // notifyState deduplicates identical question signatures, but reissues
+      // buttons when a repeated approval contains a new question.
+      telegram.notifyState(changedSession, 'approval');
+    } else if (changed?.state === 'done' && !changed.navigation && !changed.repeated && !approvalStillPending) {
+      telegram.notifyState(changedSession, 'done');
     }
   });
   stopCodexMonitor = startCodexMonitor({
@@ -414,16 +729,86 @@ async function start() {
     }),
     onQuestionsCleared: (session) => board.completePendingDone(session.tile || session.key),
   });
+  livenessTimer = setInterval(() => board.checkLiveness(), 15 * 1000);
+  livenessTimer.unref?.();
   wireIpc();
   createWindow();
+  runMailSync().catch((error) => console.error(`[mail] initial sync failed: ${error.message}`));
+  mailSyncTimer = setInterval(() => runMailSync().catch((error) => console.error(`[mail] scheduled sync failed: ${error.message}`)), 5 * 60 * 1000);
+  mailSyncTimer.unref?.();
   if (appSettings.telegramEnabled !== false) telegram.start();
   for (const session of board.list()) {
     if (session.state === 'approval') telegram.notifyState(session, 'approval');
   }
 }
 
+function wireMailSync() {
+  mailSync = null;
+  if (!hostStore || !mailCredentials) return;
+  const refreshToken = mailCredentials.load('gmail-refresh-token');
+  const clientId = mailCredentials.load('gmail-client-id');
+  const clientSecret = mailCredentials.load('gmail-client-secret');
+  const account = mailCredentials.load('gmail-account');
+  if (!refreshToken || !clientId || !clientSecret || !account) return;
+  const oauth = new GoogleOAuth({ clientId, clientSecret });
+  const provider = new GmailProvider({ refreshToken, oauth });
+  mailSync = new MailSync({ store: hostStore, provider });
+}
+
+function createGmailProvider() {
+  if (!mailCredentials) throw new Error('Protected credential storage is unavailable.');
+  const refreshToken = mailCredentials.load('gmail-refresh-token');
+  const clientId = mailCredentials.load('gmail-client-id');
+  const clientSecret = mailCredentials.load('gmail-client-secret');
+  if (!refreshToken || !clientId) throw new Error('Connect Gmail before sending a reply.');
+  return new GmailProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret: clientSecret || null }) });
+}
+
+async function runMailSync() {
+  if (!mailSync || !mailCredentials) return { paired: false, provider: 'gmail', reason: 'Gmail sync is not initialized. Reconnect Gmail after the secure credential store is ready.' };
+  const account = mailCredentials.load('gmail-account');
+  const adapterId = `gmail:${account}`;
+  try {
+    const result = await mailSync.run({ adapterId, accountAddress: account });
+    const tasks = taskService?.processAll(adapterId) || [];
+    const digest = digestScheduler?.prepare(hostStore.listTasks()) || null;
+    const syncResult = { ...result, taskCandidates: tasks.length, digestPrepared: Boolean(digest), notificationId: digest?.notificationId || null };
+    console.error(`[mail] sync complete account=${account} fetched=${syncResult.fetched} inserted=${syncResult.inserted} tasks=${syncResult.taskCandidates}`);
+    hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);
+    await deliverPendingDigest();
+    if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('mail:status-changed', { status: 'healthy', result: syncResult });
+    return syncResult;
+  } catch (error) {
+    hostStore.setConnectorHealth(adapterId, 'error', { message: error.message, code: error.code || null });
+    if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('mail:status-changed', { status: 'error', error: error.message });
+    throw error;
+  }
+}
+
+async function deliverPendingDigest() {
+  if (!hostStore || !telegram?.enabled || !telegram.configured) return null;
+  const notification = hostStore.claimNotification('digest');
+  if (!notification) return null;
+  const lines = notification.items.map((item, index) => `${index + 1}. ${item.summary}${item.reasons?.length ? ` — ${item.reasons.join(', ')}` : ''}`);
+  try {
+    const feedback = {
+      inline_keyboard: [[
+        { text: 'Useful', callback_data: telegram.addAction({ type: 'digest-feedback', notificationId: notification.notificationId, useful: true }) },
+        { text: 'Not useful', callback_data: telegram.addAction({ type: 'digest-feedback', notificationId: notification.notificationId, useful: false }) },
+      ]],
+    };
+    await telegram.send(`Today\n\n${lines.join('\n')}`, { reply_markup: feedback });
+    return hostStore.completeNotification(notification.notificationId, 'sent', { channel: 'telegram' });
+  } catch (error) {
+    const status = error.name === 'AbortError' || /timeout|network|fetch/i.test(error.message) ? 'unknown' : 'failed';
+    hostStore.completeNotification(notification.notificationId, status, { channel: 'telegram', error: error.message });
+    throw error;
+  }
+}
+
 app.whenReady().then(async () => {
   if (!hasSingleInstance) return;
+  configureUserDataPath();
   await restoreShellPath();
   return start();
 }).catch((error) => {
@@ -437,6 +822,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', async () => {
   stopCodexMonitor?.();
+  if (livenessTimer) clearInterval(livenessTimer);
+  if (mailSyncTimer) clearInterval(mailSyncTimer);
   telegram?.stop();
   for (const child of remoteCommands.values()) {
     try { child.kill(); } catch (_) { /* Process may already have exited. */ }
@@ -445,4 +832,5 @@ app.on('before-quit', async () => {
   for (const child of terminals.values()) child.kill();
   terminals.clear();
   if (board) await board.closeServer();
+  hostStore?.close();
 });

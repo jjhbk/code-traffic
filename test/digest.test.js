@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict');
+const { DigestScheduler, dateKey } = require('../host/scheduling/digest');
+const { SqliteStore } = require('../host/store/sqlite-store');
+
+const store = new SqliteStore();
+const scheduler = new DigestScheduler({ store, timeZone: 'America/New_York', dailyCap: 2, clock: () => Date.parse('2026-09-16T13:00:00Z') });
+assert.equal(dateKey(Date.parse('2026-09-16T13:00:00Z'), 'America/New_York'), '2026-09-16');
+const tasks = [
+  { taskId: 'later', summary: 'Later', status: 'active', dueDate: 'friday', owner: 'counterparty' },
+  { taskId: 'today', summary: 'Today', status: 'active', dueDate: 'today', owner: 'self' },
+  { taskId: 'tomorrow', summary: 'Tomorrow', status: 'active', dueDate: 'tomorrow', owner: 'self' },
+];
+const first = scheduler.prepare(tasks);
+assert.deepEqual(first.items.map((item) => item.taskId), ['today', 'tomorrow']);
+assert.equal(scheduler.prepare(tasks), null, 'daily cap prevents a second digest reservation');
+const quiet = new DigestScheduler({ store, timeZone: 'America/New_York', quietStart: '21:00', quietEnd: '07:00', clock: () => Date.parse('2026-09-16T02:00:00Z') });
+assert.equal(quiet.isQuiet(), true);
+assert.equal(quiet.prepare(tasks), null);
+store.setSuppression('counterparty', 'client@example.com');
+assert.equal(scheduler.prepare([{ taskId: 'suppressed', summary: 'Suppressed', status: 'active', owner: 'self', counterparty: 'client@example.com' }]), null);
+store.close();
+console.log('digest tests passed');

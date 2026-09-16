@@ -5,14 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';">
     <title>Signal Box</title>
-    <link rel="stylesheet" href="styles.css?v=7">
+    <link rel="icon" type="image/png" href="../branding/signal-box-loop-mark.png">
+    <link rel="stylesheet" href="styles.css?v=12">
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css?v=3">
   </head>
   <body>
+    <div id="wsl-cursor" aria-hidden="true"></div>
+    <div class="app-chrome">
+      <div class="chrome-brand"><img src="../branding/signal-box-loop-mark.png" alt=""><span>Signal Box</span></div>
+      <div class="chrome-drag-region"></div>
+      <div class="window-controls">
+        <button id="window-minimize" type="button" aria-label="Minimize">—</button>
+        <button id="window-maximize" type="button" aria-label="Maximize">□</button>
+        <button id="window-close" class="window-close" type="button" aria-label="Close">×</button>
+      </div>
+    </div>
     <main class="shell">
       <header class="topbar">
         <div class="brand-block">
-          <div class="brand-row"><span class="brand-mark" aria-hidden="true">SB</span><div><p class="eyebrow">SESSION CONTROL</p><h1>Signal Box</h1></div></div>
+          <div class="brand-row"><img class="brand-mark" src="../branding/signal-box-loop-mark.png" alt=""><div><p class="eyebrow">PERSONAL ASSISTANT · ALWAYS ON</p><h1>Signal Box</h1></div></div>
           <p id="summary">No sessions</p>
         </div>
         <div class="actions">
@@ -24,10 +35,21 @@
             </select>
             <button id="clear-all" class="clear-all" type="button">Clear all</button>
             <button id="telegram-settings" type="button">Telegram settings</button>
+            <button id="gmail-settings" type="button">Gmail settings</button>
+            <button id="tasks-toggle" type="button">Tasks</button>
+            <button id="digest-settings" type="button">Digest settings</button>
             <button id="new-session" class="new-session" type="button">+ New session</button>
           </div>
       </header>
+      <section id="setup-panel" class="setup-panel" hidden>
+        <div class="setup-heading"><div><p class="section-kicker">SETUP CENTER</p><h2>Make Signal Box useful</h2><p>Connect the services you want monitored and notified.</p></div><span class="setup-count" id="setup-count"></span></div>
+        <div id="setup-list" class="setup-list"></div>
+      </section>
       <section id="board" class="board" aria-live="polite"></section>
+      <section id="tasks-view" class="tasks-view" hidden>
+        <div class="tasks-heading"><h2>Tasks</h2><button id="tasks-refresh" type="button">Refresh</button></div>
+        <div id="tasks-list" class="tasks-list" aria-live="polite"></div>
+      </section>
       <section id="terminal-view" class="terminal-view" hidden>
         <div class="terminal-bar">
           <button id="terminal-back" type="button">← Board</button>
@@ -56,6 +78,109 @@
         </form>
       </section>
     </div>
+    <div id="gmail-modal" class="modal-backdrop" hidden>
+      <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="gmail-title">
+        <h2 id="gmail-title">Gmail connection</h2>
+        <p id="gmail-status">Gmail is not connected. Signal Box requests read access plus permission to send reviewed replies.</p>
+        <form id="gmail-form">
+          <div class="connect-explainer"><span class="connect-icon">G</span><div><strong>Secure browser connection</strong><p>Google will open in your browser. Signal Box never asks you to paste keys or passwords here.</p></div></div>
+          <label for="gmail-client-id">Your Google Desktop client ID</label>
+          <input id="gmail-client-id" type="text" autocomplete="off" placeholder="1234567890-abc.apps.googleusercontent.com">
+          <p class="field-hint">Create this once in Google Cloud under OAuth clients → Desktop app. The same client can be reused for Calendar and Drive.</p>
+          <label for="gmail-client-secret">Google client secret <span>(if your client provides one)</span></label>
+          <input id="gmail-client-secret" type="password" autocomplete="off" placeholder="GOCSPX-…">
+          <p class="field-hint">Some Google desktop clients require this during token exchange. Signal Box stores it only in the OS credential store.</p>
+          <details class="setup-guide">
+            <summary>How do I create this?</summary>
+            <ol>
+              <li><strong>Create a Google Cloud project.</strong> <a class="guide-link" href="https://console.cloud.google.com/projectcreate" data-url="https://console.cloud.google.com/projectcreate">Open Google Cloud</a></li>
+              <li>Open <strong>APIs &amp; Services → Library</strong> and enable <strong>Gmail API</strong>.</li>
+              <li>Open <strong>Google Auth Platform → Branding</strong> and configure the app name and support email.</li>
+              <li>Under <strong>Audience</strong>, choose External and add your own Google account as a test user.</li>
+              <li>Under <strong>Clients</strong>, create an <strong>OAuth client → Desktop app</strong>. Copy only the client ID here.</li>
+            </ol>
+            <p class="field-hint">Google may issue a client secret for desktop apps. Signal Box keeps the secret and refresh token in the operating system credential store.</p>
+          </details>
+          <p id="gmail-error" class="settings-error" hidden></p>
+          <div class="settings-actions">
+            <button id="close-gmail" type="button">Close</button>
+            <button id="sync-gmail" type="button">Sync now</button>
+            <button id="disconnect-gmail" type="button">Disconnect</button>
+            <button class="primary-action" type="submit">Continue in browser</button>
+          </div>
+        </form>
+      </section>
+    </div>
+    <div id="digest-modal" class="modal-backdrop" hidden>
+      <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="digest-title">
+        <h2 id="digest-title">Digest settings</h2>
+        <p id="digest-timezone"></p>
+        <form id="digest-form">
+          <label for="quiet-start">Quiet hours start</label>
+          <input id="quiet-start" type="time">
+          <label for="quiet-end">Quiet hours end</label>
+          <input id="quiet-end" type="time">
+          <label for="digest-cap">Daily task cap</label>
+          <input id="digest-cap" type="number" min="1" max="50" step="1">
+          <h3 class="settings-subheading">Suppressions</h3>
+          <div id="suppression-list" class="suppression-list"></div>
+          <h3 class="settings-subheading">Pilot metrics</h3>
+          <p id="digest-stats" class="digest-stats"></p>
+          <p id="digest-error" class="settings-error" hidden></p>
+          <div class="settings-actions">
+            <button id="close-digest" type="button">Close</button>
+            <button class="primary-action" type="submit">Save digest settings</button>
+          </div>
+        </form>
+      </section>
+    </div>
+    <div id="reply-modal" class="modal-backdrop" hidden>
+      <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="reply-title">
+        <h2 id="reply-title">Review reply</h2>
+        <p id="reply-destination"></p>
+        <form id="reply-form">
+          <input id="reply-task-id" type="hidden">
+          <label for="reply-subject">Subject</label>
+          <input id="reply-subject" type="text" required>
+          <label for="reply-body">Message</label>
+          <textarea id="reply-body" rows="7" required placeholder="Write the exact reply Signal Box should send."></textarea>
+          <p id="reply-consequences" class="digest-stats">This will send one email after explicit approval.</p>
+          <p id="reply-error" class="settings-error" hidden></p>
+          <div class="settings-actions">
+            <button id="close-reply" type="button">Cancel</button>
+            <button class="primary-action" type="submit">Review and send</button>
+          </div>
+        </form>
+      </section>
+    </div>
+    <div id="task-edit-modal" class="modal-backdrop" hidden>
+      <section class="session-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="task-edit-title">
+        <h2 id="task-edit-title">Edit task</h2>
+        <form id="task-edit-form">
+          <input id="task-edit-id" type="hidden">
+          <div id="task-edit-summary-row">
+            <label for="task-edit-summary">Task summary</label>
+            <input id="task-edit-summary" type="text">
+          </div>
+          <div>
+            <label for="task-edit-due">Due date or time</label>
+            <input id="task-edit-due" type="text" placeholder="YYYY-MM-DD or YYYY-MM-DDTHH:MM">
+          </div>
+          <div id="task-edit-owner-row">
+            <label for="task-edit-owner">Owner</label>
+            <select id="task-edit-owner">
+              <option value="self">You owe this</option>
+              <option value="counterparty">Counterparty owes this</option>
+            </select>
+          </div>
+          <p id="task-edit-error" class="settings-error" hidden></p>
+          <div class="settings-actions">
+            <button id="close-task-edit" type="button">Cancel</button>
+            <button class="primary-action" type="submit">Save</button>
+          </div>
+        </form>
+      </section>
+    </div>
     <div id="session-choice" class="modal-backdrop" hidden>
       <section class="session-dialog" role="dialog" aria-modal="true" aria-labelledby="session-choice-title">
         <h2 id="session-choice-title">Start a session</h2>
@@ -70,6 +195,6 @@
     <script src="../node_modules/@xterm/xterm/lib/xterm.js?v=3"></script>
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js?v=3"></script>
     <script src="audio.js?v=3"></script>
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=7"></script>
   </body>
 </html>

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const http = require('http');
+const fs = require('fs');
 
 function port() {
   const value = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
@@ -16,6 +17,12 @@ function payloadFromArgs() {
     } catch (_) { /* Codex may pass human-readable arguments before its JSON payload. */ }
   }
   return {};
+}
+
+function tokenFromArgs() {
+  const index = process.argv.indexOf('--token-file');
+  if (index === -1 || !process.argv[index + 1]) return null;
+  try { return fs.readFileSync(process.argv[index + 1], 'utf8').trim() || null; } catch (_) { return null; }
 }
 
 function stateFor(payload) {
@@ -39,11 +46,14 @@ function notify() {
     || process.env.CODEX_THREAD_ID || process.env.CODEX_SESSION_ID || null;
   const sessionId = reportedId || `codex:${cwd}`;
   const query = new URLSearchParams({ state, tile: process.env.SIGNAL_TILE || '' });
-  const request = http.request({ hostname: '127.0.0.1', port: port(), path: `/hook?${query}`, method: 'POST', headers: { 'Content-Type': 'application/json' } });
+  const token = tokenFromArgs();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['X-Signal-Box-Token'] = token;
+  const request = http.request({ hostname: '127.0.0.1', port: port(), path: `/hook?${query}`, method: 'POST', headers });
   request.on('error', () => {});
   request.end(JSON.stringify({ session_id: sessionId, cwd }));
 }
 
 if (require.main === module) notify();
 
-module.exports = { payloadFromArgs, stateFor };
+module.exports = { payloadFromArgs, stateFor, tokenFromArgs };

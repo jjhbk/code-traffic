@@ -22,3 +22,9 @@ sessions.json
 # OS metadata
 .DS_Store
 Thumbs.db
+*.mp4
+!/branding/
+*.png
+!branding/signal-box-orbit-mark.png
+!branding/signal-box-loop-mark.png
+!branding/signal-box.png

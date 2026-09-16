@@ -1,5 +1,6 @@
 {
   "name": "signal-box",
+  "productName": "Signal Box",
   "version": "1.0.5",
   "private": true,
   "author": "Signal Box contributors",
@@ -11,9 +12,15 @@
     "start": "electron-forge start",
     "install-hooks": "node hooks.js --install",
     "install-codex-hooks": "node codex-hooks.js --install",
+    "probe:sqlite": "electron scripts/sqlite-electron-spike.js",
+    "check:packaging": "node scripts/check-packaging.js",
+    "check:signing": "node scripts/check-signing.js",
     "postinstall": "electron-rebuild -f -w node-pty || true",
     "package": "electron-forge package",
     "make": "electron-forge make",
+    "make:win": "electron-forge make --platform win32",
+    "make:mac": "electron-forge make --platform darwin",
+    "make:linux": "electron-forge make --platform linux",
     "install:local": "node scripts/install-local.js"
   },
   "devDependencies": {

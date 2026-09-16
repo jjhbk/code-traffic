@@ -21,8 +21,13 @@ function settingsPaths() {
   };
 }
 
-function hookCommand(state) {
-  return `curl -sS -m 2 -X POST -H 'Content-Type: application/json' --data-binary @- "http://127.0.0.1:${port()}/hook?state=${state}&tile=$SIGNAL_TILE" >/dev/null 2>&1 || true`;
+function shellQuote(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
+
+function hookCommand(state, tokenFile = null) {
+  const tokenHeader = tokenFile
+    ? ` -H "X-Signal-Box-Token: $(cat ${shellQuote(tokenFile)})"`
+    : '';
+  return `curl -sS -m 2 -X POST -H 'Content-Type: application/json'${tokenHeader} --data-binary @- "http://127.0.0.1:${port()}/hook?state=${state}&tile=$SIGNAL_TILE" >/dev/null 2>&1 || true`;
 }
 
 function ours(entry) {
@@ -41,9 +46,9 @@ function readSettings(file) {
   }
 }
 
-function ourHooks() {
+function ourHooks(tokenFile = null) {
   const command = (state) => ({
-    hooks: [{ type: 'command', async: true, command: hookCommand(state) }],
+    hooks: [{ type: 'command', async: true, command: hookCommand(state, tokenFile) }],
   });
 
   return {
@@ -51,7 +56,7 @@ function ourHooks() {
     PermissionRequest: [command('approval')],
     Notification: [{
       matcher: 'permission_prompt|agent_needs_input|elicitation_dialog|elicitation_url_dialog',
-      hooks: [{ type: 'command', async: true, command: hookCommand('approval') }],
+      hooks: [{ type: 'command', async: true, command: hookCommand('approval', tokenFile) }],
     }],
     Stop: [command('done')],
     StopFailure: [command('done')],
@@ -75,7 +80,7 @@ function removeOurHooks(hooks) {
   }
 }
 
-function install() {
+function install({ tokenFile = null } = {}) {
   const paths = settingsPaths();
   const settings = readSettings(paths.settings);
   if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
@@ -91,7 +96,7 @@ function install() {
     settings.hooks = {};
   }
   removeOurHooks(settings.hooks);
-  for (const [event, entries] of Object.entries(ourHooks())) {
+  for (const [event, entries] of Object.entries(ourHooks(tokenFile))) {
     settings.hooks[event] = [...(settings.hooks[event] || []), ...entries];
   }
   fs.writeFileSync(paths.settings, `${JSON.stringify(settings, null, 2)}\n`);

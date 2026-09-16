@@ -6,15 +6,38 @@ const terminalHost = document.getElementById('terminal');
 const terminalTitle = document.getElementById('terminal-title');
 const sessionChoice = document.getElementById('session-choice');
 const settingsModal = document.getElementById('settings-modal');
+const setupPanel = document.getElementById('setup-panel');
 let sessions = [];
 let archivedSessions = [];
 let hasTelegramToken = false;
 let telegramChatStep = false;
 let activeTile = null;
+let tasks = [];
 let fitTimer;
 let fitAttempts = 0;
 const terminals = new Map();
 const pendingPty = new Map();
+let taskEditMode = 'edit';
+
+if (window.signalBox.environment?.wsl) {
+  document.body.classList.add('wsl-cursor-fallback');
+  const cursor = document.getElementById('wsl-cursor');
+  let cursorFrame = 0;
+  let cursorX = 0;
+  let cursorY = 0;
+  window.addEventListener('pointermove', (event) => {
+    cursorX = event.clientX;
+    cursorY = event.clientY;
+    if (cursorFrame) return;
+    cursorFrame = requestAnimationFrame(() => {
+      cursor.style.transform = `translate3d(${cursorX + 2}px, ${cursorY + 2}px, 0) rotate(-12deg)`;
+      cursorFrame = 0;
+    });
+  }, { passive: true });
+  window.addEventListener('blur', () => { cursor.style.display = 'none'; });
+  window.addEventListener('focus', () => { cursor.style.display = 'block'; });
+}
+
 window.addEventListener('error', (event) => {
   console.error(`[renderer-error] ${event.message}`, event.error);
 });
@@ -43,7 +66,7 @@ function sorted(list) {
 function render() {
   const ordered = sorted(sessions);
   board.dataset.count = String(ordered.length);
-  summary.textContent = ordered.length === 0 ? 'No sessions' : `${ordered.length} session${ordered.length === 1 ? '' : 's'}`;
+  summary.innerHTML = `<span class="status-beacon"></span>${ordered.length === 0 ? 'No sessions' : `${ordered.length} session${ordered.length === 1 ? '' : 's'}`}`;
   board.replaceChildren();
   if (!ordered.length) {
     const empty = document.createElement('div');
@@ -54,16 +77,17 @@ function render() {
   }
   for (const session of ordered) {
     const tile = document.createElement(session.owned ? 'button' : 'article');
-    tile.className = `tile ${session.owned ? '' : 'external'} state-${session.state || 'off'}`;
+    tile.className = `tile ${session.owned ? '' : 'external'} state-${session.state || 'off'} liveness-${session.liveness || 'inactive'}`;
     if (session.owned) tile.type = 'button';
     const lamp = document.createElement('div'); lamp.className = 'lamp';
     const project = document.createElement('div'); project.className = 'project'; project.textContent = session.project;
     const pathText = document.createElement('div'); pathText.className = 'path'; pathText.textContent = session.path || 'Unknown location';
-    const clock = document.createElement('div'); clock.className = 'clock'; clock.textContent = elapsed(session.since);
+    const clock = document.createElement('div'); clock.className = 'clock';
+    clock.textContent = session.liveness === 'unknown' ? 'status unknown' : session.liveness === 'stale' ? 'stale' : elapsed(session.since);
     tile.append(lamp, project, pathText, clock);
     const sessionMark = document.createElement('span');
     sessionMark.className = 'session-mark';
-    sessionMark.textContent = `${session.owned ? '' : 'external · '}${agentLabel(session.agent)}`;
+    sessionMark.textContent = `${session.owned ? '' : 'external · '}${agentLabel(session.agent)}${session.processStatus === 'exited' ? ' · exited' : ''}`;
     tile.append(sessionMark);
     if (!session.owned) {
       const dismiss = document.createElement('button');
@@ -88,6 +112,159 @@ function render() {
     board.append(tile);
   }
 }
+
+function renderSetup(items) {
+  setupPanel.hidden = !items.length;
+  if (!items.length) return;
+  document.getElementById('setup-count').textContent = `${items.length} step${items.length === 1 ? '' : 's'} remaining`;
+  const list = document.getElementById('setup-list');
+  list.replaceChildren();
+  for (const item of items) {
+    const card = document.createElement('article'); card.className = `setup-card setup-${item.tone || 'neutral'}`;
+    const icon = document.createElement('span'); icon.className = 'setup-icon'; icon.textContent = item.icon;
+    const content = document.createElement('div');
+    const title = document.createElement('h3'); title.textContent = item.title;
+    const detail = document.createElement('p'); detail.textContent = item.detail;
+    content.append(title, detail);
+    const action = document.createElement('button'); action.type = 'button'; action.textContent = item.action;
+    action.addEventListener('click', item.onClick);
+    card.append(icon, content, action); list.append(card);
+  }
+}
+
+async function refreshSetupCenter() {
+  try {
+    const [telegram, gmail, digest] = await Promise.all([
+      window.signalBox.getSettings(),
+      window.signalBox.getMailStatus(),
+      window.signalBox.getDigestSettings(),
+    ]);
+    const items = [];
+    if (!telegram.configured) items.push({ icon: '↗', title: 'Connect Telegram', detail: 'Receive approvals and daily updates wherever you are.', action: 'Set up', tone: 'cyan', onClick: () => document.getElementById('telegram-settings').click() });
+    if (!gmail.paired) items.push({ icon: '✉', title: 'Connect Gmail', detail: 'Let Signal Box find commitments and follow-ups from your inbox.', action: 'Connect', tone: 'violet', onClick: () => document.getElementById('gmail-settings').click() });
+    if (!digest.quietHoursStart && !digest.quietHoursEnd) items.push({ icon: '◷', title: 'Set notification quiet hours', detail: `Choose when Signal Box should stay quiet. Current timezone: ${digest.timeZone}.`, action: 'Configure', tone: 'amber', onClick: () => document.getElementById('digest-settings').click() });
+    renderSetup(items);
+  } catch (caught) { console.error('[setup-center]', caught); }
+}
+
+function renderTasks() {
+  const list = document.getElementById('tasks-list');
+  list.replaceChildren();
+  if (!tasks.length) {
+    const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No active tasks.'; list.append(empty); return;
+  }
+  for (const task of tasks) {
+    const card = document.createElement('article'); card.className = 'task-card';
+    const title = document.createElement('h3'); title.textContent = task.summary || 'Untitled task'; card.append(title);
+    const meta = document.createElement('p'); meta.className = 'task-meta';
+    meta.textContent = `${task.owner === 'self' ? 'You owe this' : 'Counterparty owes this'}${task.counterparty ? ` · ${task.counterparty}` : ''}${task.dueDate ? ` · due ${task.dueDate}` : ''}`;
+    card.append(meta);
+    if (task.evidence?.text) { const evidence = document.createElement('blockquote'); evidence.textContent = task.evidence.text; card.append(evidence); }
+    const actions = document.createElement('div'); actions.className = 'task-actions';
+    for (const [label, status] of [['Done', 'done'], ['Not useful', 'dismissed']]) {
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+      button.addEventListener('click', async () => { await window.signalBox.updateTask({ taskId: task.taskId, status }); await loadTasks(); });
+      actions.append(button);
+    }
+    const snooze = document.createElement('button'); snooze.type = 'button'; snooze.textContent = 'Snooze';
+    snooze.addEventListener('click', () => openTaskEditModal(task, 'snooze'));
+    actions.append(snooze);
+    if (task.counterparty) {
+      if (task.threadId && task.owner === 'self') {
+        const reply = document.createElement('button'); reply.type = 'button'; reply.textContent = 'Reply';
+        reply.addEventListener('click', () => openReplyModal(task));
+        actions.append(reply);
+      }
+      const suppress = document.createElement('button'); suppress.type = 'button'; suppress.textContent = 'Suppress counterparty';
+      suppress.addEventListener('click', async () => { await window.signalBox.suppressCounterparty({ counterparty: task.counterparty }); await loadTasks(); });
+      actions.append(suppress);
+    }
+    const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = 'Edit';
+    edit.addEventListener('click', () => openTaskEditModal(task, 'edit'));
+    actions.append(edit); card.append(actions); list.append(card);
+  }
+}
+
+const taskEditModal = document.getElementById('task-edit-modal');
+function openTaskEditModal(task, mode) {
+  taskEditMode = mode;
+  document.getElementById('task-edit-id').value = task.taskId;
+  document.getElementById('task-edit-title').textContent = mode === 'snooze' ? 'Snooze task' : 'Edit task';
+  document.getElementById('task-edit-summary-row').hidden = mode === 'snooze';
+  document.getElementById('task-edit-owner-row').hidden = mode === 'snooze';
+  document.getElementById('task-edit-summary').value = task.summary || '';
+  document.getElementById('task-edit-due').value = mode === 'snooze' ? '' : (task.dueDate || '');
+  document.getElementById('task-edit-owner').value = task.owner || 'self';
+  document.getElementById('task-edit-error').hidden = true;
+  taskEditModal.hidden = false;
+}
+document.getElementById('close-task-edit').addEventListener('click', () => { taskEditModal.hidden = true; });
+document.getElementById('task-edit-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorTarget = document.getElementById('task-edit-error');
+  errorTarget.hidden = true;
+  const taskId = document.getElementById('task-edit-id').value;
+  const dueDate = document.getElementById('task-edit-due').value.trim();
+  try {
+    if (taskEditMode === 'snooze') {
+      const untilAt = Date.parse(dueDate);
+      if (!Number.isFinite(untilAt)) throw new Error('Enter a valid date and time.');
+      await window.signalBox.snoozeTask({ taskId, untilAt });
+    } else {
+      const owner = document.getElementById('task-edit-owner').value;
+      if (!['self', 'counterparty'].includes(owner)) throw new Error('Choose a valid task owner.');
+      await window.signalBox.correctTask({ taskId, changes: { summary: document.getElementById('task-edit-summary').value.trim(), dueDate: dueDate || null, owner } });
+    }
+    taskEditModal.hidden = true;
+    await loadTasks();
+  } catch (caught) {
+    errorTarget.textContent = caught.message || 'Could not update the task.';
+    errorTarget.hidden = false;
+  }
+});
+
+const replyModal = document.getElementById('reply-modal');
+function openReplyModal(task) {
+  document.getElementById('reply-task-id').value = task.taskId;
+  document.getElementById('reply-destination').textContent = `To: ${task.counterparty}`;
+  document.getElementById('reply-subject').value = String(task.summary || '').startsWith('Re:') ? task.summary : `Re: ${task.summary || 'Follow up'}`;
+  document.getElementById('reply-body').value = '';
+  document.getElementById('reply-error').hidden = true;
+  replyModal.hidden = false;
+}
+document.getElementById('close-reply').addEventListener('click', () => { replyModal.hidden = true; });
+document.getElementById('reply-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorTarget = document.getElementById('reply-error');
+  errorTarget.hidden = true;
+  try {
+    const approval = await window.signalBox.proposeReply({
+      taskId: document.getElementById('reply-task-id').value,
+      subject: document.getElementById('reply-subject').value,
+      body: document.getElementById('reply-body').value,
+    });
+    const action = approval.action;
+    const confirmed = window.confirm(`Send this reply to ${action.destination}?\n\nSubject: ${action.content.subject}\n\n${action.content.body}`);
+    if (!confirmed) { replyModal.hidden = true; return; }
+    await window.signalBox.sendApprovedReply({ requestId: approval.request_id || approval.requestId });
+    replyModal.hidden = true;
+    await loadTasks();
+  } catch (caught) {
+    errorTarget.textContent = caught.message || 'Could not send the reply.';
+    errorTarget.hidden = false;
+  }
+});
+
+async function loadTasks() {
+  try { tasks = await window.signalBox.listTasks(); renderTasks(); } catch (caught) { showError(caught.message || 'Could not load tasks.'); }
+}
+
+document.getElementById('tasks-toggle').addEventListener('click', async () => {
+  const view = document.getElementById('tasks-view');
+  view.hidden = !view.hidden;
+  if (!view.hidden) await loadTasks();
+});
+document.getElementById('tasks-refresh').addEventListener('click', loadTasks);
 
 function openTerminal(session) {
   try {
@@ -119,23 +296,39 @@ function openTerminal(session) {
       const copySelection = () => {
         const selection = terminal.getSelection();
         if (!selection) return false;
-        navigator.clipboard?.writeText(selection).catch(() => {
-          const helper = document.createElement('textarea');
-          helper.value = selection;
-          helper.style.position = 'fixed';
-          helper.style.opacity = '0';
-          document.body.append(helper);
-          helper.select();
-          document.execCommand('copy');
-          helper.remove();
-        });
+        window.signalBox.writeClipboard(selection).catch((caught) => console.error('[clipboard-copy]', caught));
         return true;
       };
+      let pasteInFlight = false;
+      const pasteClipboard = async () => {
+        if (pasteInFlight) return;
+        pasteInFlight = true;
+        try {
+          const text = await window.signalBox.readClipboard();
+          // xterm.js wraps this in bracketed-paste markers so shells receive
+          // multi-line text as one paste instead of executing each line.
+          if (text) terminal.paste(text);
+        } catch (caught) { console.error('[clipboard-paste]', caught); }
+        finally { setTimeout(() => { pasteInFlight = false; }, 0); }
+      };
+      container.addEventListener('paste', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        pasteClipboard();
+      }, true);
       terminal.attachCustomKeyEventHandler((event) => {
         const key = event.key.toLowerCase();
         const modifier = event.ctrlKey || event.metaKey;
         if (modifier && (key === 'c' || (event.shiftKey && key === 'c')) && terminal.hasSelection()) {
           copySelection();
+          return false;
+        }
+        if (modifier && key === 'v') {
+          // The capture-phase paste handler above owns Ctrl/Cmd+V.
+          return false;
+        }
+        if (event.shiftKey && key === 'insert') {
+          pasteClipboard();
           return false;
         }
         return true;
@@ -279,6 +472,153 @@ document.getElementById('telegram-settings').addEventListener('click', async () 
     showSettings();
   } catch (caught) { showError(caught.message || 'Could not load Telegram settings.'); }
 });
+const gmailModal = document.getElementById('gmail-modal');
+window.signalBox.onMailPairProgress?.(({ stage, message, redirectUri }) => {
+  const statusTarget = document.getElementById('gmail-status');
+  const messages = {
+    'waiting-for-google': 'Waiting for Google authentication to return to Signal Box…',
+    'browser-opened': 'Google is open in your browser. Complete authentication there…',
+    'callback-received': 'Google authentication received. Finishing secure connection…',
+    'saving-credentials': 'Saving the connection in your OS credential store…',
+    error: message || 'Google authentication could not complete.',
+  };
+  if (statusTarget && messages[stage]) statusTarget.textContent = messages[stage];
+  if (stage === 'error' && redirectUri) console.error(`[mail] OAuth callback error; expected redirect ${redirectUri}`);
+});
+document.querySelectorAll('.guide-link').forEach((button) => {
+  button.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = button.dataset.url || button.getAttribute('href');
+    if (!target) return;
+    button.setAttribute('aria-busy', 'true');
+    try {
+      await window.signalBox.openExternal(target);
+    } catch (caught) {
+      const message = caught?.message || 'Could not open the setup page.';
+      const errorTarget = document.getElementById('gmail-error');
+      errorTarget.textContent = message;
+      errorTarget.hidden = false;
+    } finally {
+      button.removeAttribute('aria-busy');
+    }
+  });
+});
+async function refreshGmailStatus() {
+  const status = await window.signalBox.getMailStatus();
+  const health = status.health;
+  document.getElementById('gmail-status').textContent = !status.paired
+    ? (status.storageMessage || 'Gmail is not connected.')
+    : health?.status === 'error'
+      ? `Gmail sync error: ${health.details?.message || 'unknown error'}`
+      : health?.updatedAt
+        ? `Gmail is connected. Last sync: ${new Date(health.updatedAt).toLocaleString()}.`
+        : 'Gmail is connected for read-only sync.';
+  document.getElementById('disconnect-gmail').hidden = !status.paired;
+  document.getElementById('sync-gmail').hidden = !status.paired;
+  const clientIdInput = document.getElementById('gmail-client-id');
+  if (clientIdInput && status.clientId) clientIdInput.value = status.clientId;
+}
+document.getElementById('gmail-settings').addEventListener('click', async () => {
+  try { await refreshGmailStatus(); gmailModal.hidden = false; } catch (caught) { showError(caught.message); }
+});
+document.getElementById('close-gmail').addEventListener('click', () => { gmailModal.hidden = true; });
+document.getElementById('disconnect-gmail').addEventListener('click', async () => {
+  try { await window.signalBox.disconnectMail(); await refreshGmailStatus(); } catch (caught) { showError(caught.message); }
+});
+document.getElementById('sync-gmail').addEventListener('click', async () => {
+  const button = document.getElementById('sync-gmail');
+  const statusTarget = document.getElementById('gmail-status');
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Syncing…';
+  statusTarget.textContent = 'Syncing Gmail messages…';
+  try {
+    const result = await window.signalBox.syncMail();
+    if (!result?.paired) throw new Error(result?.reason || 'Gmail sync is not initialized. Reconnect Gmail and try again.');
+    await refreshGmailStatus();
+    const fetched = Number(result?.fetched || 0);
+    const inserted = Number(result?.inserted || 0);
+    statusTarget.textContent = fetched === 0
+      ? 'Gmail sync completed, but Gmail returned no INBOX or SENT messages.'
+      : `Gmail sync complete. ${fetched} message${fetched === 1 ? '' : 's'} fetched, ${inserted} new.`;
+  } catch (caught) {
+    statusTarget.textContent = `Gmail sync failed: ${caught.message || 'unknown error'}`;
+    showError(caught.message);
+    await refreshGmailStatus();
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+});
+document.getElementById('gmail-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorTarget = document.getElementById('gmail-error');
+  errorTarget.hidden = true;
+  document.getElementById('gmail-status').textContent = 'Starting secure Google authentication…';
+  try {
+    await window.signalBox.pairMail({
+      clientId: document.getElementById('gmail-client-id').value.trim(),
+      clientSecret: document.getElementById('gmail-client-secret').value.trim(),
+    });
+    wireMailSyncStatus();
+    await refreshGmailStatus();
+    refreshSetupCenter();
+  } catch (caught) {
+    errorTarget.textContent = caught.message || 'Could not connect Gmail.';
+    errorTarget.hidden = false;
+  }
+});
+const digestModal = document.getElementById('digest-modal');
+document.getElementById('digest-settings').addEventListener('click', async () => {
+  try {
+    const settings = await window.signalBox.getDigestSettings();
+    document.getElementById('quiet-start').value = settings.quietHoursStart;
+    document.getElementById('quiet-end').value = settings.quietHoursEnd;
+    document.getElementById('digest-cap').value = settings.dailyCap;
+    document.getElementById('digest-timezone').textContent = `Timezone: ${settings.timeZone}`;
+    const delivery = Object.entries(settings.stats.delivery || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No deliveries yet';
+    const feedback = Object.entries(settings.stats.feedback || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No feedback yet';
+    document.getElementById('digest-stats').textContent = `Delivery — ${delivery}\nFeedback — ${feedback}`;
+    await renderSuppressions();
+    digestModal.hidden = false;
+  } catch (caught) { showError(caught.message); }
+});
+document.getElementById('close-digest').addEventListener('click', () => { digestModal.hidden = true; });
+document.getElementById('digest-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorTarget = document.getElementById('digest-error');
+  errorTarget.hidden = true;
+  try {
+    await window.signalBox.saveDigestSettings({
+      quietHoursStart: document.getElementById('quiet-start').value,
+      quietHoursEnd: document.getElementById('quiet-end').value,
+      dailyCap: Number(document.getElementById('digest-cap').value),
+    });
+    digestModal.hidden = true;
+    refreshSetupCenter();
+  } catch (caught) {
+    errorTarget.textContent = caught.message || 'Could not save digest settings.';
+    errorTarget.hidden = false;
+  }
+});
+async function renderSuppressions() {
+  const list = document.getElementById('suppression-list');
+  list.replaceChildren();
+  const suppressions = await window.signalBox.listSuppressions();
+  if (!suppressions.length) { list.textContent = 'No active suppressions.'; return; }
+  suppressions.forEach((suppression) => {
+    const row = document.createElement('div'); row.className = 'suppression-row';
+    const label = document.createElement('span'); label.textContent = `${suppression.scopeType}: ${suppression.scopeKey}`;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Undo';
+    remove.addEventListener('click', async () => { await window.signalBox.removeSuppression({ scopeType: suppression.scopeType, scopeKey: suppression.scopeKey }); await renderSuppressions(); });
+    row.append(label, remove); list.append(row);
+  });
+}
+function wireMailSyncStatus() {
+  window.signalBox.onMailStatusChanged?.(() => { if (!gmailModal.hidden) refreshGmailStatus().catch(() => {}); });
+}
+wireMailSyncStatus();
 document.getElementById('close-settings').addEventListener('click', () => { settingsModal.hidden = true; });
 
 document.getElementById('settings-form').addEventListener('submit', async (event) => {
@@ -303,6 +643,7 @@ document.getElementById('settings-form').addEventListener('submit', async (event
       }
     }
     else settingsModal.hidden = true;
+    refreshSetupCenter();
   } catch (caught) {
     settingsError.textContent = caught.message || 'Could not save settings.';
     settingsError.hidden = false;
@@ -416,6 +757,17 @@ window.addEventListener('resize', () => {
   if (!terminalView.hidden && terminals.has(activeTile)) scheduleFit();
 });
 
+document.getElementById('window-minimize').addEventListener('click', () => window.signalBox.minimizeWindow());
+document.getElementById('window-maximize').addEventListener('click', async () => {
+  const maximized = await window.signalBox.toggleMaximizeWindow();
+  document.getElementById('window-maximize').textContent = maximized ? '❐' : '□';
+});
+document.getElementById('window-close').addEventListener('click', () => window.signalBox.closeWindow());
+document.querySelector('.chrome-drag-region').addEventListener('dblclick', async () => {
+  const maximized = await window.signalBox.toggleMaximizeWindow();
+  document.getElementById('window-maximize').textContent = maximized ? '❐' : '□';
+});
+
 window.signalBox.onSessionsChanged(({ sessions: next, archivedSessions: archived, changed }) => {
   sessions = next;
   if (Array.isArray(archived)) archivedSessions = archived;
@@ -441,4 +793,5 @@ window.signalBox.getSettings().then((settings) => {
     if (settings.chatId === '' && settings.hasToken) showChatIdStep();
   }
 }).catch((caught) => showError(caught.message));
+refreshSetupCenter();
 setInterval(render, 1000);

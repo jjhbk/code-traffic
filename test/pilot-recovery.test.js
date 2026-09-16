@@ -1,0 +1,24 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { SqliteStore } = require('../host/store/sqlite-store');
+const { DigestScheduler, dateKey } = require('../host/scheduling/digest');
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-pilot-'));
+const filename = path.join(directory, 'signal-box.db');
+const first = new SqliteStore({ filename, clock: () => 1000 });
+const digest = first.reserveDigest({ dateKey: '2026-09-16', items: [{ taskId: 'task-1', summary: 'Test', reasons: [] }], cap: 5 });
+first.close();
+const restarted = new SqliteStore({ filename, clock: () => 1000 });
+const claimed = restarted.claimNotification();
+assert.equal(claimed.notificationId, digest.notificationId);
+assert.equal(restarted.claimNotification(), null, 'active claims are exclusive after restart');
+restarted.completeNotification(claimed.notificationId, 'unknown', { reason: 'simulated timeout' });
+assert.equal(restarted.notificationStats().delivery.unknown, 1);
+const scheduler = new DigestScheduler({ store: restarted, timeZone: 'America/New_York', quietStart: '21:00', quietEnd: '07:00', clock: () => Date.parse('2026-09-16T02:00:00Z') });
+assert.equal(scheduler.isQuiet(), true);
+assert.equal(dateKey(Date.parse('2026-11-01T05:30:00Z'), 'America/New_York'), '2026-11-01');
+restarted.close();
+fs.rmSync(directory, { recursive: true, force: true });
+console.log('pilot recovery tests passed');
