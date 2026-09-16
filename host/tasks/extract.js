@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 function candidateFromObservation(observation, { filters = null, extractorVersion = 'local-1' } = {}) {
   const text = `${observation.subject}\n${observation.body}`.trim();
   const dueMatch = /\b(by|before|due)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(text);
@@ -6,6 +8,7 @@ function candidateFromObservation(observation, { filters = null, extractorVersio
   if ((!commitment && !eligibleUpdate) || (filters && !filters.eligible)) return null;
   const evidenceStart = dueMatch ? Math.max(0, dueMatch.index - 80) : 0;
   const evidenceEnd = dueMatch ? Math.min(text.length, dueMatch.index + dueMatch[0].length + 80) : Math.min(text.length, 240);
+  const stableParts = [observation.provider || 'source', observation.threadId, observation.direction === 'outgoing' ? 'self' : 'counterparty', observation.direction === 'incoming' ? observation.from : observation.to?.[0] || '', String(observation.subject || text.slice(0, 120)).trim().toLowerCase()];
   return {
     candidateId: `${observation.observationId}:${extractorVersion}`,
     observationId: observation.observationId,
@@ -19,6 +22,7 @@ function candidateFromObservation(observation, { filters = null, extractorVersio
     confidence: eligibleUpdate && !commitment ? 'low' : (dueMatch ? 'medium' : 'low'),
     evidence: { start: evidenceStart, end: evidenceEnd, text: text.slice(evidenceStart, evidenceEnd) },
     extractorVersion,
+    obligationKey: `ob_${crypto.createHash('sha256').update(stableParts.join('|')).digest('hex').slice(0, 24)}`,
   };
 }
 

@@ -1,0 +1,21 @@
+const assert = require('node:assert/strict');
+const { SqliteStore } = require('../host/store/sqlite-store');
+const { TaskService } = require('../host/tasks/service');
+
+const store = new SqliteStore();
+const service = new TaskService({ store });
+const observation = (id, body) => ({ observationId: id, messageId: id, threadId: 'thread-1', subject: 'Handoff', body, direction: 'outgoing', provider: 'gmail', to: ['client@example.com'] });
+store.saveObservation(observation('one', "I'll send the handoff by Friday."), 'gmail:me@example.com');
+const first = service.processAll('gmail:me@example.com')[0];
+store.saveObservation(observation('two', "I'll send the handoff by Monday."), 'gmail:me@example.com');
+const second = service.processAll('gmail:me@example.com').at(-1);
+assert.equal(second.taskId, first.taskId);
+assert.equal(second.reconciled, true);
+assert.equal(store.listTasks({ includeDismissed: true }).length, 1);
+assert.equal(store.taskGraph().edges.filter((edge) => edge.type === 'evidence').length, 2);
+store.setTaskStatus(first.taskId, 'dismissed', { reason: 'user choice' });
+store.saveObservation(observation('three', "I'll send the handoff next week."), 'gmail:me@example.com');
+service.processAll('gmail:me@example.com');
+assert.equal(store.listTasks({ includeDismissed: true }).length, 2, 'dismissed obligations remain separate');
+store.close();
+console.log('task reconciliation tests passed');

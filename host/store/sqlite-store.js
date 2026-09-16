@@ -190,6 +190,8 @@ const MIGRATIONS = [
     FOREIGN KEY(from_task_id) REFERENCES tasks(task_id),
     FOREIGN KEY(to_task_id) REFERENCES tasks(task_id)
   );`,
+  `ALTER TABLE tasks ADD COLUMN obligation_key TEXT;
+   CREATE INDEX IF NOT EXISTS tasks_obligation_key ON tasks(obligation_key);`,
 ];
 
 class SqliteStore {
@@ -438,11 +440,30 @@ class SqliteStore {
     const now = this.clock();
     const existing = this.db.prepare('SELECT task_id AS taskId, status, task_json AS taskJson FROM tasks WHERE candidate_id = ?').get(candidate.candidateId);
     if (existing) return { ...JSON.parse(existing.taskJson), taskId: existing.taskId, status: existing.status, preserved: true };
+    const reconciled = candidate.obligationKey
+      ? this.db.prepare("SELECT task_id AS taskId, status, task_json AS taskJson FROM tasks WHERE obligation_key = ? AND status NOT IN ('done', 'dismissed') ORDER BY updated_at DESC LIMIT 1").get(candidate.obligationKey)
+      : null;
+    if (reconciled) {
+      const prior = JSON.parse(reconciled.taskJson);
+      const next = { ...prior, ...candidate, taskId: reconciled.taskId, obligationKey: candidate.obligationKey };
+      this.db.exec('BEGIN');
+      try {
+        this.db.prepare('UPDATE tasks SET task_json = ?, obligation_key = ?, updated_at = ? WHERE task_id = ?')
+          .run(JSON.stringify(next), candidate.obligationKey, now, reconciled.taskId);
+        this.db.prepare(`INSERT INTO task_evidence(task_id, observation_id, start_offset, end_offset, evidence_text)
+          VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, observation_id, start_offset, end_offset) DO NOTHING`)
+          .run(reconciled.taskId, candidate.observationId, candidate.evidence.start, candidate.evidence.end, candidate.evidence.text);
+        this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'reconciled\', ?, ?)')
+          .run(reconciled.taskId, JSON.stringify({ observationId: candidate.observationId, extractorVersion: candidate.extractorVersion }), now);
+        this.db.exec('COMMIT');
+      } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+      return { ...next, status: reconciled.status, preserved: false, reconciled: true };
+    }
     const taskId = candidate.candidateId;
     this.db.exec('BEGIN');
     try {
-      this.db.prepare('INSERT INTO tasks(task_id, candidate_id, task_json, status, created_at, updated_at) VALUES (?, ?, ?, \'active\', ?, ?)')
-        .run(taskId, candidate.candidateId, JSON.stringify(candidate), now, now);
+      this.db.prepare('INSERT INTO tasks(task_id, candidate_id, task_json, status, obligation_key, created_at, updated_at) VALUES (?, ?, ?, \'active\', ?, ?, ?)')
+        .run(taskId, candidate.candidateId, JSON.stringify(candidate), candidate.obligationKey || null, now, now);
       this.db.prepare('INSERT INTO task_evidence(task_id, observation_id, start_offset, end_offset, evidence_text) VALUES (?, ?, ?, ?, ?)')
         .run(taskId, candidate.observationId, candidate.evidence.start, candidate.evidence.end, candidate.evidence.text);
       this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'extracted\', ?, ?)')
