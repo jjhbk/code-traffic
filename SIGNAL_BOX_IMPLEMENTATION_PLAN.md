@@ -8,7 +8,7 @@ Extend the existing application in place around the core idea in `signal-box-ove
 
 - **Correctness / hardening:** liveness, process-exit handling, authenticated legacy hooks, protected credentials, durable sessions, verified delivery states, and an authenticated generalized `/event` ingestion endpoint are implemented. Fully verified Claude submission remains incomplete.
 - **Vertical slice:** Gmail OAuth, incremental sync, normalization, task extraction, evidence, corrections, Telegram task controls, scheduled digests, and reviewed Gmail replies are implemented. Calendar, files, and browser recipes are not yet connected.
-- **Privacy:** deterministic pseudonymization and stable AES-256-GCM entity storage are implemented, with the vault key held in OS-protected storage. Local name/entity recognition and an isolated remote-model process remain incomplete; the app currently runs local-only with no frontier model call.
+- **Privacy/models:** deterministic pseudonymization and stable AES-256-GCM entity storage are implemented, with the vault key held in OS-protected storage. A schema-constrained local/frontier model router now ranks pseudonymized tasks and falls back to deterministic ranking. Local name/entity recognition and an isolated remote-model process remain incomplete.
 - **Protocol / policy / receipts:** durable approval requests, expiry, single resolution, execution attempts, audit records, generalized event envelopes, capability registration, unknown-capability rejection, and terminal desk-only restrictions are implemented. Full policy coverage for future browser/connector actions and generalized non-CLI actor routing still need completion.
 - **Pilot:** digest reporting, export, deletion, caps, quiet hours, and feedback are implemented. The seven-day real-user quality gate has not been observed and cannot be claimed from unit tests.
 - **Reach / acting:** one reviewed Gmail reply is implemented. Calendar, files, browser recipes, and broader host-owned actions remain future work after the pilot.
@@ -200,7 +200,7 @@ Effort ranges below assume one experienced full-time engineer familiar with this
 
 **Build**
 
-- Start with deterministic deadline/blocking-age ranking and explicit reasons. Add model ranking only if evaluation demonstrates an improvement.
+- Start with deterministic deadline/blocking-age ranking and explicit reasons. The model router can rank pseudonymized tasks using the configured local model or frontier endpoint; invalid/unavailable model output falls back to deterministic ranking. Promote model ranking only after evaluation demonstrates an improvement.
 - Implement priority floors, a persistent daily cap, timezone-aware digest timing, quiet hours, debouncing, snooze, and suppression controls.
 - Start with one digest per day and no immediate task interrupts. Existing approvals and stale-agent escalations remain separate classes with documented limits.
 - Reserve notification budget transactionally; use an outbox and delivery ledger. A network timeout can leave delivery unknown, so avoid promising exactly-once Telegram delivery.

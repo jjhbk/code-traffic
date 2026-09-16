@@ -28,6 +28,8 @@ const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
 const { DigestScheduler } = require('./host/scheduling/digest');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
+const { OllamaClient, OpenAICompatibleClient } = require('./host/models/clients');
+const { ModelRouter } = require('./host/models/router');
 
 const GOOGLE_CLIENT_ID = process.env.SIGNAL_BOX_GOOGLE_CLIENT_ID || '';
 
@@ -80,6 +82,7 @@ let digestScheduler;
 let mailSyncTimer;
 let digestTimer;
 let privacyGateway;
+let modelRouter;
 let appSettings = {};
 const codexTerminalQuestions = new Map();
 const terminals = new Map();
@@ -255,6 +258,7 @@ function wireIpc() {
     }
     return { quietHoursStart, quietHoursEnd, digestAt, dailyCap: cap };
   });
+  ipcMain.handle('model:get-status', () => modelRouter?.status() || { mode: 'off', local: false, frontier: false, active: false });
   ipcMain.handle('data:export', async () => {
     if (!hostStore) throw new Error('Durable storage is unavailable.');
     const result = await dialog.showSaveDialog(windowRef, { title: 'Export Signal Box data', defaultPath: 'signal-box-export.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
@@ -657,6 +661,13 @@ async function start() {
     privacyGateway = new PrivacyGateway({ localOnly: true });
     console.error(`[mail] protected credential storage unavailable: ${error.message}; backend=${safeStorage.getSelectedStorageBackend?.() || 'unknown'}`);
   }
+  const localClient = new OllamaClient({ model: process.env.SIGNAL_BOX_LOCAL_MODEL || 'qwen3:4b-instruct' });
+  let frontierClient = null;
+  if (process.env.SIGNAL_BOX_FRONTIER_API_KEY) {
+    frontierClient = new OpenAICompatibleClient({ model: process.env.SIGNAL_BOX_FRONTIER_MODEL || 'gpt-4o-mini', baseUrl: process.env.SIGNAL_BOX_FRONTIER_BASE_URL || 'https://api.openai.com/v1', apiKey: process.env.SIGNAL_BOX_FRONTIER_API_KEY });
+  }
+  modelRouter = new ModelRouter({ privacyGateway, localClient, frontierClient, mode: process.env.SIGNAL_BOX_MODEL_MODE || 'local' });
+  console.error(`[models] mode=${modelRouter.mode} local=${modelRouter.status().local} frontier=${modelRouter.status().frontier}`);
   const hookAuth = ensureHookToken();
   try { installClaudeHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
   try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
@@ -819,7 +830,10 @@ async function runMailSync() {
 
 async function runScheduledDigest() {
   if (!digestScheduler || !hostStore || !telegram?.enabled || !telegram.configured) return null;
-  const digest = digestScheduler.prepareScheduled(hostStore.listTasks());
+  const tasks = hostStore.listTasks();
+  let modelRanking = null;
+  try { modelRanking = await modelRouter?.rank(tasks); } catch (error) { console.error(`[models] ranking unavailable; using deterministic ranking: ${error.message}`); }
+  const digest = digestScheduler.prepareScheduled(tasks, modelRanking);
   if (!digest) return null;
   await deliverPendingDigest();
   return digest;

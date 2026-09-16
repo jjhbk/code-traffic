@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   saveDigestSettings: (payload) => ipcRenderer.invoke('digest:save-settings', payload),
   exportData: () => ipcRenderer.invoke('data:export'),
   deleteMailData: () => ipcRenderer.invoke('data:delete-mail'),
+  getModelStatus: () => ipcRenderer.invoke('model:get-status'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (payload) => ipcRenderer.invoke('settings:save', payload),
   getMailStatus: () => ipcRenderer.invoke('mail:status'),

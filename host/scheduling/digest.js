@@ -44,21 +44,25 @@ class DigestScheduler {
     return start <= end ? current >= start && current < end : current >= start || current < end;
   }
 
-  prepare(tasks = []) {
+  prepare(tasks = [], modelRanking = null) {
     if (this.isQuiet()) return null;
     this.store.wakeSnoozedTasks(this.clock());
-    const ranked = tasks.filter((task) => task.status === 'active' && !(task.counterparty && this.store.isSuppressed('counterparty', task.counterparty))).map(rankTask)
-      .sort((a, b) => b.score - a.score || String(a.task.taskId).localeCompare(String(b.task.taskId)));
+    const modelById = new Map((modelRanking?.items || []).map((item) => [String(item.taskId), item]));
+    const ranked = tasks.filter((task) => task.status === 'active' && !(task.counterparty && this.store.isSuppressed('counterparty', task.counterparty))).map((task) => {
+      const deterministic = rankTask(task);
+      const model = modelById.get(String(task.taskId));
+      return model ? { task, score: model.score, reasons: [model.reason] } : deterministic;
+    }).sort((a, b) => b.score - a.score || String(a.task.taskId).localeCompare(String(b.task.taskId)));
     if (!ranked.length) return null;
     const key = dateKey(this.clock(), this.timeZone);
     const items = ranked.slice(0, this.dailyCap).map(({ task, reasons }) => ({ taskId: task.taskId, summary: task.summary, reasons }));
     return this.store.reserveDigest({ dateKey: key, items, cap: this.dailyCap });
   }
 
-  prepareScheduled(tasks = []) {
+  prepareScheduled(tasks = [], modelRanking = null) {
     const key = dateKey(this.clock(), this.timeZone);
     if (!this.isDue() || this.isQuiet() || this.store.hasNotificationForDate(key, 'digest')) return null;
-    return this.prepare(tasks);
+    return this.prepare(tasks, modelRanking);
   }
 }
 
