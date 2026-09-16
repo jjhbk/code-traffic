@@ -14,12 +14,13 @@ function rankTask(task) {
 }
 
 class DigestScheduler {
-  constructor({ store, timeZone = 'UTC', dailyCap = 5, digestAt = '08:30', quietStart = null, quietEnd = null, clock = () => Date.now() } = {}) {
+  constructor({ store, timeZone = 'UTC', dailyCap = 5, digestAt = '08:30', cadenceMinutes = 60, quietStart = null, quietEnd = null, clock = () => Date.now() } = {}) {
     if (!store) throw new Error('Digest scheduler requires a store.');
     this.store = store;
     this.timeZone = timeZone;
     this.dailyCap = dailyCap;
     this.digestAt = digestAt || '08:30';
+    this.cadenceMinutes = [15, 30, 60].includes(Number(cadenceMinutes)) ? Number(cadenceMinutes) : 0;
     this.quietStart = quietStart;
     this.quietEnd = quietEnd;
     this.clock = clock;
@@ -44,7 +45,7 @@ class DigestScheduler {
     return start <= end ? current >= start && current < end : current >= start || current < end;
   }
 
-  prepare(tasks = [], modelRanking = null) {
+  prepare(tasks = [], modelRanking = null, { deliveryKey = null, budgetKey = null } = {}) {
     if (this.isQuiet()) return null;
     this.store.wakeSnoozedTasks(this.clock());
     const modelById = new Map((modelRanking?.items || []).map((item) => [String(item.taskId), item]));
@@ -54,15 +55,23 @@ class DigestScheduler {
       return model ? { task, score: model.score, reasons: [model.reason] } : deterministic;
     }).sort((a, b) => b.score - a.score || String(a.task.taskId).localeCompare(String(b.task.taskId)));
     if (!ranked.length) return null;
-    const key = dateKey(this.clock(), this.timeZone);
+    const key = deliveryKey || dateKey(this.clock(), this.timeZone);
     const items = ranked.slice(0, this.dailyCap).map(({ task, reasons }) => ({ taskId: task.taskId, summary: task.summary, reasons }));
-    return this.store.reserveDigest({ dateKey: key, items, cap: this.dailyCap });
+    return this.store.reserveDigest({ dateKey: key, budgetDateKey: budgetKey || key, items, cap: this.dailyCap });
   }
 
   prepareScheduled(tasks = [], modelRanking = null) {
-    const key = dateKey(this.clock(), this.timeZone);
-    if (!this.isDue() || this.isQuiet() || this.store.hasNotificationForDate(key, 'digest')) return null;
-    return this.prepare(tasks, modelRanking);
+    const now = this.clock();
+    const day = dateKey(now, this.timeZone);
+    if (this.isQuiet(now)) return null;
+    if (this.cadenceMinutes > 0) {
+      const slot = Math.floor(now / (this.cadenceMinutes * 60 * 1000));
+      const deliveryKey = `${day}:${slot}`;
+      if (this.store.hasNotificationForDate(deliveryKey, 'digest')) return null;
+      return this.prepare(tasks, modelRanking, { deliveryKey, budgetKey: day });
+    }
+    if (!this.isDue(now) || this.store.hasNotificationForDate(day, 'digest')) return null;
+    return this.prepare(tasks, modelRanking, { deliveryKey: day, budgetKey: day });
   }
 }
 

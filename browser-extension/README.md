@@ -9,3 +9,7 @@ The extension options page stores the pairing token, browser session ID, and Sig
 ## Install
 
 From Signal Box, click **Install browser bridge**. Signal Box opens the packaged extension folder and Chrome's extension manager, and copies the local pairing token to the clipboard. In Chrome, enable **Developer mode**, choose **Load unpacked**, and select the opened `browser-extension` folder. Then open the extension's **Extension options** page, paste the copied token, and enter the session ID shown by Signal Box. Chrome requires this one-time confirmation for unpacked extensions; Signal Box cannot install one silently.
+
+For the browser action test, keep a tab open at `https://m.uber.com` before
+approving the action. The bridge content script polls from that allowlisted
+page; a tab on another site cannot claim a Signal Box browser request.

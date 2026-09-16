@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 class BrowserBridge {
-  constructor({ clock = () => Date.now(), ttlMs = 15_000, heartbeatMs = 3_000 } = {}) { this.clock = clock; this.ttlMs = ttlMs; this.heartbeatMs = heartbeatMs; this.pending = new Map(); this.waiters = new Map(); this.expiryTimers = new Map(); this.lastSeen = new Map(); }
+  constructor({ clock = () => Date.now(), ttlMs = 120_000, heartbeatMs = 10_000 } = {}) { this.clock = clock; this.ttlMs = ttlMs; this.heartbeatMs = heartbeatMs; this.pending = new Map(); this.waiters = new Map(); this.expiryTimers = new Map(); this.lastSeen = new Map(); }
 
   enqueue({ sessionId, step, origin } = {}) {
     if (!sessionId || !step || !origin) throw new Error('A browser request requires a session, step, and origin.');

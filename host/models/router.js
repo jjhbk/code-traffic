@@ -55,6 +55,7 @@ class ModelRouter {
 
   async rank(tasks = []) {
     this.metrics.rankingCalls += 1;
+    this.metrics.lastRanking = { source: 'pending', taskCount: tasks.length, status: 'running', at: Date.now() };
     if (this.mode === 'off' || !tasks.length) {
       this.metrics.lastRanking = { source: 'deterministic', taskCount: tasks.length, at: Date.now() };
       return { items: [], source: 'deterministic' };
@@ -137,6 +138,7 @@ class ModelRouter {
   async recognizeEntities(text) {
     if (!this.localClient) return [];
     this.metrics.localCalls += 1;
+    this.metrics.lastLocalCall = { at: Date.now(), purpose: 'entity-recognition', status: 'running' };
     try {
       const result = await this.localClient.complete({
         system: 'Find named entities in the text. Return only exact spans from the text. Do not infer entities that are not present.',
@@ -163,8 +165,9 @@ class ModelRouter {
     const safe = (await this.privacyGateway.pseudonymizeWithRecognizer(source, (text) => this.recognizeEntities(text))).text;
     const payload = JSON.stringify({ summary: safe });
     const redacted = !payload.includes(marker) && !payload.includes('Morgan');
-    this.metrics.lastPrivacyCheck = { at: Date.now(), fields: 1, redacted, payloadBytes: Buffer.byteLength(payload), boundary: 'local-recognition-to-pseudonymized-payload' };
-    return { localCall: true, entitiesDetected: entities.length, redacted, sample: safe.replace(/ent_[a-f0-9]+/g, 'ent_[stable-id]') };
+    const leaks = [marker, 'Morgan'].filter((value) => payload.includes(value));
+    this.metrics.lastPrivacyCheck = { at: Date.now(), fields: 1, redacted, leaks, payloadBytes: Buffer.byteLength(payload), boundary: 'local-recognition-to-pseudonymized-payload' };
+    return { localCall: true, entitiesDetected: entities.length, redacted, leaks, sample: safe.replace(/ent_[a-f0-9]+/g, 'ent_[stable-id]') };
   }
 }
 

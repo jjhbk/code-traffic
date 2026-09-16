@@ -134,13 +134,22 @@ h1 { color: #f2ffff; font-size: clamp(25px, 3vw, 34px); letter-spacing: -.04em; 
 .topbar p#summary { margin: 14px 0 0 66px; color: #91a9ac; }
 .status-beacon { display: inline-block; width: 7px; height: 7px; margin: 0 8px 1px 0; border-radius: 50%; background: var(--signal-mint); box-shadow: 0 0 0 4px rgba(169, 244, 208, .09), 0 0 14px rgba(169, 244, 208, .8); }
 .actions { gap: 9px; }
-.new-session, .sound-toggle, #telegram-settings, #gmail-settings, #mail-toggle, #calendar-toggle, #drive-toggle, #tasks-toggle, #digest-settings, #browser-extension-settings, .agent-select, .terminal-bar button, .settings-actions button { border: 1px solid var(--line); border-radius: 11px; padding: 10px 14px; color: #d9eeee; background: rgba(18, 32, 39, .82); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04); transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.new-session, .sound-toggle, #telegram-settings, #activity-toggle, #graph-toggle, #gmail-settings, #mail-toggle, #calendar-toggle, #drive-toggle, #tasks-toggle, #digest-settings, #browser-extension-settings, .agent-select, .terminal-bar button, .settings-actions button { border: 1px solid var(--line); border-radius: 11px; padding: 10px 14px; color: #d9eeee; background: rgba(18, 32, 39, .82); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04); transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.panel-action, #probe-local-model { min-height: 38px; border: 1px solid var(--line); border-radius: 11px; padding: 9px 14px; color: #d9eeee; background: rgba(18, 32, 39, .82); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04); font: inherit; cursor: pointer; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.tasks-view { padding: 20px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(145deg, rgba(15, 29, 36, .84), rgba(8, 17, 23, .78)); box-shadow: 0 18px 42px rgba(0, 0, 0, .16), inset 0 1px 0 rgba(255, 255, 255, .035); }
+.tasks-view .tasks-heading { padding-bottom: 14px; border-bottom: 1px solid rgba(143, 194, 194, .12); }
+.tasks-view .tasks-heading h2 { color: #efffff; letter-spacing: .01em; }
+.tasks-view .field-hint { max-width: 620px; margin: 5px 0 0; color: #819da1; line-height: 1.45; }
+.tasks-heading button.panel-action, #probe-local-model { min-height: 38px; border: 1px solid rgba(110, 231, 245, .3); border-radius: 11px; padding: 9px 14px; color: #d9eeee; background: linear-gradient(145deg, rgba(27, 54, 62, .92), rgba(18, 32, 39, .92)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 5px 16px rgba(0, 0, 0, .14); font: inherit; cursor: pointer; }
+.tasks-heading button.panel-action:hover, #probe-local-model:hover { border-color: rgba(110, 231, 245, .72); background: linear-gradient(145deg, rgba(35, 72, 82, .96), rgba(20, 43, 51, .96)); transform: translateY(-1px); }
 .browser-setup-dialog { max-width: 620px; }
 .browser-setup-steps { margin: 18px 0 10px; padding-left: 22px; color: var(--muted); line-height: 1.65; }
 .copy-field { display: flex; align-items: center; gap: 8px; margin: 8px 0 14px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(7, 15, 20, .72); }
 .copy-field code { flex: 1; min-width: 0; overflow-wrap: anywhere; color: #c8f3ef; font-size: 12px; }
 .copy-field button { flex: 0 0 auto; }
-.new-session:hover, .sound-toggle:hover, #telegram-settings:hover, #gmail-settings:hover, #mail-toggle:hover, #calendar-toggle:hover, #drive-toggle:hover, #tasks-toggle:hover, #digest-settings:hover, #browser-extension-settings:hover, .agent-select:hover, .terminal-bar button:hover, .settings-actions button:hover { border-color: rgba(110, 231, 245, .62); background: rgba(27, 54, 62, .92); transform: translateY(-1px); }
+.new-session:hover, .sound-toggle:hover, #telegram-settings:hover, #activity-toggle:hover, #graph-toggle:hover, #gmail-settings:hover, #mail-toggle:hover, #calendar-toggle:hover, #drive-toggle:hover, #tasks-toggle:hover, #digest-settings:hover, #browser-extension-settings:hover, .agent-select:hover, .terminal-bar button:hover, .settings-actions button:hover { border-color: rgba(110, 231, 245, .62); background: rgba(27, 54, 62, .92); transform: translateY(-1px); }
+.actions > button[aria-pressed="true"] { border-color: rgba(110, 231, 245, .72); color: #eaffff; background: linear-gradient(145deg, rgba(30, 67, 76, .96), rgba(18, 39, 48, .96)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 0 1px rgba(110, 231, 245, .08); }
+.panel-action:hover, #probe-local-model:hover { border-color: rgba(110, 231, 245, .62); background: rgba(27, 54, 62, .92); transform: translateY(-1px); }
 .new-session { color: #061115; background: linear-gradient(135deg, var(--signal-mint), var(--signal-cyan)); border-color: transparent; font-weight: 750; }
 .board { gap: 15px; }
 .board-tile { min-height: 146px; border: 1px solid var(--line); border-radius: 18px; padding: 19px; background: linear-gradient(145deg, rgba(18, 31, 38, .9), rgba(10, 20, 26, .78)); box-shadow: 0 18px 42px rgba(0, 0, 0, .18), inset 0 1px 0 rgba(255, 255, 255, .035); }
@@ -248,9 +257,11 @@ h1 { font-size: 30px; font-weight: 730; letter-spacing: -.045em; background: lin
 .tile .path { color: #789297; font-size: 11px; }
 .tile .clock { right: 20px; bottom: 20px; color: #8da5a8; font-variant-numeric: tabular-nums; }
 .tile .session-mark { top: 20px; right: 20px; color: #7c9ca0; font-size: 9px; letter-spacing: .12em; }
-.tasks-view { padding-top: 3px; }
+.tasks-view { padding-top: 20px; }
 .tasks-heading { margin-bottom: 13px; }
 .tasks-heading h2 { font-size: 17px; }
+.browser-setup-dialog { width: min(620px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(110, 231, 245, .35) transparent; }
+.browser-setup-dialog .browser-test-guide { margin-bottom: 4px; }
 .task-card { padding: 17px; border-radius: 14px; }
 .mail-card { display: grid; gap: 6px; }
 .mail-card h3 { margin: 0; color: #eaffff; font-size: 14px; }

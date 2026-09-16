@@ -52,16 +52,16 @@
         <div id="setup-list" class="setup-list"></div>
       </section>
       <section id="activity-view" class="tasks-view activity-view" hidden>
-        <div class="tasks-heading"><div><h2>Assistant activity</h2><p class="field-hint">What Signal Box has recently ingested, decided, sent, or executed.</p></div><button id="activity-refresh" type="button">Refresh</button></div>
+        <div class="tasks-heading"><div><h2>Assistant activity</h2><p class="field-hint">What Signal Box has recently ingested, decided, sent, or executed.</p></div><button id="activity-refresh" class="panel-action" type="button">Refresh</button></div>
         <div id="activity-list" class="activity-list" aria-live="polite"></div>
       </section>
       <section id="board" class="board" aria-live="polite"></section>
       <section id="tasks-view" class="tasks-view" hidden>
-        <div class="tasks-heading"><h2>Tasks</h2><button id="tasks-refresh" type="button">Refresh</button></div>
+        <div class="tasks-heading"><h2>Tasks</h2><button id="tasks-refresh" class="panel-action" type="button">Refresh</button></div>
         <div id="tasks-list" class="tasks-list" aria-live="polite"></div>
       </section>
       <section id="graph-view" class="tasks-view graph-view" hidden>
-        <div class="tasks-heading"><div><h2>Task graph</h2><p class="field-hint">Tasks connected to the source observations that created them.</p></div><button id="graph-refresh" type="button">Refresh</button></div>
+        <div class="tasks-heading"><div><h2>Task graph</h2><p class="field-hint">Tasks connected to the source observations that created them.</p></div><button id="graph-refresh" class="panel-action" type="button">Refresh</button></div>
         <div id="graph-empty" class="tasks-empty" hidden>No task evidence is stored yet.</div>
         <svg id="task-graph" class="task-graph" role="img" aria-label="Task and evidence graph" viewBox="0 0 900 500" preserveAspectRatio="xMidYMin meet"></svg>
       </section>
@@ -117,7 +117,7 @@
           <p id="model-key-status" class="field-hint"></p><p id="model-error" class="settings-error" hidden></p>
           <h3 class="settings-subheading">Runtime diagnostics</h3>
           <p id="model-diagnostics" class="digest-stats">No model call has been observed yet.</p>
-          <button id="probe-local-model" type="button">Run local privacy test</button>
+          <button id="probe-local-model" class="panel-action" type="button">Run local privacy test</button>
           <div class="settings-actions"><button id="close-model" type="button">Cancel</button><button class="primary-action" type="submit">Save AI settings</button></div>
         </form>
       </section>
@@ -226,6 +226,14 @@
           <input id="quiet-end" type="time">
           <label for="digest-at">Daily digest time</label>
           <input id="digest-at" type="time" value="08:30">
+          <label for="digest-cadence">Digest cadence</label>
+          <select id="digest-cadence" class="settings-select">
+            <option value="60">Every hour</option>
+            <option value="30">Every 30 minutes</option>
+            <option value="15">Every 15 minutes</option>
+            <option value="0">Once daily</option>
+          </select>
+          <p class="field-hint">Digests are sent only when active tasks exist. Quiet hours and the daily task cap still apply.</p>
           <label for="digest-cap">Daily task cap</label>
           <input id="digest-cap" type="number" min="1" max="50" step="1">
           <h3 class="settings-subheading">Suppressions</h3>

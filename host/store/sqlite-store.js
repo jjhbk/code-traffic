@@ -517,19 +517,19 @@ class SqliteStore {
     return { ...next, taskId, status: this.db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId).status };
   }
 
-  reserveDigest({ dateKey, items, cap, notificationClass = 'digest' }) {
+  reserveDigest({ dateKey, budgetDateKey = dateKey, items, cap, notificationClass = 'digest' }) {
     if (!dateKey || !Array.isArray(items) || !Number.isInteger(cap) || cap < 1) throw new Error('Invalid digest reservation.');
     const now = this.clock();
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const ledger = this.db.prepare('SELECT reserved_count AS reservedCount, cap FROM notification_ledger WHERE date_key = ? AND notification_class = ?').get(dateKey, notificationClass);
+      const ledger = this.db.prepare('SELECT reserved_count AS reservedCount, cap FROM notification_ledger WHERE date_key = ? AND notification_class = ?').get(budgetDateKey, notificationClass);
       const existing = ledger?.reservedCount || 0;
       const limit = ledger?.cap || cap;
       const available = Math.max(0, limit - existing);
       const selected = items.slice(0, available);
       if (!selected.length) { this.db.exec('COMMIT'); return null; }
       this.db.prepare(`INSERT INTO notification_ledger(date_key, notification_class, reserved_count, cap) VALUES (?, ?, ?, ?)
-        ON CONFLICT(date_key, notification_class) DO UPDATE SET reserved_count = reserved_count + excluded.reserved_count`).run(dateKey, notificationClass, selected.length, limit);
+        ON CONFLICT(date_key, notification_class) DO UPDATE SET reserved_count = reserved_count + excluded.reserved_count`).run(budgetDateKey, notificationClass, selected.length, limit);
       const notificationId = crypto.randomUUID();
       this.db.prepare('INSERT INTO notification_outbox(notification_id, date_key, notification_class, payload_json, status, created_at) VALUES (?, ?, ?, ?, \'pending\', ?)')
         .run(notificationId, dateKey, notificationClass, JSON.stringify(selected), now);
@@ -539,7 +539,7 @@ class SqliteStore {
   }
 
   hasNotificationForDate(dateKey, notificationClass = 'digest') {
-    return Boolean(this.db.prepare('SELECT 1 FROM notification_ledger WHERE date_key = ? AND notification_class = ?').get(dateKey, notificationClass));
+    return Boolean(this.db.prepare('SELECT 1 FROM notification_outbox WHERE date_key = ? AND notification_class = ?').get(dateKey, notificationClass));
   }
 
   claimNotification(notificationClass = 'digest') {

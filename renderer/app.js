@@ -399,6 +399,7 @@ function activityDetails(entry) {
   if (details.status && !entry.kind.includes(details.status)) parts.push(details.status);
   if (entry.kind === 'model-ranking' && details.source) parts.push(`source: ${details.source}`);
   if (entry.kind === 'model-privacy') parts.push(details.redacted ? 'PII check passed' : 'PII check failed');
+  if (Array.isArray(details.leaks) && details.leaks.length) parts.push(`exposed: ${details.leaks.join(', ')}`);
   if (details.reason) parts.push(details.reason);
   return parts.join(' · ');
 }
@@ -429,7 +430,7 @@ function renderModelDiagnostics(diagnostic) {
     `Local calls: ${metrics.localCalls || 0} · frontier calls: ${metrics.frontierCalls || 0} · ranking runs: ${metrics.rankingCalls || 0}`,
     `Last local call: ${local ? `${local.purpose}, ${local.status}, ${formatDiagnosticTime(local.at)}` : 'never'}`,
     `Last ranking: ${ranking ? `${ranking.source}, ${ranking.status || 'fallback'}${ranking.reason ? ` (${ranking.reason})` : ''}, ${formatDiagnosticTime(ranking.at)}` : 'never'}`,
-    `Last privacy boundary: ${privacy ? `${privacy.redacted ? '✓ PII redaction check passed' : '✕ redaction check failed'} · ${privacy.boundary} · ${formatDiagnosticTime(privacy.at)}` : 'not exercised yet'}`,
+    `Last privacy boundary: ${privacy ? `${privacy.redacted ? '✓ PII redaction check passed' : '✕ redaction check failed'} · ${privacy.boundary}${privacy.leaks?.length ? ` · exposed: ${privacy.leaks.join(', ')}` : ''} · ${formatDiagnosticTime(privacy.at)}` : 'not exercised yet'}`,
   ].join('\n');
 }
 async function refreshModelDiagnostics() {
@@ -471,21 +472,28 @@ async function loadTaskGraph() {
   } catch (caught) { empty.hidden = false; empty.textContent = caught.message || 'Task graph unavailable.'; svg.hidden = true; }
 }
 
-document.getElementById('tasks-toggle').addEventListener('click', async () => {
-  const view = document.getElementById('tasks-view');
-  view.hidden = !view.hidden;
-  if (!view.hidden) await loadTasks();
-});
+const dataViews = ['activity-view', 'tasks-view', 'graph-view', 'mail-view', 'calendar-view', 'drive-view'];
+const dataViewButtons = { 'activity-view': 'activity-toggle', 'tasks-view': 'tasks-toggle', 'graph-view': 'graph-toggle', 'mail-view': 'mail-toggle', 'calendar-view': 'calendar-toggle', 'drive-view': 'drive-toggle' };
+async function toggleDataView(viewId, loader) {
+  const target = document.getElementById(viewId);
+  const shouldOpen = target.hidden;
+  dataViews.forEach((id) => {
+    document.getElementById(id).hidden = true;
+    document.getElementById(dataViewButtons[id])?.setAttribute('aria-pressed', 'false');
+  });
+  if (shouldOpen) {
+    target.hidden = false;
+    document.getElementById(dataViewButtons[viewId])?.setAttribute('aria-pressed', 'true');
+    await loader();
+  }
+}
+document.getElementById('tasks-toggle').addEventListener('click', () => toggleDataView('tasks-view', loadTasks));
 document.getElementById('tasks-refresh').addEventListener('click', loadTasks);
-document.getElementById('activity-toggle').addEventListener('click', async () => { const view = document.getElementById('activity-view'); view.hidden = !view.hidden; if (!view.hidden) await loadActivity(); });
+document.getElementById('activity-toggle').addEventListener('click', () => toggleDataView('activity-view', loadActivity));
 document.getElementById('activity-refresh').addEventListener('click', loadActivity);
-document.getElementById('graph-toggle').addEventListener('click', async () => { const view = document.getElementById('graph-view'); view.hidden = !view.hidden; if (!view.hidden) await loadTaskGraph(); });
+document.getElementById('graph-toggle').addEventListener('click', () => toggleDataView('graph-view', loadTaskGraph));
 document.getElementById('graph-refresh').addEventListener('click', loadTaskGraph);
-document.getElementById('mail-toggle').addEventListener('click', async () => {
-  const view = document.getElementById('mail-view');
-  view.hidden = !view.hidden;
-  if (!view.hidden) await loadMailMessages();
-});
+document.getElementById('mail-toggle').addEventListener('click', () => toggleDataView('mail-view', loadMailMessages));
 document.getElementById('mail-refresh').addEventListener('click', loadMailMessages);
 async function loadCalendarEvents() {
   try {
@@ -548,10 +556,10 @@ async function loadDriveFiles() {
     for (const file of files) { const card = document.createElement('article'); card.className = 'mail-card task-card'; const title = document.createElement('h3'); title.textContent = file.subject || '(unnamed file)'; const meta = document.createElement('p'); meta.className = 'task-meta'; meta.textContent = file.timestamp ? new Date(file.timestamp).toLocaleString() : 'Unknown time'; const body = document.createElement('p'); body.textContent = file.body || ''; card.append(title, meta, body); list.append(card); }
   } catch (caught) { showError(caught.message || 'Could not load Drive files.'); }
 }
-document.getElementById('calendar-toggle').addEventListener('click', async () => { const view = document.getElementById('calendar-view'); view.hidden = !view.hidden; if (!view.hidden) await loadCalendarEvents(); });
+document.getElementById('calendar-toggle').addEventListener('click', () => toggleDataView('calendar-view', loadCalendarEvents));
 document.getElementById('calendar-refresh').addEventListener('click', loadCalendarEvents);
 document.getElementById('calendar-sync').addEventListener('click', async () => { try { await window.signalBox.syncCalendar(); await loadCalendarEvents(); } catch (caught) { showError(caught.message || 'Calendar sync failed.'); } });
-document.getElementById('drive-toggle').addEventListener('click', async () => { const view = document.getElementById('drive-view'); view.hidden = !view.hidden; if (!view.hidden) await loadDriveFiles(); });
+document.getElementById('drive-toggle').addEventListener('click', () => toggleDataView('drive-view', loadDriveFiles));
 document.getElementById('drive-refresh').addEventListener('click', loadDriveFiles);
 document.getElementById('drive-sync').addEventListener('click', async () => { try { await window.signalBox.syncDrive(); await loadDriveFiles(); } catch (caught) { showError(caught.message || 'Drive sync failed.'); } });
 
@@ -922,6 +930,7 @@ document.getElementById('digest-settings').addEventListener('click', async () =>
     document.getElementById('quiet-start').value = settings.quietHoursStart;
     document.getElementById('quiet-end').value = settings.quietHoursEnd;
     document.getElementById('digest-at').value = settings.digestAt;
+    document.getElementById('digest-cadence').value = String(settings.cadenceMinutes ?? 60);
     document.getElementById('digest-cap').value = settings.dailyCap;
     document.getElementById('digest-timezone').textContent = `Timezone: ${settings.timeZone}`;
     const delivery = Object.entries(settings.stats.delivery || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No deliveries yet';
@@ -953,6 +962,7 @@ document.getElementById('digest-form').addEventListener('submit', async (event) 
       quietHoursStart: document.getElementById('quiet-start').value,
       quietHoursEnd: document.getElementById('quiet-end').value,
       digestAt: document.getElementById('digest-at').value,
+      cadenceMinutes: Number(document.getElementById('digest-cadence').value),
       dailyCap: Number(document.getElementById('digest-cap').value),
     });
     digestModal.hidden = true;

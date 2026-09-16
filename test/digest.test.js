@@ -3,7 +3,7 @@ const { DigestScheduler, dateKey } = require('../host/scheduling/digest');
 const { SqliteStore } = require('../host/store/sqlite-store');
 
 const store = new SqliteStore();
-const scheduler = new DigestScheduler({ store, timeZone: 'America/New_York', dailyCap: 2, clock: () => Date.parse('2026-09-16T13:00:00Z') });
+const scheduler = new DigestScheduler({ store, timeZone: 'America/New_York', dailyCap: 2, cadenceMinutes: 0, clock: () => Date.parse('2026-09-16T13:00:00Z') });
 assert.equal(dateKey(Date.parse('2026-09-16T13:00:00Z'), 'America/New_York'), '2026-09-16');
 const tasks = [
   { taskId: 'later', summary: 'Later', status: 'active', dueDate: 'friday', owner: 'counterparty' },
@@ -19,10 +19,19 @@ assert.equal(quiet.prepare(tasks), null);
 store.setSuppression('counterparty', 'client@example.com');
 assert.equal(scheduler.prepare([{ taskId: 'suppressed', summary: 'Suppressed', status: 'active', owner: 'self', counterparty: 'client@example.com' }]), null);
 const scheduledStore = new SqliteStore();
-const scheduled = new DigestScheduler({ store: scheduledStore, timeZone: 'America/New_York', digestAt: '08:30', clock: () => Date.parse('2026-09-16T13:00:00Z') });
+const scheduled = new DigestScheduler({ store: scheduledStore, timeZone: 'America/New_York', digestAt: '08:30', cadenceMinutes: 0, clock: () => Date.parse('2026-09-16T13:00:00Z') });
 assert.equal(scheduled.isDue(), true);
 assert.equal(scheduled.prepareScheduled([{ taskId: 'scheduled', summary: 'Scheduled', status: 'active', dueDate: 'today', owner: 'self' }]).items[0].taskId, 'scheduled');
 assert.equal(scheduled.prepareScheduled([{ taskId: 'scheduled-2', summary: 'Second', status: 'active', owner: 'self' }]), null, 'scheduled digest is reserved once per day');
 scheduledStore.close();
+const intervalStore = new SqliteStore();
+let intervalNow = Date.parse('2026-09-16T13:00:00Z');
+const hourly = new DigestScheduler({ store: intervalStore, timeZone: 'America/New_York', dailyCap: 2, cadenceMinutes: 60, clock: () => intervalNow });
+assert.equal(hourly.prepareScheduled([{ taskId: 'hour-1', summary: 'Hourly', status: 'active', owner: 'self' }]).items[0].taskId, 'hour-1');
+assert.equal(hourly.prepareScheduled([{ taskId: 'hour-2', summary: 'Same slot', status: 'active', owner: 'self' }]), null, 'interval digest is reserved once per slot');
+intervalNow += 60 * 60 * 1000;
+assert.equal(hourly.prepareScheduled([{ taskId: 'hour-3', summary: 'Next hour', status: 'active', owner: 'self' }]).items[0].taskId, 'hour-3');
+assert.equal(intervalStore.reserveDigest({ dateKey: 'manual', budgetDateKey: '2026-09-16', items: [{ taskId: 'cap-1' }], cap: 5 }), null, 'daily cap applies across interval slots');
+intervalStore.close();
 store.close();
 console.log('digest tests passed');

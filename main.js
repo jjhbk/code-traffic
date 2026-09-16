@@ -313,25 +313,29 @@ function wireIpc() {
     quietHoursStart: appSettings.quietHoursStart || '',
     quietHoursEnd: appSettings.quietHoursEnd || '',
     digestAt: appSettings.digestAt || '08:30',
+    cadenceMinutes: [15, 30, 60].includes(Number(appSettings.digestCadenceMinutes)) ? Number(appSettings.digestCadenceMinutes) : 60,
     dailyCap: Number.isInteger(appSettings.dailyDigestCap) ? appSettings.dailyDigestCap : 5,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     stats: hostStore?.notificationStats() || { delivery: {}, feedback: {} },
     history: hostStore?.listNotifications() || [],
   }));
-  ipcMain.handle('digest:save-settings', (_event, { quietHoursStart = '', quietHoursEnd = '', digestAt = '08:30', dailyCap = 5 } = {}) => {
+  ipcMain.handle('digest:save-settings', (_event, { quietHoursStart = '', quietHoursEnd = '', digestAt = '08:30', cadenceMinutes = 60, dailyCap = 5 } = {}) => {
     const validTime = (value) => value === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
     const cap = Number(dailyCap);
+    const cadence = Number(cadenceMinutes);
     if (!validTime(quietHoursStart) || !validTime(quietHoursEnd) || !validTime(digestAt)) throw new Error('Digest and quiet hours must use HH:MM format.');
     if (!Number.isInteger(cap) || cap < 1 || cap > 50) throw new Error('Daily digest cap must be between 1 and 50.');
-    appSettings = { ...appSettings, quietHoursStart, quietHoursEnd, digestAt, dailyDigestCap: cap };
+    if (![0, 15, 30, 60].includes(cadence)) throw new Error('Digest cadence must be daily, 15, 30, or 60 minutes.');
+    appSettings = { ...appSettings, quietHoursStart, quietHoursEnd, digestAt, digestCadenceMinutes: cadence, dailyDigestCap: cap };
     writeSettings(app.getPath('userData'), appSettings);
     if (digestScheduler) {
       digestScheduler.quietStart = quietHoursStart || null;
       digestScheduler.quietEnd = quietHoursEnd || null;
       digestScheduler.digestAt = digestAt;
+      digestScheduler.cadenceMinutes = cadence;
       digestScheduler.dailyCap = cap;
     }
-    return { quietHoursStart, quietHoursEnd, digestAt, dailyCap: cap };
+    return { quietHoursStart, quietHoursEnd, digestAt, cadenceMinutes: cadence, dailyCap: cap };
   });
   ipcMain.handle('model:get-status', () => ({ ...(modelRouter?.status() || { mode: 'off', local: false, frontier: false, active: false }), hardware: modelHardware }));
   ipcMain.handle('model:get-settings', () => ({
@@ -889,6 +893,8 @@ async function dispatchBrowserAction(requestId, sessionId = null, surface = 'des
   if (!hostStore || !approvalService || !browserBridge) throw new Error('Browser action execution is unavailable.');
   const activeSessionId = sessionId || appSettings.browserSessionId;
   if (!activeSessionId) throw new Error('A browser session ID is required.');
+  const bridgeStatus = browserBridge.status(activeSessionId);
+  if (!bridgeStatus.connected) throw new Error('Browser extension is not connected. Open https://m.uber.com in the paired Chrome tab, then retry the action.');
   const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: uberCabBooking.origin });
   const executor = new BrowserRecipeExecutor({ browser: adapter });
   const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
@@ -968,6 +974,7 @@ async function start() {
     store: hostStore,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     digestAt: appSettings.digestAt || '08:30',
+    cadenceMinutes: [15, 30, 60].includes(Number(appSettings.digestCadenceMinutes)) ? Number(appSettings.digestCadenceMinutes) : 60,
     quietStart: appSettings.quietHoursStart || null,
     quietEnd: appSettings.quietHoursEnd || null,
   }) : null;
