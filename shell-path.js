@@ -19,8 +19,10 @@ async function restoreShellPath({ platform = process.platform, env = process.env
     // A broken or slow shell profile must not prevent the app from opening.
   }
   const fallback = [
-    path.join(home, '.local', 'bin'),
-    path.join(home, '.npm-global', 'bin'),
+    // This code runs only for macOS. Use POSIX path operations even when the
+    // macOS behavior is being exercised from a Windows CI runner.
+    path.posix.join(home, '.local', 'bin'),
+    path.posix.join(home, '.npm-global', 'bin'),
     '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin',
   ];
   env.PATH = [...new Set([
