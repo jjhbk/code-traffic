@@ -1,7 +1,7 @@
 {
   "name": "signal-box",
   "productName": "Signal Box",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "private": true,
   "author": "Signal Box contributors",
   "license": "MIT",
