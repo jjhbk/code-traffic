@@ -9,7 +9,7 @@ Extend the existing application in place. The first release combines reliable ag
 - **Phases A–B:** implemented and covered by the reliability, durable store, approval, audit, recovery, and Telegram regression suites.
 - **Phase C:** Gmail OAuth, protected credentials, incremental sync, normalization, local privacy primitives, connector health, and deletion/disconnect flows are implemented. Remote model inference remains disabled by default and no frontier model is required by the product.
 - **Phase D:** task extraction, evidence, reconciliation, corrections, suppression, snooze, and the task UI are implemented. A labeled fixture evaluator now reports precision and recall for classifier changes.
-- **Phase E:** scheduled local-time digests, quiet hours, persistent caps, outbox delivery, Telegram feedback, settings, and the Gmail message view are implemented. The seven-day real-user pilot remains a release gate rather than a claim of completion.
+- **Phase E:** scheduled local-time digests, quiet hours, persistent caps, outbox delivery, Telegram feedback, settings, Gmail message view, and a seven-day pilot report are implemented. The real-user pilot remains a release gate rather than a claim of completion.
 - **Phase F:** reviewed Gmail reply execution is implemented. Calendar, file connectors, and browser recipes remain deferred until the pilot shows they are needed.
 - **Phase G:** payments and spend authority are excluded from this product cycle.
 - **Phase H:** multi-user functionality is excluded; this is a single-user, single-machine application.

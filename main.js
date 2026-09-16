@@ -235,6 +235,7 @@ function wireIpc() {
     dailyCap: Number.isInteger(appSettings.dailyDigestCap) ? appSettings.dailyDigestCap : 5,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     stats: hostStore?.notificationStats() || { delivery: {}, feedback: {} },
+    pilot: hostStore?.pilotReport({ days: 7, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) || null,
     history: hostStore?.listNotifications() || [],
   }));
   ipcMain.handle('digest:save-settings', (_event, { quietHoursStart = '', quietHoursEnd = '', digestAt = '08:30', dailyCap = 5 } = {}) => {

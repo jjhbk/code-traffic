@@ -606,7 +606,9 @@ document.getElementById('digest-settings').addEventListener('click', async () =>
     document.getElementById('digest-timezone').textContent = `Timezone: ${settings.timeZone}`;
     const delivery = Object.entries(settings.stats.delivery || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No deliveries yet';
     const feedback = Object.entries(settings.stats.feedback || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'No feedback yet';
-    document.getElementById('digest-stats').textContent = `Delivery — ${delivery}\nFeedback — ${feedback}`;
+    const pilot = settings.pilot;
+    const pilotLine = pilot ? `Pilot — ${pilot.observedDays.length}/7 days observed · ${pilot.delivery.sent} sent · ${pilot.delivery.failed} failed · ${pilot.delivery.unknown} unknown${pilot.usefulnessRate === null ? '' : ` · ${Math.round(pilot.usefulnessRate * 100)}% useful`}` : '';
+    document.getElementById('digest-stats').textContent = `Delivery — ${delivery}\nFeedback — ${feedback}\n${pilotLine}`;
     await renderSuppressions();
     digestModal.hidden = false;
   } catch (caught) { showError(caught.message); }

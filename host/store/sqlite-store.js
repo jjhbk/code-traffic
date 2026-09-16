@@ -431,6 +431,32 @@ class SqliteStore {
     };
   }
 
+  pilotReport({ days = 7, timeZone = 'UTC' } = {}) {
+    if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('Pilot duration must be between 1 and 90 days.');
+    const cutoff = this.clock() - days * 24 * 60 * 60 * 1000;
+    const rows = this.db.prepare(`SELECT o.notification_id AS notificationId, o.date_key AS dateKey, o.status,
+      f.useful AS useful FROM notification_outbox o LEFT JOIN notification_feedback f ON f.notification_id = o.notification_id
+      WHERE o.notification_class = 'digest' AND o.created_at >= ? ORDER BY o.created_at`).all(cutoff);
+    const observedDays = [...new Set(rows.map((row) => row.dateKey))].sort();
+    const sent = rows.filter((row) => row.status === 'sent').length;
+    const failed = rows.filter((row) => row.status === 'failed').length;
+    const unknown = rows.filter((row) => row.status === 'unknown' || row.status === 'sending').length;
+    const feedbackRows = rows.filter((row) => row.useful !== null && row.useful !== undefined);
+    const useful = feedbackRows.filter((row) => Number(row.useful) === 1).length;
+    const notUseful = feedbackRows.filter((row) => Number(row.useful) === 0).length;
+    return {
+      days,
+      timeZone,
+      observedDays,
+      digestCount: rows.length,
+      delivery: { sent, failed, unknown },
+      feedback: { useful, notUseful, responseCount: feedbackRows.length },
+      feedbackRate: rows.length ? feedbackRows.length / rows.length : 0,
+      usefulnessRate: feedbackRows.length ? useful / feedbackRows.length : null,
+      readyForReview: observedDays.length >= days && failed === 0 && unknown === 0,
+    };
+  }
+
   listNotifications(limit = 20) {
     return this.db.prepare(`SELECT notification_id AS notificationId, date_key AS dateKey, notification_class AS notificationClass,
       status, created_at AS createdAt FROM notification_outbox ORDER BY created_at DESC LIMIT ?`).all(limit);
