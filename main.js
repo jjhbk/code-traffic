@@ -30,6 +30,7 @@ const { DigestScheduler } = require('./host/scheduling/digest');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient, OpenAICompatibleClient } = require('./host/models/clients');
 const { ModelRouter } = require('./host/models/router');
+const { recommendLocalModel } = require('./host/models/profile');
 
 const GOOGLE_CLIENT_ID = process.env.SIGNAL_BOX_GOOGLE_CLIENT_ID || '';
 
@@ -661,13 +662,15 @@ async function start() {
     privacyGateway = new PrivacyGateway({ localOnly: true });
     console.error(`[mail] protected credential storage unavailable: ${error.message}; backend=${safeStorage.getSelectedStorageBackend?.() || 'unknown'}`);
   }
-  const localClient = new OllamaClient({ model: process.env.SIGNAL_BOX_LOCAL_MODEL || 'qwen3:4b-instruct' });
+  const localProfile = recommendLocalModel();
+  const localModel = process.env.SIGNAL_BOX_LOCAL_MODEL || localProfile.model;
+  const localClient = new OllamaClient({ model: localModel });
   let frontierClient = null;
   if (process.env.SIGNAL_BOX_FRONTIER_API_KEY) {
     frontierClient = new OpenAICompatibleClient({ model: process.env.SIGNAL_BOX_FRONTIER_MODEL || 'gpt-4o-mini', baseUrl: process.env.SIGNAL_BOX_FRONTIER_BASE_URL || 'https://api.openai.com/v1', apiKey: process.env.SIGNAL_BOX_FRONTIER_API_KEY });
   }
   modelRouter = new ModelRouter({ privacyGateway, localClient, frontierClient, mode: process.env.SIGNAL_BOX_MODEL_MODE || 'local' });
-  console.error(`[models] mode=${modelRouter.mode} local=${modelRouter.status().local} frontier=${modelRouter.status().frontier}`);
+  console.error(`[models] mode=${modelRouter.mode} local=${localModel} (${localProfile.tier}) frontier=${modelRouter.status().frontier}`);
   const hookAuth = ensureHookToken();
   try { installClaudeHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
   try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
