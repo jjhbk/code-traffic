@@ -29,6 +29,7 @@ const { createOAuthState, waitForOAuthCallback } = require('./host/mail/oauth-ca
 const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
 const { DigestScheduler } = require('./host/scheduling/digest');
+const { AssistantRuntime } = require('./host/runtime/assistant');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
 const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
@@ -90,6 +91,7 @@ let calendarSync;
 let driveSync;
 let taskService;
 let digestScheduler;
+let assistantRuntime;
 let mailSyncTimer;
 let calendarSyncTimer;
 let driveSyncTimer;
@@ -978,6 +980,18 @@ async function start() {
     quietStart: appSettings.quietHoursStart || null,
     quietEnd: appSettings.quietHoursEnd || null,
   }) : null;
+  assistantRuntime = hostStore ? new AssistantRuntime({
+    store: hostStore,
+    intervalMs: 30 * 1000,
+    onError: (error) => console.error(`[assistant] runtime tick failed: ${error.message}`),
+  }) : null;
+  if (assistantRuntime) {
+    assistantRuntime.register('assistant.digest', async () => {
+      await runScheduledDigest();
+      return { completed: true };
+    });
+    assistantRuntime.schedule('assistant.digest', {}, Date.now(), `assistant:digest:${Math.floor(Date.now() / 30_000)}`);
+  }
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
   try {
     await board.listen(Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747);
@@ -1073,9 +1087,8 @@ async function start() {
   runDriveSync().catch((error) => console.error(`[drive] initial sync failed: ${error.message}`));
   driveSyncTimer = setInterval(() => runDriveSync().catch((error) => console.error(`[drive] scheduled sync failed: ${error.message}`)), 10 * 60 * 1000);
   driveSyncTimer.unref?.();
-  digestTimer = setInterval(() => runScheduledDigest().catch((error) => console.error(`[digest] scheduled delivery failed: ${error.message}`)), 30 * 1000);
-  digestTimer.unref?.();
   if (appSettings.telegramEnabled !== false) telegram.start();
+  assistantRuntime?.start();
   for (const session of board.list()) {
     if (session.state === 'approval') telegram.notifyState(session, 'approval');
   }
@@ -1213,6 +1226,7 @@ app.on('before-quit', async () => {
   if (calendarSyncTimer) clearInterval(calendarSyncTimer);
   if (driveSyncTimer) clearInterval(driveSyncTimer);
   if (digestTimer) clearInterval(digestTimer);
+  assistantRuntime?.stop();
   telegram?.stop();
   modelRouter?.frontierClient?.close?.();
   for (const child of remoteCommands.values()) {
