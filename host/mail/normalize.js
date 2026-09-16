@@ -54,8 +54,8 @@ function normalizeMessage(raw, { accountAddress = '' } = {}) {
 
 function candidateFilters(observation, { existingTaskThreadIds = new Set() } = {}) {
   const body = `${observation.subject}\n${observation.body}`;
-  const hasCommitmentLanguage = /\b(i['’]?ll|i will|we['’]?ll|we will|can do|will send|will share|will follow up|please|could you|would you)\b/i.test(body);
-  const incomingRequest = observation.direction === 'incoming' && /\b(please|could you|would you|can you|need you to|by (monday|tuesday|wednesday|thursday|friday|tomorrow|today))\b/i.test(body);
+  const hasCommitmentLanguage = /\b(i['’]?ll|i will|we['’]?ll|we will|can do|will (?:send|share|follow up|review|provide|finish)|i can|we can)\b/i.test(body);
+  const incomingRequest = observation.direction === 'incoming' && /\b(please (?:send|share|review|confirm|provide|finish|follow up)|could you|would you|can you|need you to|by (monday|tuesday|wednesday|thursday|friday|tomorrow|today))\b/i.test(body);
   const outgoingCommitment = observation.direction === 'outgoing' && hasCommitmentLanguage;
   const existingTaskUpdate = existingTaskThreadIds.has(observation.threadId);
   return {

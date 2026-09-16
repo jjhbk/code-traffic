@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const { normalizeMessage, candidateFilters } = require('../host/mail/normalize');
+const { candidateFromObservation } = require('../host/tasks/extract');
+const { evaluateFixtures } = require('../host/tasks/evaluation');
 
 const incoming = normalizeMessage({
   id: 'm1', threadId: 't1', historyId: 'h1',
@@ -27,5 +29,17 @@ const outgoing = normalizeMessage({
 assert.equal(outgoing.direction, 'outgoing');
 assert.equal(candidateFilters(outgoing).outgoingCommitment, true);
 assert.equal(candidateFilters(outgoing, { existingTaskThreadIds: new Set(['t1']) }).existingTaskUpdate, true);
+assert.equal(candidateFilters({ direction: 'incoming', subject: 'Attachment', body: 'Please find attached the report.' }).eligible, false);
+assert.equal(candidateFromObservation({ observationId: 'update', threadId: 'existing', subject: 'Status', body: 'The report is attached.', direction: 'incoming' }, {
+  filters: { eligible: true, existingTaskUpdate: true },
+}).candidateId, 'update:local-1');
+const evaluation = evaluateFixtures([
+  { id: 'request', expected: true, observation: { observationId: '1', threadId: '1', subject: 'Review', body: 'Could you review this by Friday?', direction: 'incoming' } },
+  { id: 'promise', expected: true, observation: { observationId: '2', threadId: '2', subject: 'Handoff', body: "I'll send it tomorrow.", direction: 'outgoing' } },
+  { id: 'newsletter', expected: false, observation: { observationId: '3', threadId: '3', subject: 'Weekly update', body: 'Please find attached our newsletter.', direction: 'incoming' } },
+  { id: 'receipt', expected: false, observation: { observationId: '4', threadId: '4', subject: 'Receipt', body: 'Your payment was received.', direction: 'incoming' } },
+]);
+assert.equal(evaluation.precision, 1);
+assert.equal(evaluation.recall, 1);
 assert.notEqual(incoming.observationId, outgoing.observationId);
 console.log('mail normalization tests passed');
