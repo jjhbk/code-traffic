@@ -100,7 +100,7 @@ Signal Box is a working application, not a proposal. Being honest about the line
 | Staleness detection for silent agent loops | Built; per-session tuning remains open |
 | Event server authentication; keychain secret storage | Legacy hook authentication and OS-protected credentials built; generalized `/event` remains |
 | Ingest connectors (mail, calendar, files) | Gmail built; calendar and files remain |
-| Privacy vault and pseudonymization | Deterministic pseudonymization primitive built; persistent encrypted vault and local entity recognition remain |
+| Privacy vault and pseudonymization | Deterministic detectors and persistent encrypted vault built; local entity recognition remains |
 | Task graph, prioritizer, digest | Deterministic Gmail task graph and scheduled digest built; frontier ranking remains optional/future |
 | Browser recipes; standing authority; payments | Not built |
 | Audit log | Approval, execution, and notification audit records built; full append-only event audit remains |

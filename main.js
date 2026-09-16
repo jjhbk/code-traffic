@@ -27,6 +27,7 @@ const { createOAuthState, waitForOAuthCallback } = require('./host/mail/oauth-ca
 const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
 const { DigestScheduler } = require('./host/scheduling/digest');
+const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 
 const GOOGLE_CLIENT_ID = process.env.SIGNAL_BOX_GOOGLE_CLIENT_ID || '';
 
@@ -78,6 +79,7 @@ let taskService;
 let digestScheduler;
 let mailSyncTimer;
 let digestTimer;
+let privacyGateway;
 let appSettings = {};
 const codexTerminalQuestions = new Map();
 const terminals = new Map();
@@ -646,8 +648,13 @@ async function start() {
   try {
     mailCredentials = new ProtectedCredentialStore({ filename: path.join(app.getPath('userData'), 'mail-credentials.json'), safeStorage });
     console.error(`[mail] protected credential storage ready: ${safeStorage.getSelectedStorageBackend?.() || 'available'}`);
+    let vaultKey = mailCredentials.load('privacy-vault-key');
+    if (!vaultKey) { vaultKey = crypto.randomBytes(32).toString('base64'); mailCredentials.save('privacy-vault-key', vaultKey); }
+    privacyGateway = new PrivacyGateway({ vault: new EntityVault({ filename: path.join(app.getPath('userData'), 'privacy-vault.json'), key: Buffer.from(vaultKey, 'base64') }), localOnly: true });
+    console.error('[privacy] encrypted entity vault ready; remote inference disabled');
   } catch (error) {
     mailCredentials = null;
+    privacyGateway = new PrivacyGateway({ localOnly: true });
     console.error(`[mail] protected credential storage unavailable: ${error.message}; backend=${safeStorage.getSelectedStorageBackend?.() || 'unknown'}`);
   }
   const hookAuth = ensureHookToken();

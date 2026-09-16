@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { EntityVault, PrivacyGateway } = require('../host/privacy/gateway');
 const { candidateFromObservation } = require('../host/tasks/extract');
 
@@ -14,6 +17,17 @@ assert.equal(first.offsets[0].sourceStart, 6);
 assert.equal(vault.rehydrate(first.offsets[0].entityId, 'email'), 'me@example.com');
 assert.throws(() => vault.rehydrate(first.offsets[0].entityId, 'phone'), /mismatched/);
 assert.equal(await gateway.infer({ body: 'me@example.com' }), null);
+const vaultDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-vault-'));
+const vaultFile = path.join(vaultDirectory, 'vault.json');
+const persistent = new EntityVault({ filename: vaultFile, key: Buffer.alloc(32, 7) });
+const stableId = persistent.idFor('email', 'stable@example.com');
+assert.doesNotMatch(fs.readFileSync(vaultFile, 'utf8'), /stable@example.com/);
+const reopened = new EntityVault({ filename: vaultFile, key: Buffer.alloc(32, 7) });
+assert.equal(reopened.idFor('email', 'stable@example.com'), stableId);
+assert.equal(reopened.rehydrate(stableId, 'email'), 'stable@example.com');
+assert.throws(() => new EntityVault({ filename: vaultFile, key: Buffer.alloc(32, 8) }), /encrypted entity vault/);
+assert.match(gateway.pseudonymize('Pay 4111 1111 1111 1111 at https://example.com/account').text, /\[card:ent_[a-f0-9]+\]/);
+fs.rmSync(vaultDirectory, { recursive: true, force: true });
 
 const observation = { observationId: 'obs-1', threadId: 'thread-1', subject: 'Friday handoff', body: "I'll send the handoff by Friday.", direction: 'outgoing' };
 const candidate = candidateFromObservation(observation, { filters: { eligible: true } });
