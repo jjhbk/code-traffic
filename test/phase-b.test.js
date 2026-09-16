@@ -5,6 +5,7 @@ const path = require('node:path');
 const { SqliteStore } = require('../host/store/sqlite-store');
 const { ApprovalService } = require('../host/approvals/service');
 const { normalizeEvent, normalizeIngestEvent } = require('../host/events/event-contract');
+const { PolicyEngine } = require('../host/policy/engine');
 
 let now = 1000;
 const store = new SqliteStore({ clock: () => now });
@@ -17,6 +18,9 @@ assert.equal(normalizeEvent({ state: 'working', eventId: 'event-1', sequence: 2 
 assert.throws(() => normalizeEvent({ state: 'not-a-state' }), /Unsupported event/);
 assert.equal(normalizeIngestEvent({ source: 'fake', actor_id: 'actor-1', kind: 'observation', seq: 1, payload: { subject: 'Hello' } }).adapterId, 'fake:actor-1');
 assert.throws(() => normalizeIngestEvent({ source: 'fake', actor_id: 'actor-1', kind: 'unknown' }), /Unsupported ingest/);
+const policy = new PolicyEngine();
+assert.deepEqual(policy.evaluate({ capability: 'terminal.exec' }, { surfaces: ['desktop', 'telegram'] }).surfaces, ['desktop']);
+assert.throws(() => policy.evaluate({ capability: 'missing' }), /Unknown capabilities/);
 assert.equal(store.ingestEvent({ eventId: 'e1', adapterId: 'fake', producerEpoch: 'p1', sequence: 1, type: 'working', payload: { tile: 'one' } }).accepted, true);
 assert.equal(store.ingestEvent({ eventId: 'e1', adapterId: 'fake', producerEpoch: 'p1', sequence: 1, type: 'working', payload: { tile: 'one' } }).duplicate, true);
 assert.equal(store.ingestEvent({ eventId: 'e0', adapterId: 'fake', producerEpoch: 'p1', sequence: 0, type: 'working', payload: { tile: 'one' } }).stale, true);

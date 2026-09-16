@@ -1,15 +1,17 @@
+const { PolicyEngine } = require('../policy/engine');
+
 class ApprovalService {
-  constructor({ store, clock = () => Date.now(), policyVersion = '1' } = {}) {
+  constructor({ store, clock = () => Date.now(), policyVersion = null, policy = null } = {}) {
     if (!store) throw new Error('An approval store is required.');
     this.store = store;
     this.clock = clock;
-    this.policyVersion = policyVersion;
+    this.policy = policy || new PolicyEngine({ version: policyVersion || 'single-user-1' });
+    this.policyVersion = policyVersion || this.policy.version;
   }
 
   request(actionProposal, { principal, surfaces = ['desktop'], expiresAt = this.clock() + 5 * 60 * 1000 } = {}) {
-    if (!actionProposal?.capability || actionProposal.capability === 'unknown') throw new Error('Unknown capabilities cannot be approved.');
-    if (actionProposal.autonomous === true) throw new Error('Autonomous write grants are disabled.');
-    return this.store.createApproval({ action: actionProposal, options: actionProposal.options || [{ optionId: 'allow', label: 'Allow once' }, { optionId: 'deny', label: 'Deny' }], principal, surfaces, expiresAt, policyVersion: this.policyVersion });
+    const decisionPolicy = this.policy.evaluate(actionProposal, { surfaces });
+    return this.store.createApproval({ action: { ...actionProposal, effects: actionProposal.effects || decisionPolicy.effects }, options: actionProposal.options || [{ optionId: 'allow', label: 'Allow once' }, { optionId: 'deny', label: 'Deny' }], principal, surfaces: decisionPolicy.surfaces, expiresAt, policyVersion: this.policyVersion });
   }
 
   decide(requestId, optionId, { principal, surface } = {}) {
