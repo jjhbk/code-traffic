@@ -20,9 +20,10 @@ module.exports = {
     ...(macIdentity ? { osxSign: { identity: macIdentity } } : {}),
     ...(appleId && appleIdPassword && appleTeamId ? { osxNotarize: { appleId, appleIdPassword, teamId: appleTeamId } } : {}),
     ...(windowsCertificateFile ? { windowsSign: { certificateFile: windowsCertificateFile, certificatePassword: windowsCertificatePassword } } : {}),
-    // node-pty launches this executable by its app.asar.unpacked path.
-    // AutoUnpackNatives only handles .node libraries, not spawn-helper.
-    asar: { unpack: '**/node-pty/**/spawn-helper' },
+    // node-pty launches spawn-helper and its native libraries from the
+    // app.asar.unpacked path. Unpack the complete small node-pty package so
+    // the helper is matched consistently on Windows, macOS, and Linux.
+    asar: { unpack: '**/node-pty/**' },
     extraResource: ['codex-notify.js', 'browser-extension'],
     afterPrune: [(buildPath, _electronVersion, platform, _arch, callback) => {
       if (platform !== 'darwin') return callback();
