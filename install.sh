@@ -13,25 +13,30 @@ echo "Detected Linux architecture: $machine"
 
 if command -v apt-get >/dev/null 2>&1; then
   package_type="deb"
-  asset_pattern="_${deb_arch}.deb"
+  asset_pattern="_${deb_arch}(-[^\"]+)?\\.deb$"
 elif command -v dnf >/dev/null 2>&1; then
   package_type="rpm"
-  asset_pattern=".${rpm_arch}.rpm"
+  asset_pattern="\\.${rpm_arch}(-[^\"]+)?\\.rpm$"
 elif command -v yum >/dev/null 2>&1; then
   package_type="rpm"
-  asset_pattern=".${rpm_arch}.rpm"
+  asset_pattern="\\.${rpm_arch}(-[^\"]+)?\\.rpm$"
 else
   echo "Signal Box supports apt, dnf, or yum for automatic installation." >&2
   exit 1
 fi
 
-asset_url="$(curl -fsSL "$api" \
+release_json="$(curl -fsSL "$api")"
+asset_url="$(printf '%s' "$release_json" \
   | grep -oE '"browser_download_url": "[^"]+"' \
   | sed -E 's/^"browser_download_url": "([^"]+)"$/\1/' \
-  | grep "${asset_pattern}" \
-  | head -n 1)"
+  | grep -E "${asset_pattern}" \
+  | head -n 1 || true)"
 if [ -z "$asset_url" ]; then
   echo "No Signal Box ${package_type} release was found for ${machine}." >&2
+  echo "Available release assets:" >&2
+  printf '%s' "$release_json" \
+    | grep -oE '"name": "[^"]+"' \
+    | sed -E 's/^"name": "([^"]+)"$/  \1/' >&2 || true
   exit 1
 fi
 
