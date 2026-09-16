@@ -4,6 +4,7 @@ const CAPABILITIES = new Map([
   ['gmail.send', { effects: 'commit', surfaces: ['desktop', 'telegram'] }],
   ['gmail.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
   ['calendar.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
+  ['calendar.update', { effects: 'commit', surfaces: ['desktop', 'telegram'] }],
   ['drive.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
   ['files.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
   ['browser.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],

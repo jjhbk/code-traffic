@@ -18,6 +18,8 @@ class BrowserActionService {
     if (!request || request.status !== 'resolved') throw new Error('Browser approval is not resolved.');
     const decision = this.store.getDecision(requestId);
     if (!decision || decision.optionId !== 'allow') throw new Error('Browser action was not approved.');
+    const existingAttempts = this.store.getExecutionAttempts(requestId);
+    if (existingAttempts.length) throw new Error('Browser approval has already been consumed.');
     const action = request.action;
     const attempt = this.approvals.execution({ requestId, status: 'prepared', details: { capability: action.capability, recipeId: action.recipeId, surface } });
     this.approvals.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: decision.decisionId, surface } });
