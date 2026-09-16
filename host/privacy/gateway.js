@@ -96,6 +96,25 @@ class PrivacyGateway {
     return { text: output, offsets };
   }
 
+  async pseudonymizeWithRecognizer(text, recognizer) {
+    const input = String(text || '');
+    let entities = [];
+    try { entities = await recognizer(input); } catch (_) { entities = []; }
+    const matches = entities.filter((entity) => entity && Number.isInteger(entity.start) && Number.isInteger(entity.end)
+      && entity.start >= 0 && entity.end > entity.start && entity.end <= input.length && input.slice(entity.start, entity.end) === entity.value)
+      .sort((a, b) => a.start - b.start || a.end - b.end);
+    let output = '';
+    let cursor = 0;
+    for (const entity of matches) {
+      if (entity.start < cursor) continue;
+      const id = this.vault.idFor(entity.type, entity.value);
+      output += input.slice(cursor, entity.start) + `[${entity.type}:${id}]`;
+      cursor = entity.end;
+    }
+    output += input.slice(cursor);
+    return this.pseudonymize(output);
+  }
+
   prepareRemotePayload(payload, allowedFields = Object.keys(payload || {})) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Privacy gateway payload must be an object.');
     const safe = {};

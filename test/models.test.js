@@ -23,6 +23,10 @@ const router = new ModelRouter({ privacyGateway: new PrivacyGateway({ vault: new
   } });
   const frontierRouter = new ModelRouter({ privacyGateway: new PrivacyGateway(), frontierClient: frontier, mode: 'frontier' });
   assert.equal((await frontierRouter.rank(tasks)).source, 'frontier');
+  const entities = await router.recognizeEntities('Meet Priya at Acme Labs.');
+  assert.deepEqual(entities, []);
+  const availability = await new ModelRouter({ privacyGateway: new PrivacyGateway(), localClient: new OllamaClient({ model: 'missing', fetchImpl: async () => ({ ok: true, json: async () => ({ models: [] }) }) }), mode: 'local' }).availability();
+  assert.equal(availability.localAvailable, false);
   assert.equal(new ModelRouter({ privacyGateway: new PrivacyGateway(), mode: 'frontier' }).status().active, false);
   console.log('model routing tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

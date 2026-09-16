@@ -27,6 +27,9 @@ assert.equal(reopened.idFor('email', 'stable@example.com'), stableId);
 assert.equal(reopened.rehydrate(stableId, 'email'), 'stable@example.com');
 assert.throws(() => new EntityVault({ filename: vaultFile, key: Buffer.alloc(32, 8) }), /encrypted entity vault/);
 assert.match(gateway.pseudonymize('Pay 4111 1111 1111 1111 at https://example.com/account').text, /\[card:ent_[a-f0-9]+\]/);
+const recognized = await gateway.pseudonymizeWithRecognizer('Meet Priya at Acme Labs.', async () => [{ type: 'person', value: 'Priya', start: 5, end: 10 }, { type: 'organization', value: 'Acme Labs', start: 14, end: 23 }]);
+assert.match(recognized.text, /\[person:ent_[a-f0-9]+\]/);
+assert.match(recognized.text, /\[organization:ent_[a-f0-9]+\]/);
 fs.rmSync(vaultDirectory, { recursive: true, force: true });
 
 const observation = { observationId: 'obs-1', threadId: 'thread-1', subject: 'Friday handoff', body: "I'll send the handoff by Friday.", direction: 'outgoing' };

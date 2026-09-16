@@ -260,6 +260,7 @@ function wireIpc() {
     return { quietHoursStart, quietHoursEnd, digestAt, dailyCap: cap };
   });
   ipcMain.handle('model:get-status', () => modelRouter?.status() || { mode: 'off', local: false, frontier: false, active: false });
+  ipcMain.handle('model:check', async () => modelRouter?.availability() || { mode: 'off', local: false, frontier: false, active: false, localAvailable: false });
   ipcMain.handle('data:export', async () => {
     if (!hostStore) throw new Error('Durable storage is unavailable.');
     const result = await dialog.showSaveDialog(windowRef, { title: 'Export Signal Box data', defaultPath: 'signal-box-export.json', filters: [{ name: 'JSON', extensions: ['json'] }] });

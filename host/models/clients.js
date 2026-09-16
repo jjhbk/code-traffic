@@ -12,6 +12,13 @@ class OllamaClient extends JsonModelClient {
     this.baseUrl = baseUrl.replace(/\/$/, '');
   }
 
+  async available() {
+    const response = await this.fetch(`${this.baseUrl}/api/tags`);
+    if (!response.ok) return false;
+    const body = await response.json();
+    return Array.isArray(body.models) && body.models.some((item) => item.name === this.model || item.name?.startsWith(`${this.model}:`));
+  }
+
   async complete({ system, prompt, schema } = {}) {
     const response = await this.fetch(`${this.baseUrl}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

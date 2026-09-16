@@ -134,15 +134,17 @@ function renderSetup(items) {
 
 async function refreshSetupCenter() {
   try {
-    const [telegram, gmail, digest] = await Promise.all([
+    const [telegram, gmail, digest, model] = await Promise.all([
       window.signalBox.getSettings(),
       window.signalBox.getMailStatus(),
       window.signalBox.getDigestSettings(),
+      window.signalBox.checkModel().catch(() => null),
     ]);
     const items = [];
     if (!telegram.configured) items.push({ icon: '↗', title: 'Connect Telegram', detail: 'Receive approvals and daily updates wherever you are.', action: 'Set up', tone: 'cyan', onClick: () => document.getElementById('telegram-settings').click() });
     if (!gmail.paired) items.push({ icon: '✉', title: 'Connect Gmail', detail: 'Let Signal Box find commitments and follow-ups from your inbox.', action: 'Connect', tone: 'violet', onClick: () => document.getElementById('gmail-settings').click() });
     if (!digest.quietHoursStart && !digest.quietHoursEnd) items.push({ icon: '◷', title: 'Set notification quiet hours', detail: `Choose when Signal Box should stay quiet. Current timezone: ${digest.timeZone}.`, action: 'Configure', tone: 'amber', onClick: () => document.getElementById('digest-settings').click() });
+    if (model?.mode === 'local' && model.localAvailable === false) items.push({ icon: '◌', title: 'Enable private local AI', detail: `Install ${model.localModel} with Ollama to enable local model assistance. Deterministic ranking remains active until then.`, action: 'Install guide', tone: 'violet', onClick: () => window.signalBox.openExternal('https://ollama.com/download') });
     renderSetup(items);
   } catch (caught) { console.error('[setup-center]', caught); }
 }
