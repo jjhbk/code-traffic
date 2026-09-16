@@ -22,7 +22,8 @@ async function main() {
     const archive = path.join(temp, 'app.asar');
     await asar.createPackageWithOptions(staging, archive, config.packagerConfig.asar);
     for (const name of ['spawn-helper', 'pty.node']) {
-      assert.equal(asar.statFile(archive, `${relative}/${name}`).unpacked, true);
+      const archiveEntry = path.join(relative, name);
+      assert.equal(asar.statFile(archive, archiveEntry).unpacked, true);
       await fs.access(path.join(`${archive}.unpacked`, relative, name));
     }
     if (process.platform !== 'win32') {

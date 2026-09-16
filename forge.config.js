@@ -23,7 +23,7 @@ module.exports = {
     // node-pty launches spawn-helper and its native libraries from the
     // app.asar.unpacked path. Use a literal directory prefix so the helper is
     // matched consistently across Windows, macOS, and Linux path handling.
-    asar: { unpackDir: 'node_modules/node-pty' },
+    asar: { unpackDir: path.join('node_modules', 'node-pty') },
     extraResource: ['codex-notify.js', 'browser-extension'],
     afterPrune: [(buildPath, _electronVersion, platform, _arch, callback) => {
       if (platform !== 'darwin') return callback();
