@@ -163,6 +163,23 @@ const MIGRATIONS = [
     details_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS jobs (
+    job_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    run_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    max_attempts INTEGER NOT NULL,
+    lease_token TEXT,
+    lease_until INTEGER,
+    dedupe_key TEXT,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS jobs_active_dedupe
+    ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running');`,
 ];
 
 class SqliteStore {
@@ -191,6 +208,60 @@ class SqliteStore {
   }
 
   close() { this.db.close(); }
+
+  enqueueJob({ jobId = crypto.randomUUID(), kind, payload = {}, runAt = this.clock(), maxAttempts = 5, dedupeKey = null } = {}) {
+    if (!kind || !payload || typeof payload !== 'object' || !Number.isFinite(runAt) || !Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      throw new Error('Invalid job.');
+    }
+    const existing = dedupeKey
+      ? this.db.prepare("SELECT job_id AS jobId, kind, status, run_at AS runAt, attempts FROM jobs WHERE dedupe_key = ? AND status IN ('queued', 'running')").get(dedupeKey)
+      : null;
+    if (existing) return { ...existing, deduplicated: true };
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO jobs(job_id, kind, payload_json, status, run_at, attempts, max_attempts, lease_token, lease_until, dedupe_key, last_error, created_at, updated_at)
+      VALUES (?, ?, ?, 'queued', ?, 0, ?, NULL, NULL, ?, NULL, ?, ?)`)
+      .run(jobId, String(kind), JSON.stringify(payload), runAt, maxAttempts, dedupeKey, now, now);
+    this.audit('job-enqueued', null, null, { jobId, kind, runAt, dedupeKey });
+    return { jobId, kind: String(kind), status: 'queued', runAt, attempts: 0, deduplicated: false };
+  }
+
+  claimJobs({ limit = 10, leaseMs = 60_000, workerId = crypto.randomUUID(), now = this.clock() } = {}) {
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 10));
+    if (!Number.isFinite(leaseMs) || leaseMs <= 0) throw new Error('Job lease must be positive.');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const rows = this.db.prepare(`SELECT job_id AS jobId FROM jobs
+        WHERE (status = 'queued' AND run_at <= ?) OR (status = 'running' AND lease_until < ?)
+        ORDER BY run_at, created_at LIMIT ?`).all(now, now, safeLimit);
+      const claimed = [];
+      const update = this.db.prepare(`UPDATE jobs SET status = 'running', attempts = attempts + 1, lease_token = ?, lease_until = ?, updated_at = ?
+        WHERE job_id = ? AND (status = 'queued' OR (status = 'running' AND lease_until < ?))`);
+      for (const row of rows) {
+        const token = `${workerId}:${crypto.randomUUID()}`;
+        const result = update.run(token, now + leaseMs, now, row.jobId, now);
+        if (Number(result.changes) !== 1) continue;
+        const job = this.db.prepare('SELECT job_id AS jobId, kind, payload_json AS payloadJson, status, run_at AS runAt, attempts, max_attempts AS maxAttempts, lease_token AS leaseToken, lease_until AS leaseUntil, dedupe_key AS dedupeKey FROM jobs WHERE job_id = ?').get(row.jobId);
+        claimed.push({ ...job, payload: JSON.parse(job.payloadJson) });
+      }
+      this.db.exec('COMMIT');
+      return claimed;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+
+  completeJob(jobId, leaseToken, { status = 'completed', runAt = null, error = null } = {}) {
+    if (!['completed', 'queued', 'failed'].includes(status)) throw new Error('Invalid job completion status.');
+    const now = this.clock();
+    const result = this.db.prepare(`UPDATE jobs SET status = ?, run_at = COALESCE(?, run_at), lease_token = NULL, lease_until = NULL,
+      last_error = ?, updated_at = ? WHERE job_id = ? AND status = 'running' AND lease_token = ?`).run(status, runAt, error, now, jobId, leaseToken);
+    if (Number(result.changes) !== 1) throw new Error('Job lease is missing or expired.');
+    this.audit(`job-${status}`, null, null, { jobId, error: error || null });
+    return this.getJob(jobId);
+  }
+
+  getJob(jobId) {
+    const row = this.db.prepare('SELECT job_id AS jobId, kind, payload_json AS payloadJson, status, run_at AS runAt, attempts, max_attempts AS maxAttempts, lease_token AS leaseToken, lease_until AS leaseUntil, dedupe_key AS dedupeKey, last_error AS lastError, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE job_id = ?').get(jobId);
+    return row ? { ...row, payload: JSON.parse(row.payloadJson) } : null;
+  }
 
   ingestEvent({ eventId, adapterId, producerEpoch = null, sequence = null, type, payload }) {
     if (!eventId || !adapterId || !type || !payload || typeof payload !== 'object') throw new Error('Invalid event.');
@@ -475,7 +546,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
