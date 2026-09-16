@@ -612,6 +612,18 @@ document.getElementById('digest-settings').addEventListener('click', async () =>
   } catch (caught) { showError(caught.message); }
 });
 document.getElementById('close-digest').addEventListener('click', () => { digestModal.hidden = true; });
+document.getElementById('export-data').addEventListener('click', async () => {
+  try {
+    const result = await window.signalBox.exportData();
+    if (!result.canceled) document.getElementById('digest-stats').textContent += `\nExported to ${result.filePath}`;
+  } catch (caught) { document.getElementById('digest-error').textContent = caught.message || 'Could not export data.'; document.getElementById('digest-error').hidden = false; }
+});
+document.getElementById('delete-mail-data').addEventListener('click', async () => {
+  try {
+    const result = await window.signalBox.deleteMailData();
+    if (!result.canceled) { await loadTasks(); await loadMailMessages(); document.getElementById('digest-stats').textContent += '\nStored Gmail data deleted.'; refreshSetupCenter(); }
+  } catch (caught) { document.getElementById('digest-error').textContent = caught.message || 'Could not delete Gmail data.'; document.getElementById('digest-error').hidden = false; }
+});
 document.getElementById('digest-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const errorTarget = document.getElementById('digest-error');

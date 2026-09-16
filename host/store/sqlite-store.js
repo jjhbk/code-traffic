@@ -436,6 +436,38 @@ class SqliteStore {
       status, created_at AS createdAt FROM notification_outbox ORDER BY created_at DESC LIMIT ?`).all(limit);
   }
 
+  exportData() {
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback'];
+    return {
+      exportedAt: new Date(this.clock()).toISOString(),
+      formatVersion: 1,
+      data: Object.fromEntries(tables.map((table) => [table, this.db.prepare(`SELECT * FROM ${table}`).all()])),
+    };
+  }
+
+  deleteMailData() {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const counts = {};
+      for (const [table, sql] of [
+        ['task_evidence', 'DELETE FROM task_evidence'],
+        ['task_history', 'DELETE FROM task_history'],
+        ['tasks', 'DELETE FROM tasks'],
+        ['observations', "DELETE FROM observations WHERE adapter_id LIKE 'gmail:%'"],
+        ['connector_cursors', "DELETE FROM connector_cursors WHERE adapter_id LIKE 'gmail:%'"],
+        ['connector_health', "DELETE FROM connector_health WHERE adapter_id LIKE 'gmail:%'"],
+        ['notification_feedback', "DELETE FROM notification_feedback WHERE notification_id IN (SELECT notification_id FROM notification_outbox WHERE notification_class = 'digest')"],
+        ['notification_outbox', "DELETE FROM notification_outbox WHERE notification_class = 'digest'"],
+        ['notification_ledger', "DELETE FROM notification_ledger WHERE notification_class = 'digest'"],
+      ]) {
+        const result = this.db.prepare(sql).run();
+        counts[table] = Number(result.changes);
+      }
+      this.db.exec('COMMIT');
+      return counts;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+
   correctTask(taskId, changes) {
     const row = this.db.prepare('SELECT task_json AS taskJson FROM tasks WHERE task_id = ?').get(taskId);
     if (!row || !changes || typeof changes !== 'object') throw new Error('Task correction is invalid.');

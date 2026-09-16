@@ -252,6 +252,20 @@ function wireIpc() {
     }
     return { quietHoursStart, quietHoursEnd, digestAt, dailyCap: cap };
   });
+  ipcMain.handle('data:export', async () => {
+    if (!hostStore) throw new Error('Durable storage is unavailable.');
+    const result = await dialog.showSaveDialog(windowRef, { title: 'Export Signal Box data', defaultPath: 'signal-box-export.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    fs.writeFileSync(result.filePath, `${JSON.stringify(hostStore.exportData(), null, 2)}\n`, { mode: 0o600 });
+    return { canceled: false, filePath: result.filePath };
+  });
+  ipcMain.handle('data:delete-mail', async () => {
+    if (!hostStore) throw new Error('Durable storage is unavailable.');
+    const confirmation = await dialog.showMessageBox(windowRef, { type: 'warning', buttons: ['Delete stored Gmail data', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Delete stored Gmail data', message: 'Remove synced Gmail messages, derived tasks, and digest history from this device?', detail: 'This disconnects no account and cannot undo the local deletion.' });
+    if (confirmation.response !== 0) return { canceled: true };
+    const counts = hostStore.deleteMailData();
+    return { canceled: false, counts };
+  });
   ipcMain.handle('settings:get', () => ({
     configured: Boolean(appSettings.telegramBotToken && appSettings.telegramChatId),
     enabled: appSettings.telegramEnabled === true

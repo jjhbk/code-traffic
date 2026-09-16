@@ -149,7 +149,7 @@ Effort ranges below assume one experienced full-time engineer familiar with this
 - Crash/restart preserves requests, decisions, and event deduplication; an uncertain dispatch is reconciled rather than blindly repeated.
 - Existing session restore, hook state guards, and Telegram routing regressions pass.
 
-### Phase C — Read-only mail and privacy · 2–3 weeks
+### Phase C — Gmail sync and privacy · 2–3 weeks
 
 **Depends on:** B. Connector normalization and privacy fixtures can be developed independently.
 
@@ -162,7 +162,7 @@ Effort ranges below assume one experienced full-time engineer familiar with this
 - Implement the encrypted entity vault, stable opaque IDs, conservative alias resolution, local entity recognition, deterministic replacement, and source-offset mapping.
 - Route remote inference through an isolated gateway process holding model credentials. Keep raw bodies out of logs and diagnostics. Restrict gateway inputs to approved fields; fail closed when privacy processing fails.
 - Treat local-only as disabling remote model inference, not all networking: mail sync and Telegram still require their services. Expose independent controls for these channels.
-- Define retention, deletion, backup, and disconnect behavior. Disconnect stops ingestion immediately; offer explicit deletion of stored source data and explain its impact on evidence links. Vault backup is a separate opt-in recovery decision.
+- Define retention, deletion, backup, and disconnect behavior. Disconnect stops ingestion immediately; the app offers explicit export and deletion of stored source data and explains its impact on evidence links. Vault backup is a separate opt-in recovery decision.
 
 **Exit tests**
 
