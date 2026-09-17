@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   getAssistantNotifications: () => ipcRenderer.invoke('assistant:notifications'),
   acknowledgeAssistantNotification: (payload) => ipcRenderer.invoke('assistant:ack-notification', payload),
   getAssistantContext: () => ipcRenderer.invoke('assistant:context'),
+  deleteAssistantLocationHistory: () => ipcRenderer.invoke('assistant:delete-location-history'),
   listStandingGrants: () => ipcRenderer.invoke('assistant:standing-grants'),
   createStandingGrant: (payload) => ipcRenderer.invoke('assistant:create-standing-grant', payload),
   revokeStandingGrant: (payload) => ipcRenderer.invoke('assistant:revoke-standing-grant', payload),

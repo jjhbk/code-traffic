@@ -486,6 +486,10 @@ function wireIpc() {
     return hostStore.acknowledgeMobileNotification(notificationId, 'desktop-electron');
   });
   ipcMain.handle('assistant:context', () => hostStore?.listContext() || []);
+  ipcMain.handle('assistant:delete-location-history', () => {
+    if (!hostStore) throw new Error('Assistant context storage is unavailable.');
+    return { deleted: hostStore.deleteMobileContextEvents('location') };
+  });
   ipcMain.handle('assistant:standing-grants', () => hostStore?.listStandingGrants({ principal: 'signal-box-user' }) || []);
   ipcMain.handle('assistant:create-standing-grant', (_event, { capability, surface = 'desktop', constraints = {}, expiresAt, maxUses = null, cooldownMs = 0 } = {}) => {
     if (!hostStore || !approvalService) throw new Error('Standing permission storage is unavailable.');

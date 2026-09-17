@@ -656,6 +656,13 @@ document.getElementById('mobile-pairing-generate')?.addEventListener('click', as
   } catch (caught) { showError(caught.message || 'Could not generate a mobile pairing code.'); }
   finally { button.disabled = false; }
 });
+document.getElementById('desktop-forget-location')?.addEventListener('click', async () => {
+  if (!window.signalBox.deleteAssistantLocationHistory || !window.confirm('Forget all stored raw mobile location history? Saved places and arrival reminders will remain.')) return;
+  const button = document.getElementById('desktop-forget-location'); button.disabled = true;
+  try { const result = await window.signalBox.deleteAssistantLocationHistory(); button.textContent = `Forgot ${result.deleted || 0} location event${result.deleted === 1 ? '' : 's'}`; }
+  catch (caught) { showError(caught.message || 'Could not forget location history.'); }
+  finally { button.disabled = false; }
+});
 document.getElementById('permission-form')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const recipeId = document.getElementById('permission-recipe').value.trim();
