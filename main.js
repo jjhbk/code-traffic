@@ -1168,7 +1168,19 @@ async function start() {
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
   mobileConversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'mobile', proactivity: proactivityService }) : null;
   mobilePairing = hostStore ? new MobilePairingService({ store: hostStore }) : null;
-  mobileContext = hostStore ? new MobileContextService({ store: hostStore }) : null;
+  mobileContext = hostStore ? new MobileContextService({
+    store: hostStore,
+    onContextChange: (record) => {
+      try {
+        hostStore.enqueueJob({
+          kind: 'assistant.proactive-actions',
+          payload: { reason: 'mobile-context-updated', recordType: record.recordType, recordKey: record.recordKey },
+          runAt: record.updatedAt,
+          dedupeKey: `assistant.proactive-actions:mobile-context:${record.recordType}:${record.recordKey}:${record.updatedAt}`,
+        });
+      } catch (error) { console.error(`[assistant] mobile context wake-up failed: ${error.message}`); }
+    },
+  }) : null;
   mobilePushService = hostStore ? new MobilePushService({ store: hostStore }) : null;
   mobileApi = hostStore && mobileConversationService && proactivityService ? new MobileApi({
     store: hostStore,

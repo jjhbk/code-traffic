@@ -5,7 +5,8 @@ const { MobileContextService } = require('../host/mobile/context');
 (() => {
   let now = 1_000_000;
   const store = new SqliteStore({ clock: () => now });
-  const context = new MobileContextService({ store, clock: () => now, maxLocationAgeMs: 10_000 });
+  const changes = [];
+  const context = new MobileContextService({ store, clock: () => now, maxLocationAgeMs: 10_000, onContextChange: (record) => changes.push(`${record.recordType}:${record.recordKey}:${record.updatedAt}`) });
   context.savePlace({ placeKey: 'home', label: 'Home', latitude: 40, longitude: -73, radiusMeters: 150, consent: true });
   const task = store.saveTaskCandidate({ candidateId: 'pickup-task', observationId: 'pickup-observation', summary: 'Pick up the return', contextTrigger: { type: 'arrival', placeKey: 'home', cooldownMs: 60_000 }, evidence: { start: 0, end: 1, text: 'Pick up the return when you get home.' }, extractorVersion: 'test' });
   const first = context.processLocation({ eventId: 'location-1', latitude: 40, longitude: -73, accuracy: 10, capturedAt: now });
@@ -21,6 +22,8 @@ const { MobileContextService } = require('../host/mobile/context');
   const battery = context.processSensor({ sensor: 'battery', value: { level: 0.42, state: 'charging' }, capturedAt: now, deviceId: 'phone-1' });
   assert.equal(battery.stale, false); assert.equal(battery.context.value.level, 0.42);
   assert.equal(store.listContext({ recordType: 'fact' }).find((record) => record.recordKey === 'mobile.sensor.battery').value.state, 'charging');
+  assert.ok(changes.some((change) => change.startsWith('place:home:')), 'saved places notify the planner of new context');
+  assert.ok(changes.some((change) => change.startsWith('fact:mobile.sensor.battery:')), 'sensor context notifies the planner of new context');
   assert.throws(() => context.processSensor({ sensor: 'motion', value: { active: true }, capturedAt: now }), /battery context/);
   store.close(); console.log('mobile context tests passed');
 })();

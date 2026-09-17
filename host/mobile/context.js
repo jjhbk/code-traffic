@@ -9,15 +9,17 @@ function distanceMeters(a, b) {
 }
 
 class MobileContextService {
-  constructor({ store, clock = () => Date.now(), maxLocationAgeMs = 15 * 60 * 1000, maxSensorAgeMs = 60 * 60 * 1000 } = {}) {
+  constructor({ store, clock = () => Date.now(), maxLocationAgeMs = 15 * 60 * 1000, maxSensorAgeMs = 60 * 60 * 1000, onContextChange = null } = {}) {
     if (!store) throw new Error('Mobile context service requires a store.');
-    this.store = store; this.clock = clock; this.maxLocationAgeMs = maxLocationAgeMs; this.maxSensorAgeMs = maxSensorAgeMs;
+    this.store = store; this.clock = clock; this.maxLocationAgeMs = maxLocationAgeMs; this.maxSensorAgeMs = maxSensorAgeMs; this.onContextChange = onContextChange;
   }
 
   savePlace({ placeKey, label, latitude, longitude, radiusMeters = 150, consent = false } = {}) {
     if (!consent || !/^[A-Za-z0-9:_-]{1,80}$/.test(String(placeKey || '')) || !String(label || '').trim()) throw new Error('A named place requires explicit consent, a safe key, and a label.');
     if (!this.validCoordinate(latitude, longitude) || !Number.isFinite(radiusMeters) || radiusMeters < 10 || radiusMeters > 10_000) throw new Error('Place coordinates or radius are invalid.');
-    return this.store.upsertContext({ recordType: 'place', recordKey: placeKey, value: { label: String(label).slice(0, 120), latitude: Number(latitude), longitude: Number(longitude), radiusMeters: Number(radiusMeters) }, source: { channel: 'mobile', consentScope: 'saved-place' }, confidence: 'high', confirmed: true });
+    const place = this.store.upsertContext({ recordType: 'place', recordKey: placeKey, value: { label: String(label).slice(0, 120), latitude: Number(latitude), longitude: Number(longitude), radiusMeters: Number(radiusMeters) }, source: { channel: 'mobile', consentScope: 'saved-place' }, confidence: 'high', confirmed: true });
+    this._notifyContextChange(place);
+    return place;
   }
 
   processLocation({ eventId, latitude, longitude, accuracy, capturedAt = this.clock() } = {}) {
@@ -60,7 +62,13 @@ class MobileContextService {
       confirmed: true,
       validUntil: now + this.maxSensorAgeMs,
     });
+    this._notifyContextChange(context);
     return { stale: false, context };
+  }
+
+  _notifyContextChange(record) {
+    if (typeof this.onContextChange !== 'function' || !record) return;
+    try { this.onContextChange(record); } catch (_) { /* Context persistence must not fail on a wake-up hook. */ }
   }
 
   validCoordinate(latitude, longitude) { return Number.isFinite(Number(latitude)) && Number(latitude) >= -90 && Number(latitude) <= 90 && Number.isFinite(Number(longitude)) && Number(longitude) >= -180 && Number(longitude) <= 180; }
