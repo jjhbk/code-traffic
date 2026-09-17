@@ -29,6 +29,10 @@ const outgoing = normalizeMessage({
 assert.equal(outgoing.direction, 'outgoing');
 assert.equal(candidateFilters(outgoing).outgoingCommitment, true);
 assert.equal(candidateFilters(outgoing, { existingTaskThreadIds: new Set(['t1']) }).existingTaskUpdate, true);
+const calendar = normalizeMessage({ provider: 'google-calendar', id: 'event-1', threadId: 'calendar:event-1', etag: 'etag-1', subject: 'Design review', description: 'Discuss proposal', location: 'Room A', start: '2026-09-18T15:00:00Z', end: '2026-09-18T16:00:00Z', body: 'Starts: 2026-09-18T15:00:00Z' }, { adapterId: 'calendar:me@example.com' });
+assert.equal(calendar.adapterId, 'calendar:me@example.com');
+assert.equal(calendar.start, '2026-09-18T15:00:00Z');
+assert.equal(calendar.etag, 'etag-1');
 assert.equal(candidateFilters({ direction: 'incoming', subject: 'Attachment', body: 'Please find attached the report.' }).eligible, false);
 const bulk = normalizeMessage({ id: 'bulk', threadId: 'bulk', headers: [{ name: 'From', value: 'news@marketing.example' }, { name: 'List-Unsubscribe', value: '<https://example.test/u>' }], subject: 'Weekly sale', body: 'Unsubscribe here' });
 assert.equal(bulk.isBulk, true);

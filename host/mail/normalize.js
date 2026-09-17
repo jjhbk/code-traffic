@@ -34,7 +34,7 @@ function classifyMessage({ from = '', subject = '', body = '', labels = [], head
   return { spamScore: normalizedScore, isSpam: normalizedScore >= 0.8, isBulk: normalizedScore >= 0.45, spamReasons: reasons };
 }
 
-function normalizeMessage(raw, { accountAddress = '' } = {}) {
+function normalizeMessage(raw, { accountAddress = '', adapterId = '' } = {}) {
   if (!raw?.id || !raw.threadId) throw new Error('A message id and thread id are required.');
   const headers = headerMap(raw.headers || raw.payload?.headers);
   const from = headers.from || raw.from || '';
@@ -45,10 +45,13 @@ function normalizeMessage(raw, { accountAddress = '' } = {}) {
   const body = stripQuotedText(raw.body || raw.text || raw.payload?.body?.data || '');
   const direction = accountAddress && from.toLowerCase().includes(accountAddress.toLowerCase()) ? 'outgoing' : 'incoming';
   const sourceVersion = String(raw.historyId || raw.etag || timestamp || 'unknown');
-  const observationId = crypto.createHash('sha256').update(`${raw.id}:${sourceVersion}`).digest('hex');
+  const sourceIdentity = adapterId || raw.provider || 'mail';
+  const observationId = crypto.createHash('sha256').update(`${sourceIdentity}:${raw.id}:${sourceVersion}`).digest('hex');
   return {
     observationId,
+    adapterId: sourceIdentity,
     provider: raw.provider || 'mail',
+    id: raw.id,
     messageId: String(raw.id),
     threadId: String(raw.threadId),
     historyId: raw.historyId || null,
@@ -62,6 +65,11 @@ function normalizeMessage(raw, { accountAddress = '' } = {}) {
     timeZone: raw.timeZone || null,
     labels: Array.isArray(raw.labels) ? [...raw.labels] : [],
     attachments: [],
+    etag: raw.etag || null,
+    description: raw.description || '',
+    location: raw.location || '',
+    start: raw.start || null,
+    end: raw.end || null,
     sourceVersion,
     ...classifyMessage({ from, subject, body, labels: raw.labels || [], headers: raw.headers || raw.payload?.headers || [] }),
   };

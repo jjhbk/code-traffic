@@ -23,7 +23,7 @@ class MailSync {
     const messages = Array.isArray(result?.messages) ? result.messages : [];
     let inserted = 0;
     for (const raw of messages) {
-      const observation = normalizeMessage(raw, { accountAddress });
+      const observation = normalizeMessage(raw, { accountAddress, adapterId });
       if (this.store.saveObservation(observation, adapterId)) inserted += 1;
     }
     if (result?.nextCursor !== undefined && result.nextCursor !== null) {
