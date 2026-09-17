@@ -39,6 +39,7 @@ class MobileApi {
       if (method === 'GET' && resource === 'notifications') return this.notifications(device, query);
       if (method === 'GET' && resource === 'approvals') return { approvals: this.store.listPendingApprovals({ principal: 'signal-box-user', surface: 'mobile', now: this.clock() }) };
       if (method === 'GET' && resource === 'connections') return { connections: await this.getConnections() };
+      if (method === 'POST' && resource === 'devices' && parts[4] === 'push-token') return this.registerPushToken(body, device);
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
       if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
@@ -102,6 +103,13 @@ class MobileApi {
   acknowledgeNotification(notificationId, device = null) {
     try { return this.store.acknowledgeMobileNotification(notificationId, device?.deviceId || 'legacy-mobile'); }
     catch (error) { throw this._error(error.message === 'Notification not found.' ? 404 : 400, error.message); }
+  }
+
+  registerPushToken(body = {}, device = null) {
+    const deviceId = device?.deviceId || body.deviceId || 'legacy-mobile';
+    if (!deviceId || (device && body.deviceId && body.deviceId !== device.deviceId)) throw this._error(403, 'Push token device identity does not match the authenticated device.');
+    try { return { registration: this.store.registerMobilePushToken({ deviceId, pushToken: body.pushToken, platform: body.platform || 'expo' }) }; }
+    catch (error) { throw this._error(400, error.message); }
   }
 
   sendMessage(body = {}) {
