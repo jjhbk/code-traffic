@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -84,7 +85,7 @@ function sessionDetails(key, tile, sessionId, cwd, owned, agent = null, now = Da
 }
 
 class Board extends EventEmitter {
-  constructor({ storagePath = null, historyProvider = null, liveness = {}, clock = () => Date.now(), authToken = null, mobileAuthToken = null, mobileApi = null, store = null, browserBridge = null } = {}) {
+  constructor({ storagePath = null, historyProvider = null, liveness = {}, clock = () => Date.now(), authToken = null, mobileAuthToken = null, mobileApi = null, serverOptions = null, store = null, browserBridge = null } = {}) {
     super();
     this.storagePath = storagePath;
     this.archivePath = storagePath ? `${storagePath}.archive` : null;
@@ -93,6 +94,7 @@ class Board extends EventEmitter {
     this.authToken = authToken || null;
     this.mobileAuthToken = mobileAuthToken || null;
     this.mobileApi = mobileApi;
+    this.serverOptions = serverOptions;
     this.store = store;
     this.browserBridge = browserBridge;
     this.livenessLimits = { ...LIVENESS_DEFAULTS, ...liveness };
@@ -414,7 +416,8 @@ class Board extends EventEmitter {
   }
 
   listen(port = 4747, host = '127.0.0.1') {
-    this.server = http.createServer(async (request, response) => {
+    const createServer = this.serverOptions ? https.createServer : http.createServer;
+    this.server = createServer(this.serverOptions || {}, async (request, response) => {
       let url;
       try { url = new URL(request.url, `http://${host}`); }
       catch (_) { sendJson(response, 400, { error: 'Invalid request URL.' }); return; }

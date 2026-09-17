@@ -37,6 +37,7 @@ const { FollowUpWorkflow } = require('./host/workflows/follow-up');
 const { AvailabilityWorkflow } = require('./host/workflows/availability');
 const { MobileApi, PROTOCOL_VERSION } = require('./host/mobile/api');
 const { MobilePairingService } = require('./host/mobile/pairing');
+const { resolveMobileTransport } = require('./host/mobile/transport');
 const { PlanningService } = require('./host/planning/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
@@ -110,6 +111,7 @@ let availabilityWorkflow;
 let mobileConversationService;
 let mobileApi;
 let mobilePairing;
+let mobileTransport = { host: '127.0.0.1', advertisedHost: '127.0.0.1', protocol: 'http', tls: false, serverOptions: null };
 let trayRef;
 let mailSyncTimer;
 let calendarSyncTimer;
@@ -343,7 +345,7 @@ function wireIpc() {
     const pairing = ensureMobileToken();
     const port = Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747;
     const code = mobilePairing?.startPairing();
-    return { protocolVersion: PROTOCOL_VERSION, bootstrapToken: pairing.token, pairingCode: code?.code || null, pairingExpiresAt: code?.expiresAt || null, hostUrl: `http://127.0.0.1:${port}`, transport: 'local-loopback', note: 'Remote phone connectivity is not enabled by default.' };
+    return { protocolVersion: PROTOCOL_VERSION, bootstrapToken: pairing.token, pairingCode: code?.code || null, pairingExpiresAt: code?.expiresAt || null, hostUrl: `${mobileTransport.protocol}://${mobileTransport.advertisedHost}:${port}`, transport: mobileTransport.tls ? 'direct-tls' : 'local-loopback', note: mobileTransport.tls ? 'Direct TLS transport is enabled.' : 'Remote phone connectivity is not enabled by default.' };
   });
   ipcMain.handle('browser:get-status', () => browserBridge?.status(appSettings.browserSessionId || '') || { sessionId: appSettings.browserSessionId || '', connected: false, lastSeenAt: null, pending: 0 });
   ipcMain.handle('clipboard:read', () => clipboard.readText());
@@ -1067,6 +1069,13 @@ async function start() {
   configureModelRouter();
   const hookAuth = ensureHookToken();
   const mobileAuth = ensureMobileToken();
+  mobileTransport = resolveMobileTransport({
+    host: appSettings.mobileBindHost || process.env.SIGNAL_BOX_MOBILE_BIND_HOST || '127.0.0.1',
+    advertisedHost: appSettings.mobileAdvertisedHost || process.env.SIGNAL_BOX_MOBILE_ADVERTISED_HOST || null,
+    keyPath: appSettings.mobileTlsKeyPath || process.env.SIGNAL_BOX_MOBILE_TLS_KEY || null,
+    certPath: appSettings.mobileTlsCertPath || process.env.SIGNAL_BOX_MOBILE_TLS_CERT || null,
+    caPath: appSettings.mobileTlsCaPath || process.env.SIGNAL_BOX_MOBILE_TLS_CA || null,
+  });
   browserBridge = new BrowserBridge();
   try { installClaudeHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
   try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
@@ -1104,6 +1113,7 @@ async function start() {
     historyProvider: sessionHistoryWithTerminalQuestions,
     authToken: hookAuth.token,
     mobileAuthToken: mobileAuth.token,
+    serverOptions: mobileTransport.serverOptions,
     store: hostStore,
     browserBridge,
   });
@@ -1173,7 +1183,7 @@ async function start() {
   }
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
   try {
-    await board.listen(Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747);
+    await board.listen(Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747, mobileTransport.host);
   } catch (error) {
     if (error.code === 'EADDRINUSE') {
       throw new Error(`Port ${boardPort} is already in use. Stop the other process or set SIGNAL_BOX_PORT to another port.`);
