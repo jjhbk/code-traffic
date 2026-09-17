@@ -480,6 +480,10 @@ function wireIpc() {
     return hostStore.revokeStandingGrant(grantId);
   });
   ipcMain.handle('assistant:autonomous-runs', (_event, { grantId = null, limit = 100 } = {}) => hostStore?.listAutonomousRuns({ grantId, limit }) || []);
+  ipcMain.handle('assistant:reconcile-autonomous-run', (_event, { runId, evidence } = {}) => {
+    if (!hostStore || !approvalService || !runId) throw new Error('An autonomous run is required.');
+    return new BrowserActionService({ approvals: approvalService, store: hostStore }).reconcileUnknownRun(runId, { evidence });
+  });
   ipcMain.handle('assistant:execute-standing-browser', async (_event, { recipeId, inputs = {}, grantId, sessionId = null, taskId = null } = {}) => {
     if (!hostStore || !approvalService || !planningService || !browserBridge) throw new Error('Automatic browser execution is unavailable.');
     const recipe = actionRegistry.browserRecipe(recipeId);

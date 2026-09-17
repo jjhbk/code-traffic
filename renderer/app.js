@@ -620,7 +620,22 @@ async function loadAssistantPermissions() {
   }
   const runHeading = document.createElement('h3'); runHeading.textContent = 'Automatic activity'; runsTarget.append(runHeading);
   if (!runs.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No automatic actions have run yet.'; runsTarget.append(empty); }
-  for (const run of runs) { const item = document.createElement('div'); item.className = 'permission-run'; item.textContent = `${run.action?.recipeId || run.action?.capability || 'Action'} · ${run.status} · ${new Date(run.createdAt).toLocaleString()}`; runsTarget.append(item); }
+  for (const run of runs) {
+    const item = document.createElement('div'); item.className = 'permission-run';
+    const label = document.createElement('span'); label.textContent = `${run.action?.recipeId || run.action?.capability || 'Action'} · ${run.status} · ${new Date(run.createdAt).toLocaleString()}`; item.append(label);
+    if (run.status === 'unknown' && window.signalBox.reconcileAutonomousRun) {
+      const reconcile = document.createElement('button'); reconcile.type = 'button'; reconcile.textContent = 'Mark verified';
+      reconcile.addEventListener('click', async () => {
+        const evidence = window.prompt('What verified that this browser action completed?');
+        if (!evidence?.trim()) return;
+        reconcile.disabled = true;
+        try { await window.signalBox.reconcileAutonomousRun({ runId: run.runId, evidence }); await loadAssistantConversation(); }
+        catch (caught) { reconcile.disabled = false; showError(caught.message || 'Could not reconcile this action.'); }
+      });
+      item.append(reconcile);
+    }
+    runsTarget.append(item);
+  }
 }
 document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));
 document.getElementById('assistant-refresh').addEventListener('click', loadAssistantConversation);

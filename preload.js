@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   createStandingGrant: (payload) => ipcRenderer.invoke('assistant:create-standing-grant', payload),
   revokeStandingGrant: (payload) => ipcRenderer.invoke('assistant:revoke-standing-grant', payload),
   listAutonomousRuns: (payload) => ipcRenderer.invoke('assistant:autonomous-runs', payload),
+  reconcileAutonomousRun: (payload) => ipcRenderer.invoke('assistant:reconcile-autonomous-run', payload),
   executeStandingBrowser: (payload) => ipcRenderer.invoke('assistant:execute-standing-browser', payload),
   startAvailabilityWatch: (payload) => ipcRenderer.invoke('assistant:start-availability-watch', payload),
   getActivity: () => ipcRenderer.invoke('activity:list'),

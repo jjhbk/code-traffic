@@ -53,6 +53,20 @@ class BrowserActionService {
       throw error;
     }
   }
+
+  reconcileUnknownRun(runId, { evidence, principal = 'signal-box-user' } = {}) {
+    const cleanEvidence = String(evidence || '').trim();
+    if (!cleanEvidence || cleanEvidence.length > 2_000) throw new Error('A concise verification note is required.');
+    const run = this.store.getAutonomousRun(runId);
+    if (!run || run.status !== 'unknown') throw new Error('Only an unknown autonomous run can be reconciled.');
+    const grant = this.store.getStandingGrant(run.grantId);
+    if (!grant || grant.principal !== principal) throw new Error('The autonomous run is not owned by this user.');
+    const details = { ...run.details, reconciliation: { source: 'user', principal, evidence: cleanEvidence, reconciledAt: this.clock() } };
+    return this.store.updateAutonomousRun(runId, 'confirmed', {
+      details,
+      receipt: { status: 'confirmed', verification: 'user-reconciled', evidence: cleanEvidence, runId, actionDigest: run.actionDigest },
+    });
+  }
 }
 
 module.exports = { BrowserActionService };
