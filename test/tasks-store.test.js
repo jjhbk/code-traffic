@@ -31,6 +31,7 @@ store.saveObservation({ observationId: 'gmail-delete', messageId: 'gmail-delete'
 const deleteApproval = store.createApproval({ action: { taskId, capability: 'gmail.send', destination: 'client@example.com' }, options: [{ optionId: 'send', option: 'send' }], principal: 'signal-box-user', expiresAt: Date.now() + 60_000 });
 const deleteGrant = store.createStandingGrant({ principal: 'signal-box-user', capability: 'gmail.send', surface: 'desktop', expiresAt: Date.now() + 60_000 });
 store.createAutonomousRun({ grantId: deleteGrant.grantId, action: { taskId, capability: 'gmail.send', destination: 'client@example.com' }, actionDigest: 'delete-mail-run', status: 'confirmed' });
+store.createAutonomousRun({ grantId: deleteGrant.grantId, action: { capability: 'calendar.update', eventId: 'event-1', changes: { summary: 'Private' } }, actionDigest: 'delete-calendar-run', status: 'confirmed' });
 const deleted = store.deleteMailData();
 assert.equal(deleted.observations, 1);
 assert.equal(store.getApproval(deleteApproval.request_id), null, 'mail deletion removes provider approval payloads');

@@ -1485,11 +1485,19 @@ class SqliteStore {
       }
       if (taskIds.size) {
         const autonomous = this.db.prepare('SELECT run_id AS runId, action_json AS actionJson FROM autonomous_runs').all()
-          .filter((row) => { try { return taskIds.has(JSON.parse(row.actionJson).taskId); } catch (_) { return false; } }).map((row) => row.runId);
+          .filter((row) => {
+            try {
+              const action = JSON.parse(row.actionJson);
+              return ['gmail.send', 'calendar.update'].includes(action.capability) || taskIds.has(action.taskId);
+            } catch (_) { return false; }
+          }).map((row) => row.runId);
         if (autonomous.length) {
           const placeholders = autonomous.map(() => '?').join(', ');
           counts.autonomous_runs = Number(this.db.prepare(`DELETE FROM autonomous_runs WHERE run_id IN (${placeholders})`).run(...autonomous).changes);
         }
+      }
+      if (!taskIds.size) {
+        counts.autonomous_runs = Number(this.db.prepare("DELETE FROM autonomous_runs WHERE json_extract(action_json, '$.capability') IN ('gmail.send', 'calendar.update')").run().changes);
       }
       counts.standing_grants = Number(this.db.prepare("DELETE FROM standing_grants WHERE capability IN ('gmail.send', 'calendar.update')").run().changes);
       for (const [table, sql] of [
