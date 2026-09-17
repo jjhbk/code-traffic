@@ -182,7 +182,7 @@ Gate: integration tests with fake clocks/providers plus a consented pilot demons
 Primary files: `host/runtime/*`, `main.js`, credential adapters, browser bridge, packaging and installer configuration.
 
 - Run an early packaging/credential feasibility spike alongside batches 1–2; deliver host separation after the first integrated workflow is stable.
-- Move connector state mutation, scheduling, Telegram handling, policy and action ownership out of UI-parent callbacks. The worker now owns connector cursors, observations, task reconciliation and deterministic proactive eligibility; credentialed provider calls and browser execution still require the Electron host until the packaging/credential spike is complete.
+- Move connector state mutation, scheduling, Telegram handling, policy and action ownership out of UI-parent callbacks. The worker now owns connector cursors, observations, task reconciliation and deterministic proactive eligibility; credentialed Google provider calls now run behind a supervised authenticated provider process, while browser execution still requires the Electron host until the remaining packaging spike is complete.
 - Use one host/writer per profile with authenticated, versioned local IPC and explicit client identity. Prevent duplicate connector pollers, browser bridges and action workers.
 - Provide opt-in login startup, restart supervision, health, pause, full stop, UI reconnect, sleep/resume catch-up and compatible update/schema handshakes. Validate credential access while locked and after login.
 - Distinguish host availability from browser availability: a live host cannot execute a recipe if its required browser/session is unavailable. Show that dependency and resume safely.

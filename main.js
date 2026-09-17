@@ -25,6 +25,7 @@ const { ApprovalService } = require('./host/approvals/service');
 const { GoogleOAuth, GmailProvider, GoogleCalendarProvider, GoogleDriveProvider } = require('./host/mail/google');
 const { ProtectedCredentialStore } = require('./host/mail/credentials');
 const { GoogleProviderHost } = require('./host/mail/provider-host');
+const { GoogleProviderProcess } = require('./host/mail/provider-process');
 const { createOAuthState, waitForOAuthCallback } = require('./host/mail/oauth-callback');
 const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
@@ -104,6 +105,7 @@ let hostStore;
 let approvalService;
 let mailCredentials;
 let googleProviderHost;
+let googleProviderProcess;
 let mailSync;
 let calendarSync;
 let driveSync;
@@ -673,6 +675,7 @@ function wireIpc() {
     }
     for (const name of ['gmail-refresh-token', 'gmail-client-id', 'gmail-client-secret', 'gmail-account']) mailCredentials.delete(name);
     googleProviderHost?.clear();
+    googleProviderProcess?.setCredentials({}).catch((error) => console.error(`[mail] provider credential clear failed: ${error.message}`));
     mailSync = null;
     calendarSync = null;
     driveSync = null;
@@ -720,6 +723,7 @@ function wireIpc() {
       account = profile.emailAddress || '';
       if (account) mailCredentials.save('gmail-account', account);
     } catch (error) { console.error(`[mail] could not read Gmail profile: ${error.message}`); }
+    await googleProviderProcess?.setCredentials(readGoogleCredentials());
     wireMailSync();
     await backgroundHost?.setConnectorAccounts({ gmail: account || null, calendar: account || null, drive: account || null });
     return { paired: true, provider: 'gmail', account };
@@ -1053,6 +1057,16 @@ async function start() {
     console.error(`[mail] protected credential storage unavailable: ${error.message}; backend=${safeStorage.getSelectedStorageBackend?.() || 'unknown'}`);
   }
   googleProviderHost = mailCredentials ? new GoogleProviderHost({ credentialStore: mailCredentials, clientId: GOOGLE_CLIENT_ID }) : null;
+  if (mailCredentials) {
+    try {
+      googleProviderProcess = new GoogleProviderProcess({ forkImpl: forkBackgroundUtility });
+      await googleProviderProcess.start(readGoogleCredentials());
+      console.error('[mail] credentialed Google provider process started');
+    } catch (error) {
+      googleProviderProcess = null;
+      console.error(`[mail] credentialed provider process unavailable; using local provider fallback: ${error.message}`);
+    }
+  }
   configureModelRouter();
   const hookAuth = ensureHookToken();
   const mobileAuth = ensureMobileToken();
@@ -1093,6 +1107,9 @@ async function start() {
             if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
             if (kind === 'assistant.replan') return runTaskReplan(payload);
             if (kind === 'assistant.proactive-actions') return runProactiveActions(payload);
+            if (kind === 'connector.gmail.fetch' && googleProviderProcess) return googleProviderProcess.request(kind, payload);
+            if (kind === 'connector.calendar.fetch' && googleProviderProcess) return googleProviderProcess.request(kind, payload);
+            if (kind === 'connector.drive.fetch' && googleProviderProcess) return googleProviderProcess.request(kind, payload);
             if (kind === 'connector.gmail.fetch') return createGmailProvider().sync(payload);
             if (kind === 'connector.calendar.fetch') return createCalendarProvider().sync(payload);
             if (kind === 'connector.drive.fetch') return createDriveProvider().sync(payload);
@@ -1384,6 +1401,16 @@ function createGmailProvider() {
   return googleProviderHost.provider('gmail');
 }
 
+function readGoogleCredentials() {
+  if (!mailCredentials) return {};
+  return {
+    'gmail-refresh-token': mailCredentials.load('gmail-refresh-token'),
+    'gmail-client-id': mailCredentials.load('gmail-client-id') || GOOGLE_CLIENT_ID || null,
+    'gmail-client-secret': mailCredentials.load('gmail-client-secret'),
+    'gmail-account': mailCredentials.load('gmail-account'),
+  };
+}
+
 function createCalendarProvider() {
   if (!googleProviderHost) throw new Error('Protected credential storage is unavailable.');
   return googleProviderHost.provider('calendar');
@@ -1669,6 +1696,7 @@ app.on('before-quit', (event) => {
     if (driveSyncTimer) clearInterval(driveSyncTimer);
     if (digestTimer) clearInterval(digestTimer);
     assistantRuntime?.stop();
+    try { await googleProviderProcess?.stop(); } catch (error) { console.error(`[mail] provider process shutdown failed: ${error.message}`); }
     try { await backgroundHost?.stop(); } catch (error) { console.error(`[assistant] background host shutdown failed: ${error.message}`); }
     trayRef?.destroy();
     trayRef = null;
