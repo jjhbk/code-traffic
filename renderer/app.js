@@ -584,6 +584,7 @@ async function loadAssistantConversation() {
       card.append(title, detail, seen); notificationsTarget.append(card);
     }
     await loadAssistantPermissions();
+    await loadMobileDevices();
     for (const message of messages) {
       const card = document.createElement('article'); card.className = `activity-card assistant-${message.direction}`;
       const meta = document.createElement('small'); meta.textContent = `${message.direction === 'inbound' ? 'You' : 'Signal Box'} · ${new Date(message.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
@@ -635,6 +636,26 @@ async function loadAssistantPermissions() {
       item.append(reconcile);
     }
     runsTarget.append(item);
+  }
+}
+async function loadMobileDevices() {
+  const target = document.getElementById('mobile-devices-list');
+  if (!target || !window.signalBox.listMobileDevices) return;
+  const devices = await window.signalBox.listMobileDevices();
+  target.replaceChildren();
+  const heading = document.createElement('h3'); heading.textContent = 'Paired devices'; target.append(heading);
+  if (!devices.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No mobile devices paired.'; target.append(empty); return; }
+  for (const device of devices) {
+    const card = document.createElement('article'); card.className = 'permission-card';
+    const title = document.createElement('strong'); title.textContent = device.deviceName;
+    const detail = document.createElement('span'); detail.textContent = device.revokedAt ? 'Revoked' : `Last seen ${device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : 'never'}`;
+    card.append(title, detail);
+    if (!device.revokedAt) {
+      const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
+      revoke.addEventListener('click', async () => { if (!window.confirm(`Revoke ${device.deviceName}? It will lose access and push notifications.`)) return; revoke.disabled = true; try { await window.signalBox.revokeMobileDevice({ deviceId: device.deviceId }); await loadMobileDevices(); } catch (caught) { revoke.disabled = false; showError(caught.message || 'Could not revoke mobile device.'); } });
+      card.append(revoke);
+    }
+    target.append(card);
   }
 }
 document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));

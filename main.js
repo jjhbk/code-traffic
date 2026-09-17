@@ -364,6 +364,11 @@ function wireIpc() {
     const code = mobilePairing?.startPairing();
     return { protocolVersion: PROTOCOL_VERSION, bootstrapToken: pairing.token, pairingCode: code?.code || null, pairingExpiresAt: code?.expiresAt || null, hostUrl: `${mobileTransport.protocol}://${mobileTransport.advertisedHost}:${port}`, transport: mobileTransport.tls ? 'direct-tls' : 'local-loopback', note: mobileTransport.tls ? 'Direct TLS transport is enabled.' : 'Remote phone connectivity is not enabled by default.' };
   });
+  ipcMain.handle('mobile:list-devices', () => mobilePairing?.devices() || []);
+  ipcMain.handle('mobile:revoke-device', (_event, { deviceId } = {}) => {
+    if (!mobilePairing || !deviceId) throw new Error('A mobile device is required.');
+    return mobilePairing.revoke(deviceId);
+  });
   ipcMain.handle('browser:get-status', () => browserBridge?.status(appSettings.browserSessionId || '') || { sessionId: appSettings.browserSessionId || '', connected: false, lastSeenAt: null, pending: 0 });
   ipcMain.handle('clipboard:read', () => clipboard.readText());
   ipcMain.handle('clipboard:write', (_event, text = '') => { clipboard.writeText(String(text)); return true; });
