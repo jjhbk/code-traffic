@@ -80,6 +80,19 @@
         </div>
         <div class="section-toolbar"><div><p class="section-kicker">THE BIG PICTURE</p><h2>Your assistant at work</h2></div><div><button id="assistant-pause" type="button">Pause</button><button id="assistant-refresh" type="button" aria-label="Refresh assistant">↻ Refresh</button></div></div>
         <div class="assistant-panels"><div id="assistant-decisions" class="assistant-summary" aria-live="polite"></div><div id="assistant-workflows" class="assistant-summary" aria-live="polite"></div></div>
+        <section class="assistant-permissions" aria-labelledby="assistant-permissions-title">
+          <div class="section-toolbar"><div><p class="section-kicker">CONTROLLED AUTONOMY</p><h2 id="assistant-permissions-title">Permissions</h2><p>Signal Box can act automatically only inside a permission you define.</p></div><button id="permissions-refresh" class="panel-action" type="button">Refresh</button></div>
+          <form id="permission-form" class="permission-form">
+            <label for="permission-capability">Capability</label><select id="permission-capability"><option value="browser.read">Read browser data</option><option value="browser.reversible">Reversible browser action</option><option value="browser.commit">Committed browser action</option></select>
+            <label for="permission-recipe">Recipe ID <span>(optional)</span></label><input id="permission-recipe" type="text" placeholder="uber.book-cab.v1">
+            <label for="permission-origin">Allowed website <span>(optional)</span></label><input id="permission-origin" type="url" placeholder="https://m.uber.com">
+            <label for="permission-hours">Expires in hours</label><input id="permission-hours" type="number" min="1" max="8760" value="24" required>
+            <label for="permission-uses">Maximum uses <span>(optional)</span></label><input id="permission-uses" type="number" min="1" max="1000" placeholder="Unlimited">
+            <button class="primary-action" type="submit">Create permission</button>
+          </form>
+          <div id="assistant-permissions-list" class="permission-list" aria-live="polite"></div>
+          <div id="assistant-runs-list" class="permission-runs" aria-live="polite"></div>
+        </section>
       </section>
       <div id="session-toolbar" class="section-toolbar" hidden><div><h2>Your agent sessions</h2><p id="summary">No sessions</p></div><div class="actions"><select id="agent-select" class="agent-select" aria-label="Agent"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="terminal">Terminal</option></select><button id="clear-all" class="clear-all" type="button">Clear all</button><button id="new-session" class="new-session" type="button">+ New session</button></div></div>
       <section id="board" class="board" aria-live="polite"></section>

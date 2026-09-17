@@ -569,6 +569,7 @@ async function loadAssistantConversation() {
       }
     }
     if (!workflows.length) { const heading = document.createElement('h3'); heading.textContent = 'Following up'; const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'Nothing in motion yet. Follow-ups you start will appear here.'; workflowsTarget.append(heading, empty); }
+    await loadAssistantPermissions();
     for (const message of messages) {
       const card = document.createElement('article'); card.className = `activity-card assistant-${message.direction}`;
       const meta = document.createElement('small'); meta.textContent = `${message.direction === 'inbound' ? 'You' : 'Signal Box'} · ${new Date(message.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
@@ -577,8 +578,43 @@ async function loadAssistantConversation() {
     }
   } catch (caught) { document.getElementById('assistant-health').textContent = 'Assistant unavailable'; document.getElementById('assistant-health').dataset.state = 'unavailable'; showError(caught.message || 'Assistant conversation unavailable.'); }
 }
+async function loadAssistantPermissions() {
+  const target = document.getElementById('assistant-permissions-list');
+  const runsTarget = document.getElementById('assistant-runs-list');
+  if (!target || !runsTarget || !window.signalBox.listStandingGrants) return;
+  const [grants, runs] = await Promise.all([window.signalBox.listStandingGrants(), window.signalBox.listAutonomousRuns({ limit: 12 })]);
+  target.replaceChildren(); runsTarget.replaceChildren();
+  const heading = document.createElement('h3'); heading.textContent = 'Active permissions'; target.append(heading);
+  if (!grants.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No standing permissions. One-time approvals remain available.'; target.append(empty); }
+  for (const grant of grants) {
+    const card = document.createElement('article'); card.className = 'permission-card';
+    const title = document.createElement('strong'); title.textContent = grant.capability;
+    const details = document.createElement('span'); details.textContent = `${grant.constraints.recipeId || 'Any registered action'} · ${grant.usedCount}${grant.maxUses == null ? '' : `/${grant.maxUses}`} uses · expires ${new Date(grant.expiresAt).toLocaleDateString()}`;
+    const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = grant.status === 'active' ? 'Revoke' : grant.status;
+    revoke.disabled = grant.status !== 'active';
+    revoke.addEventListener('click', async () => { revoke.disabled = true; try { await window.signalBox.revokeStandingGrant({ grantId: grant.grantId }); await loadAssistantPermissions(); } catch (caught) { revoke.disabled = false; showError(caught.message || 'Could not revoke permission.'); } });
+    card.append(title, details, revoke); target.append(card);
+  }
+  const runHeading = document.createElement('h3'); runHeading.textContent = 'Automatic activity'; runsTarget.append(runHeading);
+  if (!runs.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No automatic actions have run yet.'; runsTarget.append(empty); }
+  for (const run of runs) { const item = document.createElement('div'); item.className = 'permission-run'; item.textContent = `${run.action?.recipeId || run.action?.capability || 'Action'} · ${run.status} · ${new Date(run.createdAt).toLocaleString()}`; runsTarget.append(item); }
+}
 document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));
 document.getElementById('assistant-refresh').addEventListener('click', loadAssistantConversation);
+document.getElementById('permissions-refresh')?.addEventListener('click', loadAssistantPermissions);
+document.getElementById('permission-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const recipeId = document.getElementById('permission-recipe').value.trim();
+  const origin = document.getElementById('permission-origin').value.trim();
+  const hours = Math.min(8760, Math.max(1, Number(document.getElementById('permission-hours').value || 24)));
+  const usesInput = document.getElementById('permission-uses').value;
+  const maxUses = usesInput ? Math.min(1000, Math.max(1, Number(usesInput))) : null;
+  const constraints = { ...(recipeId ? { recipeId } : {}), ...(origin ? { origin } : {}) };
+  const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
+  try { await window.signalBox.createStandingGrant({ capability: document.getElementById('permission-capability').value, surface: 'desktop', constraints, expiresAt: Date.now() + hours * 60 * 60 * 1000, maxUses }); await loadAssistantPermissions(); event.currentTarget.reset(); document.getElementById('permission-hours').value = '24'; }
+  catch (caught) { showError(caught.message || 'Could not create permission.'); }
+  finally { button.disabled = false; }
+});
 document.getElementById('assistant-pause').addEventListener('click', async () => {
   const button = document.getElementById('assistant-pause');
   button.disabled = true;
