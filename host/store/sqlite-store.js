@@ -1468,6 +1468,27 @@ class SqliteStore {
     try {
       const counts = {};
       const taskIds = new Set(this.db.prepare('SELECT task_id AS taskId FROM tasks').all().map((row) => row.taskId));
+      if (taskIds.size) {
+        const taskIdList = [...taskIds];
+        const placeholders = taskIdList.map(() => '?').join(', ');
+        const linkedNotifications = this.db.prepare('SELECT notification_id AS notificationId, date_key AS dateKey, notification_class AS notificationClass, payload_json AS payloadJson FROM notification_outbox').all()
+          .filter((row) => { try { return JSON.parse(row.payloadJson).some((item) => taskIds.has(item.taskId)); } catch (_) { return false; } });
+        if (linkedNotifications.length) {
+          const notificationIds = linkedNotifications.map((row) => row.notificationId);
+          const notificationPlaceholders = notificationIds.map(() => '?').join(', ');
+          counts.notification_feedback = Number(this.db.prepare(`DELETE FROM notification_feedback WHERE notification_id IN (${notificationPlaceholders})`).run(...notificationIds).changes);
+          counts.notification_outbox = Number(this.db.prepare(`DELETE FROM notification_outbox WHERE notification_id IN (${notificationPlaceholders})`).run(...notificationIds).changes);
+          counts.notification_ledger = 0;
+          for (const row of linkedNotifications) counts.notification_ledger += Number(this.db.prepare('DELETE FROM notification_ledger WHERE date_key = ? AND notification_class = ?').run(row.dateKey, row.notificationClass).changes);
+        }
+        const linkedJobs = this.db.prepare('SELECT job_id AS jobId, payload_json AS payloadJson FROM jobs').all()
+          .filter((row) => { try { return taskIds.has(JSON.parse(row.payloadJson).taskId); } catch (_) { return false; } }).map((row) => row.jobId);
+        if (linkedJobs.length) {
+          const jobPlaceholders = linkedJobs.map(() => '?').join(', ');
+          counts.jobs = Number(this.db.prepare(`DELETE FROM jobs WHERE job_id IN (${jobPlaceholders})`).run(...linkedJobs).changes);
+        }
+        counts.conversation_messages = Number(this.db.prepare(`DELETE FROM conversation_messages WHERE task_id IN (${placeholders})`).run(...taskIdList).changes);
+      }
       const actionRequests = this.db.prepare('SELECT request_id AS requestId, action_json AS actionJson FROM approval_requests').all()
         .filter((row) => {
           try {

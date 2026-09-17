@@ -32,11 +32,15 @@ const deleteApproval = store.createApproval({ action: { taskId, capability: 'gma
 const deleteGrant = store.createStandingGrant({ principal: 'signal-box-user', capability: 'gmail.send', surface: 'desktop', expiresAt: Date.now() + 60_000 });
 store.createAutonomousRun({ grantId: deleteGrant.grantId, action: { taskId, capability: 'gmail.send', destination: 'client@example.com' }, actionDigest: 'delete-mail-run', status: 'confirmed' });
 store.createAutonomousRun({ grantId: deleteGrant.grantId, action: { capability: 'calendar.update', eventId: 'event-1', changes: { summary: 'Private' } }, actionDigest: 'delete-calendar-run', status: 'confirmed' });
+store.enqueueNotification({ notificationId: 'delete-mail-attention', dateKey: 'delete-mail-attention', notificationClass: 'assistant-attention', items: [{ taskId, summary: 'Private mail obligation' }] });
+store.enqueueJob({ kind: 'assistant.proactive-actions', payload: { taskId }, runAt: Date.now(), dedupeKey: 'delete-mail-proactive' });
 const deleted = store.deleteMailData();
 assert.equal(deleted.observations, 1);
 assert.equal(store.getApproval(deleteApproval.request_id), null, 'mail deletion removes provider approval payloads');
 assert.equal(store.getStandingGrant(deleteGrant.grantId), null, 'mail deletion removes provider standing grants');
 assert.equal(store.listAutonomousRuns({ grantId: deleteGrant.grantId }).length, 0, 'mail deletion removes task-bound autonomous payloads');
+assert.equal(store.listPendingNotifications({ notificationClass: 'assistant-attention' }).some((item) => item.notificationId === 'delete-mail-attention'), false, 'mail deletion removes task-linked notifications');
+assert.equal(store.exportData().data.jobs.some((job) => job.dedupe_key === 'delete-mail-proactive'), false, 'mail deletion removes task-linked proactive jobs');
 assert.equal(store.observations('fake').length, 3, 'non-Gmail adapters remain available');
 const multi = { observationId: 'multi', messageId: 'multi', threadId: 'multi-thread', subject: 'Launch plan', body: "I'll send the contract by Friday, and I'll schedule the review by Monday.", direction: 'outgoing', to: ['client@example.com'] };
 store.saveObservation(multi, 'fake');
