@@ -525,10 +525,16 @@ class SqliteStore {
   }
 
   revokeMobileDevice(deviceId) {
-    const result = this.db.prepare('UPDATE mobile_devices SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(this.clock(), deviceId);
-    if (!Number(result.changes)) throw new Error('Mobile device not found or already revoked.');
-    this.audit('mobile-device-revoked', null, null, { deviceId });
-    return this.getMobileDevice(deviceId);
+    const now = this.clock();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = this.db.prepare('UPDATE mobile_devices SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(now, deviceId);
+      if (!Number(result.changes)) throw new Error('Mobile device not found or already revoked.');
+      this.db.prepare('UPDATE mobile_push_tokens SET revoked_at = ?, updated_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(now, now, deviceId);
+      this.db.exec('COMMIT');
+      this.audit('mobile-device-revoked', null, null, { deviceId });
+      return this.getMobileDevice(deviceId);
+    } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
   }
 
   listMobileDevices() {
