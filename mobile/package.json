@@ -12,6 +12,7 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.1.2",
     "expo": "~53.0.0",
+    "expo-battery": "~9.1.0",
     "expo-location": "~18.1.0",
     "expo-notifications": "~0.31.4",
     "react": "19.0.0",

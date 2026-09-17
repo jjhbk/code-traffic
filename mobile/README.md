@@ -2,7 +2,7 @@
 
 This is a separate React Native (Expo) interaction surface for the Electron assistant core.
 
-The app owns presentation, explicit location consent, memory/context controls, connector visibility, and an offline command outbox. It does not open SQLite, run inference, hold provider credentials, or execute browser actions. The Electron core remains authoritative for tasks, memory, permissions, workflows, planning, notifications, and receipts.
+The app owns presentation, explicit location and one-shot battery consent, memory/context controls, connector visibility, and an offline command outbox. It does not open SQLite, run inference, hold provider credentials, or execute browser actions. The Electron core remains authoritative for tasks, memory, permissions, workflows, planning, notifications, and receipts.
 
 ## Run
 
