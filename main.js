@@ -34,6 +34,7 @@ const { ProactivityService } = require('./host/proactivity/service');
 const { ConversationService } = require('./host/conversation/service');
 const { WorkflowService } = require('./host/workflows/service');
 const { FollowUpWorkflow } = require('./host/workflows/follow-up');
+const { AvailabilityWorkflow } = require('./host/workflows/availability');
 const { PlanningService } = require('./host/planning/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
@@ -103,6 +104,7 @@ let proactivityService;
 let conversationService;
 let followUpWorkflow;
 let planningService;
+let availabilityWorkflow;
 let trayRef;
 let mailSyncTimer;
 let calendarSyncTimer;
@@ -450,6 +452,10 @@ function wireIpc() {
     const executor = new BrowserRecipeExecutor({ browser: adapter });
     const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
     return planningService.executeDecision({ decision: { type: 'execute_browser', requiresApproval: false, reason: 'standing permission matched' }, recipe, inputs, grantId, taskId, executor });
+  });
+  ipcMain.handle('assistant:start-availability-watch', (_event, { taskId = null, inputs = {}, checkGrantId, reservationGrantId, intervalMs = 15 * 60 * 1000, maxChecks = 96 } = {}) => {
+    if (!hostStore || !availabilityWorkflow) throw new Error('Availability monitoring is unavailable.');
+    return availabilityWorkflow.start({ taskId, checkRecipeId: uberCabQuote.id, reservationRecipeId: uberCabBooking.id, inputs, checkGrantId, reservationGrantId, intervalMs, maxChecks });
   });
   ipcMain.handle('activity:list', () => {
     const entries = hostStore?.recentAudit(60) || [];
@@ -1053,6 +1059,7 @@ async function start() {
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
             if (kind === 'assistant.digest') return runScheduledDigest(payload);
+            if (kind === 'browser.availability.check') return runBrowserAvailabilityCheck(payload);
             throw new Error(`Unsupported background job ${kind}.`);
           },
         });
@@ -1090,6 +1097,7 @@ async function start() {
     const workflows = new WorkflowService({ store: hostStore });
     followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows });
     planningService = new PlanningService({ workflows, browserActions: new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null }) });
+    availabilityWorkflow = new AvailabilityWorkflow({ store: hostStore, workflows });
   }
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
@@ -1114,6 +1122,7 @@ async function start() {
     assistantRuntime.register('workflow.resume', async ({ workflowId }) => {
       if (workflowId && hostStore) new WorkflowService({ store: hostStore }).resume(workflowId);
     });
+    assistantRuntime.register('browser.availability.check', async (payload) => runBrowserAvailabilityCheck(payload));
     assistantRuntime.register('assistant.digest', async () => {
       await runScheduledDigest();
       return { completed: true };
@@ -1318,6 +1327,47 @@ async function runScheduledDigest() {
   if (!digest) return null;
   await deliverPendingDigest();
   return digest;
+}
+
+async function runBrowserAvailabilityCheck({ workflowId } = {}) {
+  if (!availabilityWorkflow || !hostStore || !approvalService || !browserBridge || !workflowId) throw new Error('Availability monitoring is unavailable.');
+  const workflow = hostStore.getWorkflow(workflowId);
+  if (!workflow || workflow.workflowType !== 'browser-availability') throw new Error('Availability workflow was not found.');
+  const sessionId = appSettings.browserSessionId;
+  if (!sessionId || !browserBridge.status(sessionId).connected) {
+    return availabilityWorkflow.check(workflowId, { available: false, evidence: 'Browser session is not connected.' });
+  }
+  const inputs = workflow.payload.inputs || {};
+  const quoteAdapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId, origin: uberCabQuote.origin });
+  const quoteExecutor = new BrowserRecipeExecutor({ browser: quoteAdapter });
+  const quoteService = new BrowserActionService({ approvals: approvalService, store: hostStore, executor: quoteExecutor });
+  try {
+    const quote = await quoteService.executeWithStandingGrant(uberCabQuote, inputs, {
+      grantId: workflow.payload.checkGrantId,
+      principal: 'signal-box-user',
+      surface: 'desktop',
+      taskId: workflow.taskId,
+      executor: quoteExecutor,
+    });
+    return availabilityWorkflow.check(workflowId, {
+      available: quote.receipt?.status === 'confirmed',
+      evidence: quote.receipt?.outputs || quote.receipt,
+      executeReservation: async () => {
+        const reservationAdapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId, origin: uberCabBooking.origin });
+        const reservationExecutor = new BrowserRecipeExecutor({ browser: reservationAdapter });
+        return planningService.executeDecision({
+          decision: { type: 'execute_browser', requiresApproval: false, reason: 'availability confirmed' },
+          recipe: uberCabBooking,
+          inputs,
+          grantId: workflow.payload.reservationGrantId,
+          taskId: workflow.taskId,
+          executor: reservationExecutor,
+        });
+      },
+    });
+  } catch (error) {
+    return availabilityWorkflow.check(workflowId, { available: false, evidence: `Availability check failed: ${error.message}` });
+  }
 }
 
 async function executeAutomaticBrowserDecisions(tasks, decisions) {

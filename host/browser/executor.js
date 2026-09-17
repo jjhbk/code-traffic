@@ -54,6 +54,7 @@ class BrowserRecipeExecutor {
       if (step.kind === 'read') context[step.output || step.target] = Number(String(result).replace(/[^0-9.]/g, '')) || result;
       receipt.steps.push({ id: step.id, status: 'completed', result: step.kind === 'read' ? result : undefined });
     }
+    receipt.outputs = { ...context };
     receipt.status = 'confirmed'; receipt.finishedAt = this.clock();
     return receipt;
   }
