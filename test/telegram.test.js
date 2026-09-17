@@ -245,6 +245,44 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   assert.deepStrictEqual(browserDecisions[0], ['browser-request', 'allow', { principal: 'signal-box-user', surface: 'telegram' }]);
   assert.deepStrictEqual(browserExecuted, ['browser-request', 'browser-session', '42', 'telegram']);
   browserControl.stop();
+
+  const freshOffsets = [];
+  const freshRequests = [];
+  const freshControl = new TelegramControl({
+    token: 'test-token', chatId: '42', listSessions: () => [], getHistory: () => ({ pendingQuestions: [] }),
+    getOffset: () => null,
+    saveOffset: (offset) => freshOffsets.push(offset),
+    fetchImpl: async (_url, options) => {
+      const payload = JSON.parse(options.body);
+      freshRequests.push(payload.offset);
+      if (payload.offset === -1) return { ok: true, json: async () => ({ ok: true, result: [{ update_id: 10, message: { chat: { id: 42 }, text: 'ignored during bootstrap' } }] }) };
+      freshControl.stopped = true;
+      return { ok: true, json: async () => ({ ok: true, result: [] }) };
+    },
+  });
+  freshControl.stopped = false;
+  await freshControl.poll();
+  assert.deepStrictEqual(freshRequests, [-1, 11]);
+  assert.deepStrictEqual(freshOffsets, [11]);
+
+  const resumedOffsets = [];
+  const resumedRequests = [];
+  const resumedControl = new TelegramControl({
+    token: 'test-token', chatId: '42', listSessions: () => [], getHistory: () => ({ pendingQuestions: [] }),
+    getOffset: () => 11,
+    saveOffset: (offset) => resumedOffsets.push(offset),
+    fetchImpl: async (_url, options) => {
+      const payload = JSON.parse(options.body);
+      resumedRequests.push(payload.offset);
+      resumedControl.stopped = true;
+      return { ok: true, json: async () => ({ ok: true, result: [] }) };
+    },
+  });
+  resumedControl.stopped = false;
+  await resumedControl.poll();
+  assert.deepStrictEqual(resumedRequests, [11]);
+  assert.deepStrictEqual(resumedOffsets, []);
+  resumedControl.stop();
   console.log('telegram tests passed');
 })().catch((error) => {
   console.error(error);

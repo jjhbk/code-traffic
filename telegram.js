@@ -31,7 +31,7 @@ function telegramErrorText(error) {
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, getNotification = null, assistantMessage = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, getNotification = null, assistantMessage = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, getOffset = () => null, saveOffset = () => {}, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
@@ -53,8 +53,12 @@ class TelegramControl {
     this.submitDelayMs = submitDelayMs;
     this.approvalRetryMs = approvalRetryMs;
     this.fetch = fetchImpl;
+    const savedOffset = getOffset();
+    this.hasPersistedOffset = savedOffset !== null && savedOffset !== undefined
+      && savedOffset !== '' && Number.isInteger(Number(savedOffset)) && Number(savedOffset) >= 0;
     this.selectedTile = null;
-    this.offset = 0;
+    this.offset = this.hasPersistedOffset ? Number(savedOffset) : 0;
+    this.saveOffset = saveOffset;
     this.stopped = true;
     this.abortControllers = new Set();
     this.actions = new Map();
@@ -66,6 +70,15 @@ class TelegramControl {
 
   get enabled() { return Boolean(this.token && this.fetch); }
   get configured() { return Boolean(this.chatId); }
+
+  persistOffset() {
+    try {
+      this.saveOffset(this.offset);
+      this.hasPersistedOffset = true;
+    } catch (error) {
+      console.error(`[telegram] could not persist update offset: ${telegramErrorText(error)}`);
+    }
+  }
 
   start() {
     if (!this.enabled || !this.stopped) return;
@@ -227,12 +240,13 @@ class TelegramControl {
 
   async poll() {
     try {
-      if (this.configured) {
+      if (this.configured && !this.hasPersistedOffset) {
         const queued = await this.request('getUpdates', { offset: -1, timeout: 0, allowed_updates: ['message', 'callback_query'] });
         if (queued.length) {
           const latest = queued[queued.length - 1];
           this.offset = latest.update_id + 1;
           if (parseCommand(latest.message?.text)?.name === 'start') await this.handleUpdate(latest);
+          this.persistOffset();
         }
       }
     } catch (error) {
@@ -248,8 +262,9 @@ class TelegramControl {
           allowed_updates: ['message', 'callback_query'],
         });
         for (const update of updates) {
-          this.offset = update.update_id + 1;
           await this.handleUpdate(update);
+          this.offset = update.update_id + 1;
+          this.persistOffset();
         }
       } catch (error) {
         if (this.stopped || error.name === 'AbortError') return;

@@ -1262,6 +1262,11 @@ async function start() {
   telegram = new TelegramControl({
     token: appSettings.telegramEnabled === false ? '' : appSettings.telegramBotToken,
     chatId: appSettings.telegramChatId,
+    getOffset: () => appSettings.telegramUpdateOffset,
+    saveOffset: (offset) => {
+      appSettings = { ...appSettings, telegramUpdateOffset: Number(offset) };
+      writeSettings(app.getPath('userData'), appSettings);
+    },
     listSessions: () => board.list(),
     listTasks: () => hostStore?.listTasks() || [],
     updateTask: (taskId, status) => hostStore?.setTaskStatus(taskId, status),
