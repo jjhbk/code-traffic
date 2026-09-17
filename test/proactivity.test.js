@@ -5,6 +5,11 @@ const { ProactivityService } = require('../host/proactivity/service');
 let now = 100_000;
 const store = new SqliteStore({ clock: () => now });
 const service = new ProactivityService({ store, followUpAfterMs: 1_000 });
+store.upsertContext({ recordType: 'person', recordKey: 'alex@example.com', value: { name: 'Alex' }, source: { channel: 'test' }, confidence: 'high', confirmed: true });
+store.upsertContext({ recordType: 'fact', recordKey: 'stale-project', value: { name: 'Launch' }, source: { channel: 'test' }, validUntil: now - 1 });
+store.upsertContext({ recordType: 'preference', recordKey: 'response-style', value: 'concise', source: { channel: 'test' }, confidence: 'high', confirmed: true });
+const relevantContext = service.contextForTask({ taskId: 'context-task', summary: 'Ask Alex to review the launch plan', counterparty: 'alex@example.com' }, store.listContext({ includeExpired: true }));
+assert.deepEqual(relevantContext.map((record) => record.recordKey), ['alex@example.com', 'response-style']);
 const frontier = service.selectAutomaticDecisions([
   { taskId: 'auto-1', type: 'execute_browser' },
   { taskId: 'auto-2', type: 'execute_browser' },

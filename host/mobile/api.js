@@ -110,7 +110,7 @@ class MobileApi {
   async today(device = null, query = {}) {
     const tasks = this.store.listTasks();
     const decisions = this.proactivity.evaluateAsync
-      ? await this.proactivity.evaluateAsync(tasks, { context: this.store.listContext().slice(0, 12) })
+      ? await this.proactivity.evaluateAsync(tasks, { context: this.store.listContext() })
       : this.proactivity.evaluate(tasks);
     return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions, workflows: this.store.listWorkflows({ activeOnly: true }), notifications: this.notifications(device, query).notifications };
   }

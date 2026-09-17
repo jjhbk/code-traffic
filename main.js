@@ -1447,7 +1447,7 @@ async function runScheduledDigest() {
   if (!digestScheduler || !hostStore) return null;
   const tasks = hostStore.listTasks();
   const decisions = proactivityService?.evaluateAsync
-    ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext().slice(0, 12) })
+    ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext() })
     : (proactivityService?.evaluate(tasks) || []);
   proactivityService?.enqueueAttentionNotifications(tasks, decisions);
   await executeAutomaticBrowserDecisions(tasks, decisions);

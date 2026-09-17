@@ -42,6 +42,29 @@ class ProactivityService {
     return tasks.map((task) => this.decide(task, options));
   }
 
+  contextForTask(task, context = [], { now = this.clock(), limit = 8 } = {}) {
+    if (!task || !Array.isArray(context)) return [];
+    const text = [task.summary, task.description, task.counterparty, task.threadId, task.evidence?.text].filter(Boolean).join(' ').toLowerCase();
+    const tokens = new Set((text.match(/[a-z0-9][a-z0-9._@-]{2,}/g) || []).filter((token) => !['the', 'and', 'for', 'with', 'this', 'that'].includes(token)));
+    const placeKey = task.contextTrigger?.placeKey || task.locationTrigger?.placeKey || null;
+    return context
+      .filter((record) => record && (record.validUntil === null || record.validUntil === undefined || !Number.isFinite(Number(record.validUntil)) || Number(record.validUntil) > now))
+      .map((record) => {
+        const key = String(record.recordKey || '').toLowerCase();
+        const value = typeof record.value === 'string' ? record.value.toLowerCase() : JSON.stringify(record.value || {}).toLowerCase();
+        const keyMatch = Boolean(key && tokens.has(key));
+        const placeMatch = record.recordType === 'place' && placeKey && key === String(placeKey).toLowerCase();
+        const overlap = [...tokens].some((token) => token.length >= 4 && (key.includes(token) || value.includes(token)));
+        const durablePreference = Boolean(record.confirmed && ['goal', 'preference'].includes(record.recordType));
+        const score = (placeMatch ? 4 : 0) + (keyMatch ? 3 : 0) + (overlap ? 2 : 0) + (durablePreference ? 1 : 0);
+        return { record, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((left, right) => right.score - left.score || Number(right.record.updatedAt || 0) - Number(left.record.updatedAt || 0))
+      .slice(0, Math.max(0, Number(limit) || 0))
+      .map(({ record }) => record);
+  }
+
   async evaluateAsync(tasks = [], { now = this.clock(), context = [] } = {}) {
     const deterministic = this.evaluate(tasks, { now });
     if (!this.modelRouter?.proposeNextStep) return deterministic;
@@ -57,7 +80,7 @@ class ProactivityService {
       if (modelCalls >= this.modelMaxCalls) { refined.push(decision); continue; }
       try {
         modelCalls += 1;
-        const proposal = await this.modelRouter.proposeNextStep(task, context);
+        const proposal = await this.modelRouter.proposeNextStep(task, this.contextForTask(task, context, { now }));
         if (!proposal || proposal.decision === 'wait') { this.modelDecisionCache.set(task.taskId, { version, at: now, decision }); refined.push(decision); continue; }
         const refinedDecision = this._decision(task, proposal.decision, proposal.reason, decision.evidence, { source: proposal.source || 'model', requiresApproval: proposal.requiresApproval });
         this.modelDecisionCache.set(task.taskId, { version, at: now, decision: refinedDecision });
