@@ -560,8 +560,8 @@ async function loadAssistantConversation() {
       const workflowHeading = document.createElement('h3'); workflowHeading.textContent = 'Active workflows'; workflowsTarget.append(workflowHeading);
       for (const workflow of workflows) {
         const card = document.createElement('article'); card.className = 'assistant-state';
-        const title = document.createElement('strong'); title.textContent = taskNames.get(workflow.taskId) || 'Follow-up';
-        const detail = document.createElement('span'); detail.textContent = ({ awaiting_approval: 'Waiting for your review', waiting_event: 'Waiting for a reply', needs_attention: 'Needs your attention', verifying: 'Checking the outcome', executing: 'In progress' })[workflow.state] || workflow.state.replaceAll('_', ' ');
+        const title = document.createElement('strong'); title.textContent = taskNames.get(workflow.taskId) || (workflow.workflowType === 'browser-availability' ? 'Browser availability watch' : 'Follow-up');
+        const detail = document.createElement('span'); detail.textContent = workflow.workflowType === 'browser-availability' ? ({ waiting_event: 'Monitoring until a matching result is found', evaluating: 'Checking the saved browser recipe', executing: 'Availability found; reservation in progress', needs_attention: 'Needs your attention', completed: 'Monitoring completed' })[workflow.state] || workflow.state.replaceAll('_', ' ') : ({ awaiting_approval: 'Waiting for your review', waiting_event: 'Waiting for a reply', needs_attention: 'Needs your attention', verifying: 'Checking the outcome', executing: 'In progress' })[workflow.state] || workflow.state.replaceAll('_', ' ');
         const wake = document.createElement('small'); wake.textContent = workflow.wakeAt ? `Next check: ${new Date(workflow.wakeAt).toLocaleString()}` : 'No next check scheduled.';
         const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel workflow';
         cancel.addEventListener('click', async () => { cancel.disabled = true; try { await window.signalBox.cancelAssistantWorkflow({ workflowId: workflow.workflowId }); await loadAssistantConversation(); } catch (caught) { cancel.disabled = false; showError(caught.message || 'Could not cancel workflow.'); } });
@@ -583,6 +583,15 @@ async function loadAssistantPermissions() {
   const runsTarget = document.getElementById('assistant-runs-list');
   if (!target || !runsTarget || !window.signalBox.listStandingGrants) return;
   const [grants, runs] = await Promise.all([window.signalBox.listStandingGrants(), window.signalBox.listAutonomousRuns({ limit: 12 })]);
+  const fillGrantOptions = (id, capability, recipeId, emptyText) => {
+    const select = document.getElementById(id); if (!select) return;
+    const matching = grants.filter((grant) => grant.status === 'active' && grant.capability === capability && (!grant.constraints?.recipeId || grant.constraints.recipeId === recipeId));
+    select.replaceChildren();
+    if (!matching.length) { const option = document.createElement('option'); option.value = ''; option.textContent = emptyText; select.append(option); return; }
+    for (const grant of matching) { const option = document.createElement('option'); option.value = grant.grantId; option.textContent = `${grant.constraints?.recipeId || recipeId} · ${grant.usedCount}${grant.maxUses == null ? '' : `/${grant.maxUses}`} uses`; select.append(option); }
+  };
+  fillGrantOptions('availability-check-grant', 'browser.read', 'uber.quote-cab.v1', 'Create a browser read permission first');
+  fillGrantOptions('availability-reservation-grant', 'browser.commit', 'uber.book-cab.v1', 'Create a browser commit permission first');
   target.replaceChildren(); runsTarget.replaceChildren();
   const heading = document.createElement('h3'); heading.textContent = 'Active permissions'; target.append(heading);
   if (!grants.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No standing permissions. One-time approvals remain available.'; target.append(empty); }
@@ -613,6 +622,28 @@ document.getElementById('permission-form')?.addEventListener('submit', async (ev
   const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
   try { await window.signalBox.createStandingGrant({ capability: document.getElementById('permission-capability').value, surface: 'desktop', constraints, expiresAt: Date.now() + hours * 60 * 60 * 1000, maxUses }); await loadAssistantPermissions(); event.currentTarget.reset(); document.getElementById('permission-hours').value = '24'; }
   catch (caught) { showError(caught.message || 'Could not create permission.'); }
+  finally { button.disabled = false; }
+});
+document.getElementById('availability-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]'); button.disabled = true;
+  try {
+    await window.signalBox.startAvailabilityWatch({
+      inputs: {
+        pickup: document.getElementById('availability-pickup').value.trim(),
+        destination: document.getElementById('availability-destination').value.trim(),
+        rideType: document.getElementById('availability-ride').value.trim(),
+        maxFare: Number(document.getElementById('availability-max-fare').value),
+      },
+      checkGrantId: document.getElementById('availability-check-grant').value,
+      reservationGrantId: document.getElementById('availability-reservation-grant').value,
+      intervalMs: Number(document.getElementById('availability-interval').value) * 60 * 1000,
+      maxChecks: Number(document.getElementById('availability-max-checks').value),
+    });
+    await loadAssistantConversation();
+    form.reset(); document.getElementById('availability-ride').value = 'UberX'; document.getElementById('availability-interval').value = '15'; document.getElementById('availability-max-checks').value = '96';
+  } catch (caught) { showError(caught.message || 'Could not start monitoring.'); }
   finally { button.disabled = false; }
 });
 document.getElementById('assistant-pause').addEventListener('click', async () => {

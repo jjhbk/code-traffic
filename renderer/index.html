@@ -93,6 +93,21 @@
           <div id="assistant-permissions-list" class="permission-list" aria-live="polite"></div>
           <div id="assistant-runs-list" class="permission-runs" aria-live="polite"></div>
         </section>
+        <section class="assistant-watchers" aria-labelledby="assistant-watchers-title">
+          <div class="section-toolbar"><div><p class="section-kicker">PROACTIVE MONITORING</p><h2 id="assistant-watchers-title">Watch and act</h2><p>Keep checking a saved browser recipe and reserve it only when the result meets your limits.</p></div></div>
+          <form id="availability-form" class="availability-form">
+            <label for="availability-pickup">Pickup<input id="availability-pickup" type="text" required placeholder="Home"></label>
+            <label for="availability-destination">Destination<input id="availability-destination" type="text" required placeholder="Office"></label>
+            <label for="availability-ride">Ride type<input id="availability-ride" type="text" required value="UberX"></label>
+            <label for="availability-max-fare">Maximum fare<input id="availability-max-fare" type="number" min="0.01" step="0.01" required placeholder="45"></label>
+            <label for="availability-check-grant">Read permission<select id="availability-check-grant" required><option value="">Create a browser read permission first</option></select></label>
+            <label for="availability-reservation-grant">Reservation permission<select id="availability-reservation-grant" required><option value="">Create a browser commit permission first</option></select></label>
+            <label for="availability-interval">Check every minutes<input id="availability-interval" type="number" min="1" max="1440" value="15" required></label>
+            <label for="availability-max-checks">Maximum checks<input id="availability-max-checks" type="number" min="1" max="1000" value="96" required></label>
+            <button class="primary-action" type="submit">Start monitoring</button>
+          </form>
+          <p class="watcher-note">The read permission is consumed for each check. The reservation permission is used only after the quote passes its limit. Cancel monitoring any time from Active workflows.</p>
+        </section>
       </section>
       <div id="session-toolbar" class="section-toolbar" hidden><div><h2>Your agent sessions</h2><p id="summary">No sessions</p></div><div class="actions"><select id="agent-select" class="agent-select" aria-label="Agent"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="terminal">Terminal</option></select><button id="clear-all" class="clear-all" type="button">Clear all</button><button id="new-session" class="new-session" type="button">+ New session</button></div></div>
       <section id="board" class="board" aria-live="polite"></section>

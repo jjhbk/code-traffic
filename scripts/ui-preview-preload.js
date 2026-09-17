@@ -12,6 +12,7 @@ const api = {
   getAssistantConversation: async () => messages,
   getAssistantDecisions: async () => [{ taskId: 'demo-task', type: 'digest', reason: 'due-today', evidence: [tasks[0].evidence.text] }],
   getAssistantWorkflows: async () => [],
+  listStandingGrants: async () => [], listAutonomousRuns: async () => [], startAvailabilityWatch: async () => ({ workflowId: 'preview-watch' }),
   sendAssistantMessage: async ({ text }) => { messages.push({ direction: 'inbound', content: text, createdAt: Date.now() }, { direction: 'outbound', content: 'The launch brief is ready for your review.', createdAt: Date.now() }); },
   onSessionsChanged: () => {}, onPtyData: () => {}, onMailPairProgress: () => {}, onMailStatusChanged: () => {},
   listCalendarEvents: async () => [], listDriveFiles: async () => [], listMailMessages: async () => [],

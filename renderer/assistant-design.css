@@ -82,8 +82,16 @@ h1 { font-size: 22px; font-weight: 550; letter-spacing: -.7px; color: var(--ink)
 .assistant-panels { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
 .assistant-summary { margin: 0; padding: 21px; border: 1px solid #303a34; border-radius: 12px; background: #191f1c; align-content: start; gap: 16px; }
 .assistant-permissions { margin-top: 24px; padding: 21px; border: 1px solid #303a34; border-radius: 12px; background: #191f1c; }
+.assistant-watchers { margin-top: 24px; padding: 21px; border: 1px solid #303a34; border-radius: 12px; background: linear-gradient(135deg, #191f1c, #17201a); }
 .assistant-permissions .section-toolbar { margin: 0 0 18px; }
 .assistant-permissions .section-toolbar p:last-child { margin: 6px 0 0; }
+.assistant-watchers .section-toolbar { margin: 0 0 18px; }
+.assistant-watchers .section-toolbar p:last-child { margin: 6px 0 0; }
+.availability-form { display: grid; grid-template-columns: repeat(4, 1fr); align-items: end; gap: 10px; padding: 15px; border: 1px solid #354038; border-radius: 9px; background: #151b17; }
+.availability-form label { display: grid; gap: 6px; color: #aab9ae; font-size: 10px; }
+.availability-form input, .availability-form select { min-width: 0; border: 1px solid #3d4c41; border-radius: 6px; background: #101612; color: var(--ink); padding: 9px; font-size: 11px; }
+.availability-form button { border: 1px solid var(--mint); border-radius: 6px; background: var(--mint); color: #17281d; padding: 9px 12px; font-size: 11px; font-weight: 600; }
+.watcher-note { margin: 12px 2px 0; color: #91a096; font-size: 10px; line-height: 1.7; }
 .permission-form { display: grid; grid-template-columns: 1fr 1.2fr 1.2fr .7fr .7fr auto; align-items: end; gap: 10px; padding: 15px; border: 1px solid #354038; border-radius: 9px; background: #151b17; }
 .permission-form label { color: #aab9ae; font-size: 10px; }
 .permission-form label span { color: #75847a; }
@@ -96,7 +104,7 @@ h1 { font-size: 22px; font-weight: 550; letter-spacing: -.7px; color: var(--ink)
 .permission-card span, .permission-run { color: #a8b8ad; font-size: 10px; line-height: 1.6; }
 .permission-card button { border: 1px solid #694c43; border-radius: 6px; background: #2a211e; color: #edb6a5; padding: 7px 10px; font-size: 10px; }
 .permission-run { border-top: 1px solid #303a34; padding-top: 9px; }
-@media (max-width: 900px) { .permission-form { grid-template-columns: 1fr 1fr; } .permission-form button { grid-column: 1 / -1; justify-self: start; } }
+@media (max-width: 900px) { .permission-form, .availability-form { grid-template-columns: 1fr 1fr; } .permission-form button, .availability-form button { grid-column: 1 / -1; justify-self: start; } }
 @media (max-width: 560px) { .permission-card { grid-template-columns: 1fr auto; } .permission-card span { grid-column: 1 / -1; } }
 .assistant-summary h3 { font-size: 12px; font-weight: 550; color: var(--ink); margin: 0; }
 .assistant-state { border: 0; border-top: 1px solid #303a34; background: none; border-radius: 0; padding: 15px 0 0; gap: 9px; overflow-wrap: anywhere; }
