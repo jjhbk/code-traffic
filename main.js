@@ -374,8 +374,8 @@ function wireIpc() {
   ipcMain.handle('browser:get-status', () => browserBridge?.status(appSettings.browserSessionId || '') || { sessionId: appSettings.browserSessionId || '', connected: false, lastSeenAt: null, pending: 0 });
   ipcMain.handle('clipboard:read', () => clipboard.readText());
   ipcMain.handle('clipboard:write', (_event, text = '') => { clipboard.writeText(String(text)); return true; });
-  ipcMain.handle('sessions:list', () => board.list());
-  ipcMain.handle('sessions:archived-list', () => board.listArchived());
+  ipcMain.handle('sessions:list', () => board?.list() || []);
+  ipcMain.handle('sessions:archived-list', () => board?.listArchived() || []);
   ipcMain.handle('tasks:list', () => hostStore?.listTasks() || []);
   ipcMain.handle('tasks:update', (_event, { taskId, status } = {}) => {
     if (!hostStore) throw new Error('Task storage is unavailable.');
@@ -1422,8 +1422,6 @@ async function start() {
   });
   livenessTimer = setInterval(() => board.checkLiveness(), 15 * 1000);
   livenessTimer.unref?.();
-  wireIpc();
-  createWindow();
   createTray();
   if (appSettings.telegramEnabled !== false) telegram.start();
   assistantRuntime?.start();
@@ -1726,6 +1724,11 @@ async function deliverPendingDigest() {
 app.whenReady().then(async () => {
   if (!hasSingleInstance) return;
   configureUserDataPath();
+  // The renderer is a client of the assistant runtime, not a dependency of
+  // its startup. Show the UI before provider/background initialization so a
+  // stalled worker cannot make the desktop appear not to launch.
+  wireIpc();
+  createWindow();
   await restoreShellPath();
   return start();
 }).catch((error) => {
