@@ -23,7 +23,6 @@ const { integrationStatus } = require('./host/integrations/status');
 const { SqliteStore } = require('./host/store/sqlite-store');
 const { ApprovalService } = require('./host/approvals/service');
 const { GoogleOAuth, GmailProvider, GoogleCalendarProvider, GoogleDriveProvider } = require('./host/mail/google');
-const { createReplyProposal } = require('./host/actions/mail-reply');
 const { ProtectedCredentialStore } = require('./host/mail/credentials');
 const { createOAuthState, waitForOAuthCallback } = require('./host/mail/oauth-callback');
 const { MailSync } = require('./host/mail/sync');
@@ -632,6 +631,9 @@ async function dispatchApprovedReply(requestId, principal, surface) {
   const request = hostStore.getApproval(requestId);
   if (!request || request.action?.capability !== 'gmail.send') throw new Error('Reply approval not found.');
   const action = request.action;
+  const currentTask = action.taskId ? hostStore.listTasks({ includeDismissed: true }).find((task) => task.taskId === action.taskId) : null;
+  if (action.taskId && (!currentTask || currentTask.status !== 'active')) throw new Error('This follow-up is no longer attached to an active task.');
+  if (action.taskVersion != null && currentTask && Number(currentTask.updatedAt) !== Number(action.taskVersion)) throw new Error('This follow-up is stale because the task changed.');
   const provider = createGmailProvider();
   const decision = approvalService.decide(requestId, 'send', { principal, surface });
   const attempt = approvalService.execution({ requestId, status: 'prepared', details: { capability: action.capability, destination: action.destination, surface } });
@@ -641,10 +643,12 @@ async function dispatchApprovedReply(requestId, principal, surface) {
     const sent = await provider.sendReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId, inReplyTo: action.inReplyTo, references: action.references });
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId } });
     approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId, destination: action.destination } });
+    if (action.workflowId) hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt: Date.now() + 48 * 60 * 60 * 1000, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: sent.id || null, outcome: 'confirmed' }, details: { attemptId: attempt.attemptId } });
     return { status: 'confirmed', attemptId: attempt.attemptId, messageId: sent.id || null };
   } catch (error) {
     const status = error.name === 'AbortError' || /timeout|network|fetch/i.test(error.message) ? 'unknown' : 'failed';
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status, details: { provider: 'gmail', error: error.message, surface } });
+    if (action.workflowId) hostStore.updateWorkflow(action.workflowId, { state: status === 'unknown' ? 'needs_attention' : 'needs_attention', payload: { ...hostStore.getWorkflow(action.workflowId).payload, outcome: status, error: error.message }, details: { attemptId: attempt.attemptId } });
     if (status === 'unknown') {
       error.code = 'EXECUTION_UNKNOWN';
       error.attemptId = attempt.attemptId;
@@ -696,6 +700,7 @@ async function reconcileApprovedReply(requestId, attemptId, surface) {
   if (!result.found) return { status: 'unknown', attemptId, reconciled: false };
   approvalService.execution({ attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', surface, reconciled: true, messageId: result.messageId } });
   approvalService.receipt({ attemptId, receipt: { provider: 'gmail', messageId: result.messageId, threadId: result.threadId, destination: action.destination, reconciled: true } });
+  if (action.workflowId) hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt: Date.now() + 48 * 60 * 60 * 1000, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: result.messageId, outcome: 'reconciled' }, details: { attemptId, reconciled: true } });
   return { status: 'confirmed', attemptId, messageId: result.messageId, reconciled: true };
 }
 
