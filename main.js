@@ -765,7 +765,7 @@ async function dispatchApprovedReply(requestId, principal, surface, { decision =
   if (action.taskVersion != null && currentTask && Number(currentTask.updatedAt) !== Number(action.taskVersion)) throw new Error('This follow-up is stale because the task changed.');
   const provider = createGmailProvider();
   const resolvedDecision = decision || approvalService.decide(requestId, 'send', { principal, surface });
-  const attempt = approvalService.execution({ requestId, status: 'prepared', details: { capability: action.capability, destination: action.destination, surface } });
+  const attempt = approvalService.claimExecution({ requestId, details: { capability: action.capability, destination: action.destination, surface } });
   approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: resolvedDecision.decisionId, surface } });
   try {
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'gmail', surface } });
@@ -803,7 +803,7 @@ async function dispatchCalendarUpdate(requestId, principal, surface, { decision 
   if (!account || !refreshToken || !clientId) throw new Error('Connect Google before editing Calendar.');
   const provider = new GoogleCalendarProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
   const resolvedDecision = decision || approvalService.decide(requestId, 'update', { principal, surface });
-  const attempt = approvalService.execution({ requestId, status: 'prepared', details: { capability: action.capability, eventId: action.eventId, surface } });
+  const attempt = approvalService.claimExecution({ requestId, details: { capability: action.capability, eventId: action.eventId, surface } });
   approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: resolvedDecision.decisionId, surface } });
   try {
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'google-calendar', eventId: action.eventId, surface } });
