@@ -50,7 +50,9 @@ function candidatesFromStructured(observation, obligations, { filters = null, ex
 }
 
 function splitObligationClauses(text) {
-  return String(text || '').split(/(?:\r?\n+|[.!?]+\s+|,\s+(?:and|then)\s+)/i).map((clause) => clause.trim()).filter((clause) => clause.length >= 8 && /\b(i['’]?ll|i will|we['’]?ll|we will|will|please|could you|would you|can you|need you to)\b/i.test(clause));
+  return String(text || '').split(/(?:\r?\n+|[.!?]+\s+|,\s+(?:and|then)\s+|\s+(?:and|then)\s+(?=(?:i['’]?ll|i will|we['’]?ll|we will|will|please|could you|would you|can you|need you to)\b))/i)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause.length >= 8 && /\b(i['’]?ll|i will|we['’]?ll|we will|will|please|could you|would you|can you|need you to)\b/i.test(clause));
 }
 
 function candidateForClause(observation, clause, { eligibleUpdate, extractorVersion, index, fallbackText, clauseCount, timeZone = observation?.timeZone || 'UTC', now = Date.now() }) {
