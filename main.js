@@ -1142,6 +1142,7 @@ async function runMailSync() {
   try {
     const result = await mailSync.run({ adapterId, accountAddress: account });
     const tasks = taskService?.processAll(adapterId) || [];
+    followUpWorkflow?.observeReplies(hostStore.observations(adapterId));
     const syncResult = { ...result, taskCandidates: tasks.length };
     console.error(`[mail] sync complete account=${account} fetched=${syncResult.fetched} inserted=${syncResult.inserted} tasks=${syncResult.taskCandidates}`);
     hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);

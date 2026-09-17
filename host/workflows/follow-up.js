@@ -31,6 +31,21 @@ class FollowUpWorkflow {
   cancel(workflowId, reason = 'user-cancelled') {
     return this.workflows.transition(workflowId, 'cancelled', { reason });
   }
+
+  observeReplies(observations = []) {
+    const waiting = this.store.listWorkflows({ activeOnly: true }).filter((workflow) => workflow.workflowType === 'gmail-follow-up' && workflow.state === 'waiting_event');
+    const changed = [];
+    for (const workflow of waiting) {
+      const reply = observations.find((observation) => observation.threadId === workflow.payload.threadId && observation.direction === 'incoming');
+      if (!reply) continue;
+      changed.push(this.store.updateWorkflow(workflow.workflowId, {
+        state: 'verifying',
+        payload: { ...workflow.payload, responseObservationId: reply.observationId, responseEvidence: reply.body || reply.subject || null },
+        details: { responseObservationId: reply.observationId },
+      }));
+    }
+    return changed;
+  }
 }
 
 module.exports = { FollowUpWorkflow };
