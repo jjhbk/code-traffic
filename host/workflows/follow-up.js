@@ -50,11 +50,11 @@ class FollowUpWorkflow {
     }
     for (const workflow of waiting) {
       const sentAt = Number(workflow.payload.sentAt || 0);
+      const freshnessBaseline = sentAt || Number(workflow.createdAt || 0);
       const reply = observations.find((observation) => {
         if (observation.threadId !== workflow.payload.threadId || observation.direction !== 'incoming') return false;
-        if (!sentAt) return true;
         const observedAt = observationTime(observation.timestamp || observation.internalDate || observation.createdAt);
-        return observedAt > sentAt;
+        return observedAt > freshnessBaseline;
       });
       if (!reply) continue;
       changed.push(this.store.updateWorkflow(workflow.workflowId, {

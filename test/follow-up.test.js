@@ -36,6 +36,11 @@ const uncertainWorkflow = followUp.prepare({ taskId: 'task-2', status: 'active',
 store.updateWorkflow(uncertainWorkflow.workflow.workflowId, { state: 'waiting_event', payload: { ...uncertainWorkflow.workflow.payload, sentAt: 1000 } });
 followUp.observeReplies([{ observationId: 'reply-2', threadId: 'thread-2', direction: 'incoming', timestamp: 1100, body: 'I will look tomorrow.' }]);
 assert.equal(followUp.reconcileReply(uncertainWorkflow.workflow.workflowId, { resolved: false, reason: 'reply-needs-user-confirmation' }).state, 'needs_attention');
+store.saveTaskCandidate({ candidateId: 'task-no-sent-at', observationId: 'obs-no-sent-at', summary: 'No send timestamp', counterparty: 'alex@example.com', threadId: 'thread-no-sent-at', evidence: { start: 0, end: 1, text: 'Review' }, extractorVersion: 'test' });
+const noSentAt = followUp.prepare({ taskId: 'task-no-sent-at', status: 'active', summary: 'No send timestamp', counterparty: 'alex@example.com', threadId: 'thread-no-sent-at' }, { body: 'Checking.' });
+store.updateWorkflow(noSentAt.workflow.workflowId, { state: 'waiting_event', payload: { ...noSentAt.workflow.payload } });
+assert.equal(followUp.observeReplies([{ observationId: 'old-no-sent-at', threadId: 'thread-no-sent-at', direction: 'incoming', timestamp: noSentAt.workflow.createdAt - 1, body: 'Old reply.' }]).length, 0);
+assert.equal(followUp.observeReplies([{ observationId: 'fresh-no-sent-at', threadId: 'thread-no-sent-at', direction: 'incoming', timestamp: noSentAt.workflow.createdAt + 1, body: 'Fresh reply.' }])[0].state, 'verifying');
 assert.throws(() => followUp.prepare({ taskId: 'task-2', status: 'done', counterparty: 'alex@example.com', threadId: 'thread-2' }, { body: 'No' }), /active tasks/);
 followUp.cancel(result.workflow.workflowId);
 assert.equal(store.getWorkflow(result.workflow.workflowId).state, 'cancelled');
