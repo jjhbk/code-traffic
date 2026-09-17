@@ -205,6 +205,29 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL,
     UNIQUE(record_type, record_key)
   );`,
+  `CREATE TABLE IF NOT EXISTS workflows (
+    workflow_id TEXT PRIMARY KEY,
+    workflow_type TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    task_id TEXT,
+    state TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    wake_at INTEGER,
+    input_version INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY(task_id) REFERENCES tasks(task_id)
+  );
+  CREATE TABLE IF NOT EXISTS workflow_steps (
+    workflow_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    step_index INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(workflow_id, step_id),
+    FOREIGN KEY(workflow_id) REFERENCES workflows(workflow_id)
+  );`,
 ];
 
 class SqliteStore {
@@ -492,6 +515,57 @@ class SqliteStore {
     return Number(result.changes) === 1;
   }
 
+  createWorkflow({ workflowId = crypto.randomUUID(), workflowType, version = 1, taskId = null, payload = {}, state = 'ready', inputVersion = 1, wakeAt = null } = {}) {
+    const states = new Set(['ready', 'evaluating', 'awaiting_input', 'awaiting_approval', 'executing', 'waiting_event', 'verifying', 'completed', 'cancelled', 'needs_attention']);
+    if (!workflowType || !states.has(state) || !payload || typeof payload !== 'object' || !Number.isInteger(version) || !Number.isInteger(inputVersion)) throw new Error('Invalid workflow.');
+    if (taskId && !this.db.prepare('SELECT task_id FROM tasks WHERE task_id = ?').get(taskId)) throw new Error('Workflow task not found.');
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO workflows(workflow_id, workflow_type, version, task_id, state, payload_json, wake_at, input_version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(workflowId, workflowType, version, taskId, state, JSON.stringify(payload), wakeAt, inputVersion, now, now);
+    this.audit('workflow-created', null, null, { workflowId, workflowType, taskId, state });
+    return this.getWorkflow(workflowId);
+  }
+
+  getWorkflow(workflowId) {
+    const row = this.db.prepare(`SELECT workflow_id AS workflowId, workflow_type AS workflowType, version, task_id AS taskId, state,
+      payload_json AS payloadJson, wake_at AS wakeAt, input_version AS inputVersion, created_at AS createdAt, updated_at AS updatedAt
+      FROM workflows WHERE workflow_id = ?`).get(workflowId);
+    if (!row) return null;
+    const steps = this.db.prepare('SELECT step_id AS stepId, step_index AS stepIndex, state, details_json AS detailsJson, updated_at AS updatedAt FROM workflow_steps WHERE workflow_id = ? ORDER BY step_index').all(workflowId)
+      .map((step) => ({ ...step, details: JSON.parse(step.detailsJson) }));
+    return { ...row, payload: JSON.parse(row.payloadJson), steps };
+  }
+
+  listWorkflows({ taskId = null, activeOnly = false } = {}) {
+    const clauses = [];
+    const params = [];
+    if (taskId) { clauses.push('task_id = ?'); params.push(taskId); }
+    if (activeOnly) { clauses.push("state NOT IN ('completed', 'cancelled')"); }
+    const rows = this.db.prepare(`SELECT workflow_id AS workflowId FROM workflows ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY updated_at DESC`).all(...params);
+    return rows.map((row) => this.getWorkflow(row.workflowId));
+  }
+
+  updateWorkflow(workflowId, { state, payload, wakeAt, inputVersion = null, details = {} } = {}) {
+    const allowed = new Set(['ready', 'evaluating', 'awaiting_input', 'awaiting_approval', 'executing', 'waiting_event', 'verifying', 'completed', 'cancelled', 'needs_attention']);
+    if (!allowed.has(state)) throw new Error('Invalid workflow state.');
+    const existing = this.getWorkflow(workflowId);
+    if (!existing) throw new Error('Workflow not found.');
+    const now = this.clock();
+    this.db.prepare(`UPDATE workflows SET state = ?, payload_json = ?, wake_at = ?, input_version = COALESCE(?, input_version), updated_at = ? WHERE workflow_id = ?`)
+      .run(state, JSON.stringify(payload === undefined ? existing.payload : payload), wakeAt === undefined ? existing.wakeAt : wakeAt, inputVersion, now, workflowId);
+    if (details && Object.keys(details).length) this.audit('workflow-transition', null, null, { workflowId, state, ...details });
+    return this.getWorkflow(workflowId);
+  }
+
+  upsertWorkflowStep(workflowId, { stepId, stepIndex, state, details = {} } = {}) {
+    if (!this.getWorkflow(workflowId) || !stepId || !Number.isInteger(stepIndex) || !state) throw new Error('Invalid workflow step.');
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO workflow_steps(workflow_id, step_id, step_index, state, details_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workflow_id, step_id) DO UPDATE SET step_index = excluded.step_index, state = excluded.state, details_json = excluded.details_json, updated_at = excluded.updated_at`)
+      .run(workflowId, stepId, stepIndex, state, JSON.stringify(details), now);
+    return this.getWorkflow(workflowId).steps.find((step) => step.stepId === stepId);
+  }
+
   saveTaskCandidate(candidate) {
     if (!candidate?.candidateId || !candidate.observationId) throw new Error('Invalid task candidate.');
     const now = this.clock();
@@ -672,7 +746,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'context_records', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
