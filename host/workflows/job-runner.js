@@ -1,11 +1,12 @@
 class JobRunner {
-  constructor({ store, handlers = {}, workerId = `assistant-${process.pid}`, leaseMs = 60_000, clock = () => Date.now() } = {}) {
+  constructor({ store, handlers = {}, workerId = `assistant-${process.pid}`, leaseMs = 60_000, clock = () => Date.now(), kinds = null } = {}) {
     if (!store) throw new Error('A job runner requires a store.');
     this.store = store;
     this.handlers = handlers;
     this.workerId = workerId;
     this.leaseMs = leaseMs;
     this.clock = clock;
+    this.kinds = kinds;
   }
 
   register(kind, handler) {
@@ -14,7 +15,7 @@ class JobRunner {
   }
 
   async runOnce({ limit = 10 } = {}) {
-    const jobs = this.store.claimJobs({ limit, leaseMs: this.leaseMs, workerId: this.workerId, now: this.clock() });
+    const jobs = this.store.claimJobs({ limit, leaseMs: this.leaseMs, workerId: this.workerId, now: this.clock(), kinds: this.kinds });
     const results = [];
     for (const job of jobs) {
       const handler = this.handlers[job.kind];

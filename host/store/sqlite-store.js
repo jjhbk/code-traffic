@@ -302,14 +302,15 @@ class SqliteStore {
     return { jobId, kind: String(kind), status: 'queued', runAt, attempts: 0, deduplicated: false };
   }
 
-  claimJobs({ limit = 10, leaseMs = 60_000, workerId = crypto.randomUUID(), now = this.clock() } = {}) {
+  claimJobs({ limit = 10, leaseMs = 60_000, workerId = crypto.randomUUID(), now = this.clock(), kinds = null } = {}) {
     const safeLimit = Math.min(100, Math.max(1, Number(limit) || 10));
     if (!Number.isFinite(leaseMs) || leaseMs <= 0) throw new Error('Job lease must be positive.');
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      const kindFilter = Array.isArray(kinds) && kinds.length ? ` AND kind IN (${kinds.map(() => '?').join(', ')})` : '';
       const rows = this.db.prepare(`SELECT job_id AS jobId FROM jobs
-        WHERE (status = 'queued' AND run_at <= ?) OR (status = 'running' AND lease_until < ?)
-        ORDER BY run_at, created_at LIMIT ?`).all(now, now, safeLimit);
+        WHERE ((status = 'queued' AND run_at <= ?) OR (status = 'running' AND lease_until < ?))${kindFilter}
+        ORDER BY run_at, created_at LIMIT ?`).all(now, now, ...(Array.isArray(kinds) && kinds.length ? kinds : []), safeLimit);
       const claimed = [];
       const update = this.db.prepare(`UPDATE jobs SET status = 'running', attempts = attempts + 1, lease_token = ?, lease_until = ?, updated_at = ?
         WHERE job_id = ? AND (status = 'queued' OR (status = 'running' AND lease_until < ?))`);

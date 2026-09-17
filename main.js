@@ -29,6 +29,7 @@ const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
 const { DigestScheduler } = require('./host/scheduling/digest');
 const { AssistantRuntime } = require('./host/runtime/assistant');
+const { BackgroundHost } = require('./host/runtime/background-host');
 const { ProactivityService } = require('./host/proactivity/service');
 const { ConversationService } = require('./host/conversation/service');
 const { WorkflowService } = require('./host/workflows/service');
@@ -95,6 +96,7 @@ let driveSync;
 let taskService;
 let digestScheduler;
 let assistantRuntime;
+let backgroundHost;
 let proactivityService;
 let conversationService;
 let followUpWorkflow;
@@ -396,12 +398,14 @@ function wireIpc() {
     if (!conversationService) throw new Error('Assistant conversation is unavailable.');
     return conversationService.handle({ conversationId: 'desktop:signal-box', text, externalId: `desktop:${crypto.randomUUID()}` });
   });
-  ipcMain.handle('assistant:status', () => assistantRuntime?.health() || { running: false, busy: false, paused: false });
-  ipcMain.handle('assistant:pause', (_event, { paused } = {}) => {
+  ipcMain.handle('assistant:status', async () => ({ ...(assistantRuntime?.health() || { running: false, busy: false, paused: false }), background: backgroundHost ? await backgroundHost.health() : null }));
+  ipcMain.handle('assistant:pause', async (_event, { paused } = {}) => {
     if (!assistantRuntime) throw new Error('Assistant runtime is unavailable.');
     appSettings = { ...appSettings, assistantPaused: Boolean(paused) };
     writeSettings(app.getPath('userData'), appSettings);
-    return assistantRuntime.setPaused(appSettings.assistantPaused);
+    const health = assistantRuntime.setPaused(appSettings.assistantPaused);
+    if (backgroundHost) health.background = await backgroundHost.pause(appSettings.assistantPaused);
+    return health;
   });
   ipcMain.handle('assistant:workflows', () => hostStore?.listWorkflows({ activeOnly: true }) || []);
   ipcMain.handle('assistant:cancel-workflow', (_event, { workflowId } = {}) => {
@@ -1000,6 +1004,16 @@ async function start() {
   try {
     hostStore = new SqliteStore({ filename: path.join(app.getPath('userData'), 'signal-box.db') });
     approvalService = new ApprovalService({ store: hostStore });
+    if (appSettings.backgroundHost !== false) {
+      try {
+        backgroundHost = new BackgroundHost({ databasePath: path.join(app.getPath('userData'), 'signal-box.db') });
+        await backgroundHost.start();
+        console.error('[assistant] background host started');
+      } catch (error) {
+        backgroundHost = null;
+        console.error(`[assistant] background host unavailable; using desktop runtime: ${error.message}`);
+      }
+    }
   } catch (error) {
     hostStore = null;
     console.error(`[store] SQLite unavailable; durable event storage is disabled: ${error.message}`);
@@ -1034,6 +1048,7 @@ async function start() {
   }) : null;
   assistantRuntime = hostStore ? new AssistantRuntime({
     store: hostStore,
+    kinds: ['assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest'],
     intervalMs: 30 * 1000,
     paused: appSettings.assistantPaused === true,
     onError: (error) => console.error(`[assistant] runtime tick failed: ${error.message}`),
@@ -1313,6 +1328,7 @@ app.on('before-quit', async () => {
   if (driveSyncTimer) clearInterval(driveSyncTimer);
   if (digestTimer) clearInterval(digestTimer);
   assistantRuntime?.stop();
+  backgroundHost?.stop().catch((error) => console.error(`[assistant] background host shutdown failed: ${error.message}`));
   trayRef?.destroy();
   trayRef = null;
   telegram?.stop();

@@ -1,13 +1,13 @@
 const { JobRunner } = require('../workflows/job-runner');
 
 class AssistantRuntime {
-  constructor({ store, handlers = {}, workerId = `assistant-${process.pid}`, intervalMs = 30_000, clock = () => Date.now(), onError = null, paused = false } = {}) {
+  constructor({ store, handlers = {}, workerId = `assistant-${process.pid}`, intervalMs = 30_000, clock = () => Date.now(), onError = null, paused = false, kinds = null } = {}) {
     if (!store) throw new Error('Assistant runtime requires a store.');
     this.store = store;
     this.clock = clock;
     this.intervalMs = intervalMs;
     this.onError = onError;
-    this.runner = new JobRunner({ store, handlers, workerId, clock });
+    this.runner = new JobRunner({ store, handlers, workerId, clock, kinds });
     this.timer = null;
     this.startedAt = null;
     this.running = false;
