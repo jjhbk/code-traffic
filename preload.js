@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   openBrowserExtensionFolder: () => ipcRenderer.invoke('browser:open-extension-folder'),
   openBrowserExtensionManager: () => ipcRenderer.invoke('browser:open-extension-manager'),
   getBrowserPairing: () => ipcRenderer.invoke('browser:get-pairing'),
+  getMobilePairing: () => ipcRenderer.invoke('mobile:get-pairing'),
   getBrowserStatus: () => ipcRenderer.invoke('browser:get-status'),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),

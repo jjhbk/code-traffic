@@ -35,6 +35,7 @@ const { ConversationService } = require('./host/conversation/service');
 const { WorkflowService } = require('./host/workflows/service');
 const { FollowUpWorkflow } = require('./host/workflows/follow-up');
 const { AvailabilityWorkflow } = require('./host/workflows/availability');
+const { MobileApi, PROTOCOL_VERSION } = require('./host/mobile/api');
 const { PlanningService } = require('./host/planning/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
@@ -105,6 +106,8 @@ let conversationService;
 let followUpWorkflow;
 let planningService;
 let availabilityWorkflow;
+let mobileConversationService;
+let mobileApi;
 let trayRef;
 let mailSyncTimer;
 let calendarSyncTimer;
@@ -212,6 +215,7 @@ function saveWindowState(bounds) {
 }
 
 function hookTokenPath() { return path.join(app.getPath('userData'), 'hook-token'); }
+function mobileTokenPath() { return path.join(app.getPath('userData'), 'mobile-token'); }
 function ensureHookToken() {
   const file = hookTokenPath();
   try {
@@ -225,6 +229,18 @@ function ensureHookToken() {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${token}\n`, { mode: 0o600 });
   try { fs.chmodSync(file, 0o600); } catch (_) { /* Windows ACLs are managed by the user profile. */ }
+  return { file, token };
+}
+function ensureMobileToken() {
+  const file = mobileTokenPath();
+  try {
+    const current = fs.readFileSync(file, 'utf8').trim();
+    if (current) { try { fs.chmodSync(file, 0o600); } catch (_) {} return { file, token: current }; }
+  } catch (_) { /* Create it below. */ }
+  const token = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${token}\n`, { mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch (_) {}
   return { file, token };
 }
 
@@ -320,6 +336,11 @@ function wireIpc() {
     const pairing = ensureHookToken();
     const port = Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747;
     return { token: pairing.token, sessionId: appSettings.browserSessionId || '', hostUrl: `http://127.0.0.1:${port}` };
+  });
+  ipcMain.handle('mobile:get-pairing', () => {
+    const pairing = ensureMobileToken();
+    const port = Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747;
+    return { protocolVersion: PROTOCOL_VERSION, token: pairing.token, hostUrl: `http://127.0.0.1:${port}`, transport: 'local-loopback', note: 'Remote phone connectivity is not enabled by default.' };
   });
   ipcMain.handle('browser:get-status', () => browserBridge?.status(appSettings.browserSessionId || '') || { sessionId: appSettings.browserSessionId || '', connected: false, lastSeenAt: null, pending: 0 });
   ipcMain.handle('clipboard:read', () => clipboard.readText());
@@ -1042,6 +1063,7 @@ async function start() {
   }
   configureModelRouter();
   const hookAuth = ensureHookToken();
+  const mobileAuth = ensureMobileToken();
   browserBridge = new BrowserBridge();
   try { installClaudeHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
   try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
@@ -1078,6 +1100,7 @@ async function start() {
     storagePath: path.join(app.getPath('userData'), 'sessions.json'),
     historyProvider: sessionHistoryWithTerminalQuestions,
     authToken: hookAuth.token,
+    mobileAuthToken: mobileAuth.token,
     store: hostStore,
     browserBridge,
   });
@@ -1093,6 +1116,15 @@ async function start() {
   taskService = hostStore ? new TaskService({ store: hostStore, modelRouter }) : null;
   proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
+  mobileConversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'mobile', proactivity: proactivityService }) : null;
+  mobileApi = hostStore && mobileConversationService && proactivityService ? new MobileApi({
+    store: hostStore,
+    conversation: mobileConversationService,
+    proactivity: proactivityService,
+    approvals: approvalService,
+    getStatus: async () => ({ ...(assistantRuntime?.health() || { running: false, paused: false }), background: backgroundHost ? await backgroundHost.health() : null }),
+  }) : null;
+  board.mobileApi = mobileApi;
   if (hostStore && approvalService) {
     const workflows = new WorkflowService({ store: hostStore });
     followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows });

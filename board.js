@@ -84,13 +84,15 @@ function sessionDetails(key, tile, sessionId, cwd, owned, agent = null, now = Da
 }
 
 class Board extends EventEmitter {
-  constructor({ storagePath = null, historyProvider = null, liveness = {}, clock = () => Date.now(), authToken = null, store = null, browserBridge = null } = {}) {
+  constructor({ storagePath = null, historyProvider = null, liveness = {}, clock = () => Date.now(), authToken = null, mobileAuthToken = null, mobileApi = null, store = null, browserBridge = null } = {}) {
     super();
     this.storagePath = storagePath;
     this.archivePath = storagePath ? `${storagePath}.archive` : null;
     this.historyProvider = historyProvider;
     this.clock = clock;
     this.authToken = authToken || null;
+    this.mobileAuthToken = mobileAuthToken || null;
+    this.mobileApi = mobileApi;
     this.store = store;
     this.browserBridge = browserBridge;
     this.livenessLimits = { ...LIVENESS_DEFAULTS, ...liveness };
@@ -412,14 +414,25 @@ class Board extends EventEmitter {
   }
 
   listen(port = 4747, host = '127.0.0.1') {
-    this.server = http.createServer((request, response) => {
+    this.server = http.createServer(async (request, response) => {
+      let url;
+      try { url = new URL(request.url, `http://${host}`); }
+      catch (_) { sendJson(response, 400, { error: 'Invalid request URL.' }); return; }
+      if (url.pathname.startsWith('/api/v1/mobile')) {
+        const supplied = request.headers.authorization?.replace(/^Bearer\s+/i, '') || request.headers['x-signal-box-mobile-token'];
+        if (!this.mobileAuthToken || supplied !== this.mobileAuthToken) { sendJson(response, 401, { error: 'Mobile authentication required.' }); return; }
+        if (!this.mobileApi) { sendJson(response, 503, { error: 'Mobile API is unavailable.' }); return; }
+        try {
+          const body = request.method === 'GET' ? {} : await readJsonBody(request, 512 * 1024);
+          const result = await this.mobileApi.handle({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body });
+          sendJson(response, 200, result);
+        } catch (error) { sendJson(response, error.status || (error.message === 'Request body exceeds limit.' ? 413 : 400), { error: error.message }); }
+        return;
+      }
       if (this.authToken && request.headers['x-signal-box-token'] !== this.authToken) {
         sendJson(response, 401, { error: 'Signal Box authentication required.' });
         return;
       }
-      let url;
-      try { url = new URL(request.url, `http://${host}`); }
-      catch (_) { sendJson(response, 400, { error: 'Invalid request URL.' }); return; }
       if (request.method === 'GET' && url.pathname === '/api/sessions') {
         const sessions = this.list().map((session) => ({
           ...session,
@@ -534,6 +547,19 @@ function sendJson(response, status, payload) {
     'Cache-Control': 'no-store',
   });
   response.end(JSON.stringify(payload, null, 2));
+}
+
+function readJsonBody(request, limit) {
+  return new Promise((resolve, reject) => {
+    let body = ''; let bytes = 0; let tooLarge = false;
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => { bytes += Buffer.byteLength(chunk); if (bytes > limit) tooLarge = true; else body += chunk; });
+    request.on('error', reject);
+    request.on('end', () => {
+      if (tooLarge) return reject(new Error('Request body exceeds limit.'));
+      try { resolve(JSON.parse(body || '{}')); } catch (_) { reject(new Error('Request body must be valid JSON.')); }
+    });
+  });
 }
 
 module.exports = { Board, displayPath, permissionQuestion, userQuestionsFromHook };
