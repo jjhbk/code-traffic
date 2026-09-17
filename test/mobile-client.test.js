@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { MobileCoreClient, NOTIFICATION_CURSOR_KEY, assistantHealthStatus } = require('../mobile/src/client');
+const { MobileCoreClient, NOTIFICATION_CURSOR_KEY, OUTBOX_KEY, assistantHealthStatus } = require('../mobile/src/client');
 
 assert.equal(assistantHealthStatus({ core: { running: true, paused: true } }).key, 'paused');
 assert.equal(assistantHealthStatus({ core: { running: true, background: { running: true, lifecycle: 'recovering' } } }).label, 'CATCHING UP');
@@ -63,5 +63,9 @@ assert.throws(() => new MobileCoreClient({ baseUrl: 'https://user:pass@assistant
   const revoked = await client.revokeDevice();
   assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/devices/revoke');
   assert.equal(revoked.accepted, true);
+  await storage.setItem(OUTBOX_KEY, JSON.stringify([{ commandId: 'expired-location', path: '/api/v1/mobile/context/location', body: {}, createdAt: -1, expiresAt: 50 }]));
+  const expiredFlush = await client.flushOutbox();
+  assert.deepEqual(expiredFlush, { flushed: 0, pending: 0 });
+  assert.equal(JSON.parse(values.get(OUTBOX_KEY)).length, 0, 'expired offline context is discarded before replay');
   console.log('mobile client tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

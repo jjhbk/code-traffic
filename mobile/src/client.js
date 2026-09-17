@@ -1,5 +1,7 @@
 const OUTBOX_KEY = 'signal-box.mobile.outbox.v1';
 const NOTIFICATION_CURSOR_KEY = 'signal-box.mobile.notifications.cursor.v1';
+const OUTBOX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const CONTEXT_OUTBOX_MAX_AGE_MS = 30 * 60 * 1000;
 
 function assistantHealthStatus(payload = {}) {
   const core = payload.core || payload;
@@ -89,10 +91,10 @@ class MobileCoreClient {
   async createPermission(body) { return this.command('/api/v1/mobile/permissions', body); }
   async revokePermission(grantId) { return this.command(`/api/v1/mobile/permissions/${encodeURIComponent(grantId)}/revoke`, {}); }
   async decideApproval(requestId, optionId) { return this.command(`/api/v1/mobile/approvals/${encodeURIComponent(requestId)}/decide`, { optionId }); }
-  async sendLocation(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/location', { ...body, eventId }, eventId); }
+  async sendLocation(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/location', { ...body, eventId }, eventId, { ttlMs: CONTEXT_OUTBOX_MAX_AGE_MS }); }
   async deleteLocationHistory() { return this.command('/api/v1/mobile/context/location/delete', {}); }
   async savePlace(body) { return this.command('/api/v1/mobile/context/place', body); }
-  async sendSensor(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/sensor', { ...body, eventId }, eventId); }
+  async sendSensor(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/sensor', { ...body, eventId }, eventId, { ttlMs: CONTEXT_OUTBOX_MAX_AGE_MS }); }
   async deleteContext(recordType, recordKey) { return this.command(`/api/v1/mobile/context/${encodeURIComponent(recordType)}/${encodeURIComponent(recordKey)}/delete`, {}); }
   async acknowledgeNotification(notificationId) { return this.command(`/api/v1/mobile/notifications/${encodeURIComponent(notificationId)}/ack`, {}); }
   async registerPushToken(pushToken, platform = 'expo') { return this.command('/api/v1/mobile/devices/push-token', { pushToken, platform }); }
@@ -100,12 +102,12 @@ class MobileCoreClient {
   async revokeDevice() { return this.command('/api/v1/mobile/devices/revoke', {}); }
   async confirmAutonomousRun(runId, evidence) { return this.command(`/api/v1/mobile/assistant/autonomous-runs/${encodeURIComponent(runId)}/confirm`, { evidence }); }
 
-  async command(path, body, commandId = id()) {
+  async command(path, body, commandId = id(), { ttlMs = OUTBOX_MAX_AGE_MS } = {}) {
     try { return await this.request(path, { method: 'POST', body, idempotencyKey: commandId }); }
     catch (error) {
       if (error.code !== 'NETWORK_UNAVAILABLE' || !this.storage) throw error;
       const outbox = await this.readOutbox();
-      if (!outbox.some((item) => item.commandId === commandId)) { outbox.push({ commandId, path, body, createdAt: this.clock() }); await this.writeOutbox(outbox); }
+      if (!outbox.some((item) => item.commandId === commandId)) { const createdAt = this.clock(); outbox.push({ commandId, path, body, createdAt, expiresAt: createdAt + Math.min(Math.max(Number(ttlMs) || OUTBOX_MAX_AGE_MS, 1), OUTBOX_MAX_AGE_MS) }); await this.writeOutbox(outbox); }
       return { queued: true, commandId, pending: outbox.length };
     }
   }
@@ -121,11 +123,17 @@ class MobileCoreClient {
 
   async readOutbox() {
     if (!this.storage) return [];
-    try { const value = await this.storage.getItem(OUTBOX_KEY); const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : []; }
+    try {
+      const value = await this.storage.getItem(OUTBOX_KEY); const parsed = JSON.parse(value || '[]'); if (!Array.isArray(parsed)) return [];
+      const now = this.clock();
+      const valid = parsed.filter((item) => item && typeof item.commandId === 'string' && typeof item.path === 'string' && Number.isFinite(Number(item.createdAt)) && Number(item.createdAt) <= now && now - Number(item.createdAt) <= OUTBOX_MAX_AGE_MS && (!item.expiresAt || Number(item.expiresAt) > now));
+      if (valid.length !== parsed.length) await this.writeOutbox(valid);
+      return valid;
+    }
     catch (_) { return []; }
   }
 
   async writeOutbox(items) { if (this.storage) await this.storage.setItem(OUTBOX_KEY, JSON.stringify(items.slice(-100))); }
 }
 
-module.exports = { MobileCoreClient, MobileApiError, OUTBOX_KEY, NOTIFICATION_CURSOR_KEY, assistantHealthStatus };
+module.exports = { MobileCoreClient, MobileApiError, OUTBOX_KEY, NOTIFICATION_CURSOR_KEY, OUTBOX_MAX_AGE_MS, CONTEXT_OUTBOX_MAX_AGE_MS, assistantHealthStatus };
