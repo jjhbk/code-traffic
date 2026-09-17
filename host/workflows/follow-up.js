@@ -35,6 +35,19 @@ class FollowUpWorkflow {
   observeReplies(observations = []) {
     const waiting = this.store.listWorkflows({ activeOnly: true }).filter((workflow) => workflow.workflowType === 'gmail-follow-up' && workflow.state === 'waiting_event');
     const changed = [];
+    const awaitingApproval = this.store.listWorkflows({ activeOnly: true }).filter((workflow) => workflow.workflowType === 'gmail-follow-up' && workflow.state === 'awaiting_approval');
+    for (const workflow of awaitingApproval) {
+      const reply = observations.find((observation) => observation.threadId === workflow.payload.threadId
+        && observation.direction === 'incoming'
+        && observationTime(observation.timestamp || observation.internalDate || observation.createdAt) > Number(workflow.createdAt || 0));
+      if (!reply) continue;
+      if (workflow.payload.requestId) this.approvals.cancel(workflow.payload.requestId, 'newer-thread-evidence');
+      changed.push(this.store.updateWorkflow(workflow.workflowId, {
+        state: 'needs_attention',
+        payload: { ...workflow.payload, invalidatedByObservationId: reply.observationId, invalidationReason: 'newer-thread-evidence' },
+        details: { responseObservationId: reply.observationId, reason: 'approval-invalidated' },
+      }));
+    }
     for (const workflow of waiting) {
       const sentAt = Number(workflow.payload.sentAt || 0);
       const reply = observations.find((observation) => {

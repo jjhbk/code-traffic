@@ -14,6 +14,12 @@ assert.equal(result.workflow.state, 'awaiting_approval');
 assert.equal(result.approval.action.capability, 'gmail.send');
 assert.equal(result.approval.action.workflowId, result.workflow.workflowId);
 assert.equal(result.workflow.payload.requestId, result.approval.request_id || result.approval.requestId);
+store.saveTaskCandidate({ candidateId: 'task-approval-stale', observationId: 'obs-approval-stale', summary: 'Approval stale', counterparty: 'alex@example.com', threadId: 'thread-approval-stale', evidence: { start: 0, end: 1, text: 'Review' }, extractorVersion: 'test' });
+const pendingFollowUp = followUp.prepare({ taskId: 'task-approval-stale', status: 'active', summary: 'Approval stale', counterparty: 'alex@example.com', threadId: 'thread-approval-stale' }, { body: 'Please review.' });
+const staleRequestId = pendingFollowUp.workflow.payload.requestId;
+const invalidated = followUp.observeReplies([{ observationId: 'newer-than-draft', threadId: 'thread-approval-stale', direction: 'incoming', timestamp: Date.now() + 1, body: 'Already handled.' }]);
+assert.equal(invalidated[0].state, 'needs_attention');
+assert.equal(store.getApproval(staleRequestId).status, 'cancelled');
 store.updateWorkflow(result.workflow.workflowId, { state: 'waiting_event', payload: { ...result.workflow.payload, threadId: 'thread-1', sentAt: Date.parse('2026-09-17T10:00:00Z') } });
 const verifying = followUp.observeReplies([
   { observationId: 'old-reply', threadId: 'thread-1', direction: 'incoming', timestamp: '2026-09-17T09:59:00Z', body: 'An older message.' },

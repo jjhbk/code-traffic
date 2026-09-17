@@ -29,6 +29,8 @@ class ApprovalService {
     return this.store.decide({ requestId, optionId, principal, surface });
   }
 
+  cancel(requestId, reason = 'invalidated') { return this.store.cancelApproval(requestId, reason); }
+
   execution(attempt) { return this.store.recordExecutionAttempt(attempt); }
 
   claimExecution(attempt) { return this.store.claimExecutionAttempt(attempt); }

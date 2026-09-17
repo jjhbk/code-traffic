@@ -1353,6 +1353,16 @@ class SqliteStore {
     }
   }
 
+  cancelApproval(requestId, reason = 'invalidated') {
+    if (!requestId) throw new Error('Approval request is required.');
+    const request = this.db.prepare('SELECT request_id AS requestId, action_digest AS actionDigest, status FROM approval_requests WHERE request_id = ?').get(requestId);
+    if (!request) throw new Error('Approval request not found.');
+    if (request.status !== 'pending') return { requestId, status: request.status, cancelled: false };
+    const result = this.db.prepare("UPDATE approval_requests SET status = 'cancelled', resolved_at = ? WHERE request_id = ? AND status = 'pending'").run(this.clock(), requestId);
+    if (Number(result.changes) === 1) this.audit('approval-cancelled', requestId, request.actionDigest, { reason });
+    return { requestId, status: 'cancelled', cancelled: Number(result.changes) === 1 };
+  }
+
   audit(kind, requestId, actionDigest, details) {
     this.db.prepare('INSERT INTO audit_entries(kind, request_id, action_digest, details_json, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(kind, requestId, actionDigest, JSON.stringify(details), this.clock());
