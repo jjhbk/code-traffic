@@ -382,6 +382,19 @@ class SqliteStore {
 
   close() { this.db.close(); }
 
+  transaction(callback) {
+    if (typeof callback !== 'function') throw new Error('A transaction callback is required.');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = callback();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch (_) {}
+      throw error;
+    }
+  }
+
   getMobileCommand(commandId) {
     if (!commandId) return null;
     const row = this.db.prepare('SELECT command_id AS commandId, operation, result_json AS resultJson, created_at AS createdAt FROM mobile_commands WHERE command_id = ?').get(commandId);

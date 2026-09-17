@@ -30,21 +30,26 @@ class MailSync {
       result = await this.provider.sync({ cursor: null, boundedWindow });
     }
     const messages = Array.isArray(result?.messages) ? result.messages : [];
-    let inserted = 0;
-    let removed = 0;
-    const observations = [];
-    for (const raw of messages) {
-      if (raw?.removed) {
-        if (this.store.removeObservation(adapterId, raw.id)) removed += 1;
-        continue;
+    return this.store.transaction(() => {
+      let inserted = 0;
+      let removed = 0;
+      const observations = [];
+      for (const raw of messages) {
+        if (raw?.removed) {
+          if (this.store.removeObservation(adapterId, raw.id)) removed += 1;
+          continue;
+        }
+        const observation = normalizeMessage(raw, { accountAddress, adapterId });
+        if (this.store.saveObservation(observation, adapterId)) { inserted += 1; observations.push(observation); }
       }
-      const observation = normalizeMessage(raw, { accountAddress, adapterId });
-      if (this.store.saveObservation(observation, adapterId)) { inserted += 1; observations.push(observation); }
-    }
-    if (result?.nextCursor !== undefined && result.nextCursor !== null) {
-      this.store.setConnectorCursor(adapterId, String(result.nextCursor));
-    }
-    return { adapterId, fetched: messages.length, inserted, removed, observations, cursorReset: reset, nextCursor: result?.nextCursor ?? cursor ?? null, syncedAt: this.clock() };
+      const nextCursor = result?.nextCursor ?? cursor ?? null;
+      if (result?.nextCursor !== undefined && result.nextCursor !== null) this.store.setConnectorCursor(adapterId, String(nextCursor));
+      let reconciliation = null;
+      if (inserted || removed || nextCursor !== cursor) {
+        reconciliation = this.store.enqueueJob({ kind: 'tasks.reconcile', payload: { adapterId }, runAt: this.clock(), dedupeKey: `tasks.reconcile:${adapterId}:${nextCursor || 'initial'}` });
+      }
+      return { adapterId, fetched: messages.length, inserted, removed, observations, cursorReset: reset, nextCursor, reconciliationQueued: Boolean(reconciliation), syncedAt: this.clock() };
+    });
   }
 }
 

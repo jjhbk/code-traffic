@@ -21,6 +21,9 @@ const sync = new MailSync({ store, provider, clock: () => 1770000000000 });
 (async () => {
   const firstResult = await sync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' });
   assert.equal(firstResult.adapterId, 'gmail:me'); assert.equal(firstResult.fetched, 1); assert.equal(firstResult.inserted, 1); assert.equal(firstResult.removed, 0); assert.equal(firstResult.cursorReset, false); assert.equal(firstResult.nextCursor, 'c1'); assert.equal(firstResult.syncedAt, 1770000000000); assert.equal(firstResult.observations.length, 1);
+  assert.equal(firstResult.reconciliationQueued, true);
+  const reconciliationJob = store.claimJobs({ now: 1770000000000, workerId: 'task-reconciler' }).find((job) => job.kind === 'tasks.reconcile');
+  assert.equal(reconciliationJob?.payload.adapterId, 'gmail:me');
   assert.equal((await sync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' })).cursorReset, true);
   assert.equal(store.getConnectorCursor('gmail:me'), 'c2');
   assert.equal(store.observations('gmail:me').length, 2);

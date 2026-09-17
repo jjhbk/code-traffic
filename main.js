@@ -1130,6 +1130,7 @@ async function start() {
           paused: appSettings.assistantPaused === true,
           onJob: async (kind, payload) => {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
+            if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
@@ -1234,6 +1235,7 @@ async function start() {
     assistantRuntime.register('workflow.resume', async ({ workflowId }) => {
       if (workflowId && hostStore) new WorkflowService({ store: hostStore }).resume(workflowId);
     });
+    assistantRuntime.register('tasks.reconcile', async ({ adapterId }) => taskService?.processAllAsync(adapterId));
     assistantRuntime.register('browser.availability.check', async (payload) => runBrowserAvailabilityCheck(payload));
     assistantRuntime.register('meeting.prep', async (payload) => runMeetingPrep(payload));
     assistantRuntime.register('assistant.digest', async () => {
