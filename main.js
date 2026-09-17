@@ -393,18 +393,8 @@ function wireIpc() {
   ipcMain.handle('assistant:decisions', () => proactivityService?.evaluate(hostStore?.listTasks() || []) || []);
   ipcMain.handle('assistant:conversation', () => conversationService?.history('desktop:signal-box') || []);
   ipcMain.handle('assistant:send', (_event, { text = '' } = {}) => {
-    if (!conversationService || !proactivityService) throw new Error('Assistant conversation is unavailable.');
-    const content = String(text).trim();
-    if (!content) throw new Error('Enter a message for the assistant.');
-    const conversation = conversationService.open('desktop:signal-box');
-    conversationService.receive(conversation.conversationId, content, `desktop:${crypto.randomUUID()}`);
-    const decisions = proactivityService.evaluate(hostStore?.listTasks() || []);
-    const active = decisions.filter((decision) => decision.type !== 'wait');
-    const response = active.length
-      ? `I found ${active.length} item${active.length === 1 ? '' : 's'} that may need attention. Review Assistant activity for the evidence and next step.`
-      : 'I saved that in the assistant conversation. There are no triggered next steps right now.';
-    conversationService.respond(conversation.conversationId, response);
-    return { response, decisions, history: conversationService.history(conversation.conversationId) };
+    if (!conversationService) throw new Error('Assistant conversation is unavailable.');
+    return conversationService.handle({ conversationId: 'desktop:signal-box', text, externalId: `desktop:${crypto.randomUUID()}` });
   });
   ipcMain.handle('assistant:status', () => assistantRuntime?.health() || { running: false, busy: false });
   ipcMain.handle('assistant:workflows', () => hostStore?.listWorkflows({ activeOnly: true }) || []);
@@ -1022,7 +1012,7 @@ async function start() {
   wireMailSync();
   taskService = hostStore ? new TaskService({ store: hostStore }) : null;
   proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
-  conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop' }) : null;
+  conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
   if (hostStore && approvalService) followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows: new WorkflowService({ store: hostStore }) });
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
@@ -1072,10 +1062,8 @@ async function start() {
     recordDigestFeedback: (notificationId, useful) => hostStore?.recordNotificationFeedback(notificationId, useful, { channel: 'telegram' }),
     assistantMessage: async (text, externalId = null) => {
       if (!conversationService) throw new Error('Durable conversation storage is unavailable.');
-      const conversation = conversationService.open(`telegram:${appSettings.telegramChatId}`);
-      conversationService.receive(conversation.conversationId, text, externalId);
-      conversationService.respond(conversation.conversationId, 'Message saved. Assistant planning will use it as context.');
-      await telegram.send('Message saved. Assistant planning will use it as context.');
+      const result = conversationService.handle({ conversationId: `telegram:${appSettings.telegramChatId}`, text, externalId });
+      if (!result.duplicate) await telegram.send(result.response);
     },
     getHistory: sessionHistoryWithTerminalQuestions,
     executeTerminal: executeRemoteTerminal,
