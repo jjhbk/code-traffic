@@ -551,7 +551,9 @@ function wireIpc() {
     if (!hostStore || !approvalService || !browserBridge) throw new Error('Browser action execution is unavailable.');
     const activeSessionId = sessionId || appSettings.browserSessionId;
     if (!activeSessionId) throw new Error('A browser session ID is required.');
-    const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: uberCabBooking.origin });
+    const request = hostStore.getApproval(requestId);
+    const recipe = actionRegistry.browserRecipe(request?.action?.recipeId, request?.action?.recipeDigest || null);
+    const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: recipe.origin });
     const executor = new BrowserRecipeExecutor({ browser: adapter });
     const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
     return service.executeApproved(requestId, { executor, principal: 'signal-box-user', surface });
@@ -988,11 +990,13 @@ function sessionHistoryWithTerminalQuestions(session) {
 
 async function dispatchBrowserAction(requestId, sessionId = null, surface = 'desktop') {
   if (!hostStore || !approvalService || !browserBridge) throw new Error('Browser action execution is unavailable.');
+  const request = hostStore.getApproval(requestId);
+  const recipe = actionRegistry.browserRecipe(request?.action?.recipeId, request?.action?.recipeDigest || null);
   const activeSessionId = sessionId || appSettings.browserSessionId;
   if (!activeSessionId) throw new Error('A browser session ID is required.');
   const bridgeStatus = browserBridge.status(activeSessionId);
-  if (!bridgeStatus.connected) throw new Error('Browser extension is not connected. Open https://m.uber.com in the paired Chrome tab, then retry the action.');
-  const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: uberCabBooking.origin });
+  if (!bridgeStatus.connected) throw new Error(`Browser extension is not connected. Open ${recipe.origin} in the paired browser tab, then retry the action.`);
+  const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: recipe.origin });
   const executor = new BrowserRecipeExecutor({ browser: adapter });
   const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
   return service.executeApproved(requestId, { executor, principal: 'signal-box-user', surface });
@@ -1265,12 +1269,7 @@ async function start() {
     sendPrompt: sendRemoteAgentPrompt,
     approvalService,
     approveMailReply: (requestId, _principal, surface) => dispatchApprovedReply(requestId, 'signal-box-user', surface),
-    approveBrowserAction: async (requestId, sessionId, _principal, surface) => {
-      const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId, origin: uberCabBooking.origin });
-      const executor = new BrowserRecipeExecutor({ browser: adapter });
-      const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
-      return service.executeApproved(requestId, { executor, principal: 'signal-box-user', surface });
-    },
+    approveBrowserAction: (requestId, sessionId, _principal, surface) => dispatchBrowserAction(requestId, sessionId, surface),
     ensureSession: async (tile) => {
       const session = board.sessions.get(tile);
       if (!session || !session.owned) throw new Error('That session is not remotely controllable.');
@@ -1529,7 +1528,6 @@ async function runMeetingPrep({ workflowId } = {}) {
 
 async function executeAutomaticBrowserDecisions(tasks, decisions) {
   if (!planningService || !hostStore || !approvalService || !browserBridge) return [];
-  const recipes = { [uberCabBooking.id]: uberCabBooking, [uberCabQuote.id]: uberCabQuote };
   const executed = [];
   const frontier = proactivityService?.selectAutomaticDecisions
     ? proactivityService.selectAutomaticDecisions(decisions)
@@ -1538,9 +1536,15 @@ async function executeAutomaticBrowserDecisions(tasks, decisions) {
     console.error(`[assistant] automatic action frontier deferred ${frontier.deferred.length} action(s) until the next cycle`);
   }
   for (const decision of frontier.selected) {
-    const recipe = recipes[decision.recipeId];
     const task = tasks.find((item) => item.taskId === decision.taskId);
-    if (!recipe || !task) continue;
+    if (!task) continue;
+    let recipe;
+    try { recipe = actionRegistry.browserRecipe(decision.recipeId); }
+    catch (error) {
+      console.error(`[assistant] automatic browser recipe unavailable for ${task.taskId}: ${error.message}`);
+      proactivityService?.enqueueDependencyNotification(task, { dependency: 'browser-recipe', reason: 'browser-recipe-unavailable', evidence: error.message });
+      continue;
+    }
     const sessionId = appSettings.browserSessionId;
     if (!sessionId || !browserBridge.status(sessionId).connected) {
       console.error(`[assistant] automatic browser action waiting for browser session: ${recipe.id}`);
