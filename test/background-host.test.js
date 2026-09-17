@@ -18,7 +18,7 @@ const { WorkflowService } = require('../host/workflows/service');
   store.enqueueJob({ kind: 'assistant.replan', payload: { taskId: 'background-replan-task', reason: 'source-removed' }, runAt: Date.now(), dedupeKey: 'background-replan-fixture' });
   store.enqueueJob({ kind: 'tasks.reconcile', payload: { adapterId: 'background-fixture' }, runAt: Date.now(), dedupeKey: 'background-reconcile-fixture' });
   store.enqueueJob({ kind: 'assistant.digest.plan', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest-plan-fixture' });
-  store.enqueueJob({ kind: 'assistant.digest', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest' });
+  store.enqueueJob({ kind: 'assistant.proactive-actions', payload: {}, runAt: Date.now(), dedupeKey: 'background-proactive-actions' });
   store.close();
 
   const liveStore = new SqliteStore({ filename: databasePath });
@@ -26,11 +26,11 @@ const { WorkflowService } = require('../host/workflows/service');
   let cadenceObserved = false;
   const host = new BackgroundHost({ databasePath, onJob: async (kind, payload) => {
     if (kind === 'workflow.resume') return new WorkflowService({ store: liveStore }).resume(payload.workflowId);
-    if (kind === 'assistant.digest') {
+    if (kind === 'assistant.proactive-actions') {
       jobs += 1;
       await new Promise((resolve) => setTimeout(resolve, 200));
-      cadenceObserved = liveStore.exportData().data.jobs.some((job) => job.kind === 'assistant.digest'
-        && job.status === 'queued' && String(job.dedupe_key || '').startsWith('assistant.digest:'));
+      cadenceObserved = liveStore.exportData().data.jobs.some((job) => job.kind === 'assistant.proactive-actions'
+        && job.status === 'queued' && String(job.dedupe_key || '').startsWith('assistant.proactive-actions:'));
     }
   } });
   const initial = await host.start();

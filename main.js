@@ -1141,6 +1141,7 @@ async function start() {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
             if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
             if (kind === 'assistant.replan') return runTaskReplan(payload);
+            if (kind === 'assistant.proactive-actions') return runProactiveActions();
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
@@ -1460,13 +1461,11 @@ async function runTaskReplan({ taskId, reason = 'state-changed' } = {}) {
 
 async function runScheduledDigest() {
   if (!digestScheduler || !hostStore) return null;
+  await runProactiveActions();
   const tasks = hostStore.listTasks();
   const decisions = proactivityService?.evaluateAsync
     ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext() })
     : (proactivityService?.evaluate(tasks) || []);
-  proactivityService?.enqueueAttentionNotifications(tasks, decisions);
-  await executeAutomaticBrowserDecisions(tasks, decisions);
-  await prepareProactiveFollowUps(tasks, decisions);
   const decisionTypes = new Map(decisions.map((decision) => [decision.taskId, decision.type]));
   const actionableTasks = tasks.filter((task) => decisionTypes.get(task.taskId) !== 'wait');
   if (!digestScheduler.isScheduledDue()) return null;
@@ -1476,6 +1475,18 @@ async function runScheduledDigest() {
   if (!digest) return null;
   if (telegram?.enabled && telegram.configured) await deliverPendingDigest();
   return digest;
+}
+
+async function runProactiveActions() {
+  if (!hostStore) return null;
+  const tasks = hostStore.listTasks();
+  const decisions = proactivityService?.evaluateAsync
+    ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext() })
+    : (proactivityService?.evaluate(tasks) || []);
+  proactivityService?.enqueueAttentionNotifications(tasks, decisions);
+  await executeAutomaticBrowserDecisions(tasks, decisions);
+  await prepareProactiveFollowUps(tasks, decisions);
+  return { tasks: tasks.length, decisions: decisions.length };
 }
 
 async function runBrowserAvailabilityCheck({ workflowId } = {}) {
