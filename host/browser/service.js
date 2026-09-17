@@ -29,7 +29,7 @@ class BrowserActionService {
       return { attemptId: attempt.attemptId, receiptId: saved.receiptId, receipt };
     } catch (error) {
       const outcomeStatus = error.outcomeStatus === 'unknown' ? 'unknown' : 'failed';
-      this.approvals.execution({ attemptId: attempt.attemptId, requestId, status: outcomeStatus, details: { error: error.message, surface } });
+      this.approvals.execution({ attemptId: attempt.attemptId, requestId, status: outcomeStatus, details: { error: error.message, surface, checkpoint: error.browserCheckpoint || null } });
       throw error;
     }
   }
@@ -49,7 +49,7 @@ class BrowserActionService {
       return { runId: run.runId, receipt };
     } catch (error) {
       const status = error.outcomeStatus === 'unknown' ? 'unknown' : 'failed';
-      this.store.updateAutonomousRun(run.runId, status, { details: { error: error.message, surface } });
+      this.store.updateAutonomousRun(run.runId, status, { details: { error: error.message, surface, checkpoint: error.browserCheckpoint || null } });
       throw error;
     }
   }

@@ -46,6 +46,18 @@ async function completeWithFixture(bridge, sessionId, run, { failStep = null } =
   approvals.decide(failedId, 'allow', { principal: 'signal-box-user', surface: 'desktop' });
   await assert.rejects(() => completeWithFixture(bridge, sessionId, service.executeApproved(failedId, { executor }), { failStep: 'destination' }), /selector drift/);
   assert.equal(store.getExecutionAttempts(failedId).at(-1).status, 'failed');
+  const uncertainRequest = service.prepare(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 }, { sessionId });
+  const uncertainId = uncertainRequest.request_id || uncertainRequest.requestId;
+  approvals.decide(uncertainId, 'allow', { principal: 'signal-box-user', surface: 'desktop' });
+  await assert.rejects(() => completeWithFixture(bridge, sessionId, service.executeApproved(uncertainId, { executor }), { failStep: 'request' }), /selector drift/);
+  const uncertainAttempt = store.getExecutionAttempts(uncertainId).at(-1);
+  assert.equal(uncertainAttempt.status, 'unknown');
+  assert.deepEqual(uncertainAttempt.details.checkpoint, {
+    recipeId: uberCabBooking.id,
+    commitStarted: true,
+    commitStepId: 'request',
+    completedStepIds: ['open', 'pickup', 'destination', 'ride', 'quote', 'fare-check'],
+  });
   store.close();
   console.log('browser end-to-end fixture tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

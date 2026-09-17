@@ -44,21 +44,36 @@ class BrowserRecipeExecutor {
     const action = { capability: `browser.${checked.effects}`, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects, autonomous: false };
     const receipt = { actionDigest: digest(action), recipeId: checked.id, status: 'prepared', steps: [], startedAt: this.clock() };
     const context = {};
-    for (const step of checked.steps) {
-      const value = typeof step.value === 'string' && step.value.startsWith('$') ? inputs[step.value.slice(1)] : step.value;
-      if (step.commit === true) {
-        if (this.policy) this.policy.evaluate(action, { surfaces: ['desktop'] });
-        if (typeof approve !== 'function' || !(await approve(action))) { receipt.status = 'awaiting-approval'; receipt.finishedAt = this.clock(); return receipt; }
-        receipt.status = 'authorized';
+    let commitStarted = false;
+    let commitStepId = null;
+    try {
+      for (const step of checked.steps) {
+        const value = typeof step.value === 'string' && step.value.startsWith('$') ? inputs[step.value.slice(1)] : step.value;
+        if (step.commit === true) {
+          if (this.policy) this.policy.evaluate(action, { surfaces: ['desktop'] });
+          if (typeof approve !== 'function' || !(await approve(action))) { receipt.status = 'awaiting-approval'; receipt.finishedAt = this.clock(); return receipt; }
+          receipt.status = 'authorized';
+          commitStarted = true;
+          commitStepId = step.id;
+        }
+        if (step.kind === 'assert') {
+          assertExpression(step.expression, inputs, context);
+          receipt.steps.push({ id: step.id, status: 'completed' });
+          continue;
+        }
+        const result = await this.browser.perform({ ...step, value, inputs: { ...inputs, ...context } });
+        if (step.kind === 'read') context[step.output || step.target] = Number(String(result).replace(/[^0-9.]/g, '')) || result;
+        receipt.steps.push({ id: step.id, status: 'completed', result: step.kind === 'read' ? result : undefined });
       }
-      if (step.kind === 'assert') {
-        assertExpression(step.expression, inputs, context);
-        receipt.steps.push({ id: step.id, status: 'completed' });
-        continue;
-      }
-      const result = await this.browser.perform({ ...step, value, inputs: { ...inputs, ...context } });
-      if (step.kind === 'read') context[step.output || step.target] = Number(String(result).replace(/[^0-9.]/g, '')) || result;
-      receipt.steps.push({ id: step.id, status: 'completed', result: step.kind === 'read' ? result : undefined });
+    } catch (error) {
+      error.browserCheckpoint = {
+        recipeId: checked.id,
+        commitStarted,
+        commitStepId,
+        completedStepIds: receipt.steps.map((step) => step.id),
+      };
+      if (commitStarted) error.outcomeStatus = 'unknown';
+      throw error;
     }
     receipt.outputs = { ...context };
     receipt.status = 'confirmed'; receipt.finishedAt = this.clock();
