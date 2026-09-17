@@ -392,6 +392,9 @@ function wireIpc() {
   ipcMain.handle('tasks:graph', () => hostStore?.taskGraph({ includeDismissed: true }) || { nodes: [], edges: [] });
   ipcMain.handle('assistant:decisions', () => proactivityService?.evaluate(hostStore?.listTasks() || []) || []);
   ipcMain.handle('assistant:conversation', () => conversationService?.history('desktop:signal-box') || []);
+  ipcMain.handle('assistant:status', () => assistantRuntime?.health() || { running: false, busy: false });
+  ipcMain.handle('assistant:workflows', () => hostStore?.listWorkflows({ activeOnly: true }) || []);
+  ipcMain.handle('assistant:context', () => hostStore?.listContext() || []);
   ipcMain.handle('activity:list', () => {
     const entries = hostStore?.recentAudit(60) || [];
     const diagnostics = modelRouter?.diagnostics();
