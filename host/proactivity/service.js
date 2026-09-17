@@ -52,7 +52,7 @@ class ProactivityService {
     const active = this.store.listWorkflows({ taskId: task.taskId, activeOnly: true });
     if (active.some((workflow) => workflow.workflowType === 'browser-action')) return this._decision(task, 'wait', 'automation-in-progress', []);
     const priorRuns = this.store.listAutonomousRuns().filter((run) => run.action?.taskId === task.taskId).sort((a, b) => b.createdAt - a.createdAt);
-    if (priorRuns.some((run) => run.status === 'unknown')) return this._decision(task, 'wait', 'automation-outcome-unknown', []);
+    if (priorRuns.some((run) => run.status === 'unknown')) return this._decision(task, 'suggest_resolution', 'automation-outcome-unknown', []);
     const confirmedRuns = priorRuns.filter((run) => run.status === 'confirmed');
     if (confirmedRuns.length && automation.repeat !== true) return this._decision(task, 'wait', 'automation-completed', []);
     if (confirmedRuns.length && Number(automation.cooldownMs) > 0 && now - confirmedRuns[0].createdAt < Number(automation.cooldownMs)) return this._decision(task, 'wait', 'automation-cooldown', []);

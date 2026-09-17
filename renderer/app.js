@@ -553,7 +553,7 @@ async function loadAssistantConversation() {
     for (const decision of actionable) {
       const card = document.createElement('article'); card.className = 'assistant-state';
       const task = document.createElement('strong'); task.textContent = taskNames.get(decision.taskId) || 'Task to review';
-      const detail = document.createElement('span'); detail.textContent = `${({ digest: 'Upcoming deadline', clarify: 'Needs clarification', draft_follow_up: 'Time to follow up' })[decision.type] || decision.type.replaceAll('_', ' ')} · ${decision.reason.replaceAll('-', ' ')}`;
+      const detail = document.createElement('span'); detail.textContent = `${({ digest: 'Upcoming deadline', clarify: 'Needs clarification', draft_follow_up: 'Time to follow up', suggest_resolution: 'Needs resolution' })[decision.type] || decision.type.replaceAll('_', ' ')} · ${decision.reason.replaceAll('-', ' ')}`;
       const evidence = document.createElement('small'); evidence.textContent = decision.evidence?.length ? `Evidence: ${decision.evidence.join(' ').slice(0, 240)}` : 'No supporting evidence recorded.';
       card.append(task, detail, evidence); decisionsTarget.append(card);
       const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review tasks →'; review.addEventListener('click', () => document.getElementById('tasks-toggle').click()); card.append(review);

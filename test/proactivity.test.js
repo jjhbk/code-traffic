@@ -38,6 +38,7 @@ store.saveTaskCandidate({ candidateId: 'unknown-automatic-task', observationId: 
 const unknownTask = store.listTasks({ includeDismissed: true }).find((task) => task.taskId === 'unknown-automatic-task');
 const unknownGrant = store.createStandingGrant({ principal: 'signal-box-user', capability: 'browser.commit', surface: 'desktop', constraints: { recipeId: 'fixture.reserve.v1', origin: 'https://example.com' }, expiresAt: now + 60_000, policyVersion: 'single-user-1' });
 store.createAutonomousRun({ grantId: unknownGrant.grantId, action: { taskId: unknownTask.taskId, capability: 'browser.commit', recipeId: 'fixture.reserve.v1' }, actionDigest: 'digest-unknown', status: 'unknown' });
+assert.equal(decide(unknownTask).type, 'suggest_resolution');
 assert.equal(decide(unknownTask).reason, 'automation-outcome-unknown');
 store.close();
 console.log('proactivity tests passed');
