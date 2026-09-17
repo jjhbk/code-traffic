@@ -1077,7 +1077,19 @@ async function start() {
     certPath: appSettings.mobileTlsCertPath || process.env.SIGNAL_BOX_MOBILE_TLS_CERT || null,
     caPath: appSettings.mobileTlsCaPath || process.env.SIGNAL_BOX_MOBILE_TLS_CA || null,
   });
-  browserBridge = new BrowserBridge();
+  browserBridge = new BrowserBridge({
+    onConnect: (sessionId, connectedAt) => {
+      if (!hostStore) return;
+      try {
+        hostStore.enqueueJob({
+          kind: 'assistant.proactive-actions',
+          payload: { reason: 'browser-session-connected', sessionId },
+          runAt: connectedAt,
+          dedupeKey: `assistant.proactive-actions:browser-connected:${sessionId}:${connectedAt}`,
+        });
+      } catch (error) { console.error(`[assistant] browser reconnect wake-up failed: ${error.message}`); }
+    },
+  });
   try { installClaudeHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Claude install failed: ${error.message}`); }
   try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
   try {

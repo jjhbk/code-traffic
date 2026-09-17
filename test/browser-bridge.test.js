@@ -10,6 +10,15 @@ const requestId = bridge.enqueue({ sessionId: 'session-1', origin: 'https://m.ub
 assert.equal(bridge.next({ sessionId: 'session-2' }), null);
 assert.equal(bridge.status('session-2').connected, true);
 assert.equal(bridge.status('session-1').connected, false);
+const connections = [];
+const reconnectBridge = new BrowserBridge({ clock: () => now, heartbeatMs: 100, onConnect: (sessionId, connectedAt) => connections.push({ sessionId, connectedAt }) });
+reconnectBridge.next({ sessionId: 'session-1' });
+reconnectBridge.next({ sessionId: 'session-1' });
+assert.deepEqual(connections, [{ sessionId: 'session-1', connectedAt: 1000 }]);
+now = 1201;
+reconnectBridge.next({ sessionId: 'session-1' });
+assert.deepEqual(connections.at(-1), { sessionId: 'session-1', connectedAt: 1201 });
+now = 1000;
 assert.equal(bridge.next({ sessionId: 'session-1' }).requestId, requestId);
 assert.equal(bridge.next({ sessionId: 'session-1' }), null);
 assert.throws(() => bridge.complete({ requestId, sessionId: 'session-2', origin: 'https://m.uber.com', result: '$24' }), /another session/);

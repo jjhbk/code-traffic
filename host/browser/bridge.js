@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 class BrowserBridge {
-  constructor({ clock = () => Date.now(), ttlMs = 120_000, heartbeatMs = 10_000 } = {}) { this.clock = clock; this.ttlMs = ttlMs; this.heartbeatMs = heartbeatMs; this.pending = new Map(); this.waiters = new Map(); this.expiryTimers = new Map(); this.lastSeen = new Map(); }
+  constructor({ clock = () => Date.now(), ttlMs = 120_000, heartbeatMs = 10_000, onConnect = null } = {}) { this.clock = clock; this.ttlMs = ttlMs; this.heartbeatMs = heartbeatMs; this.onConnect = onConnect; this.pending = new Map(); this.waiters = new Map(); this.expiryTimers = new Map(); this.lastSeen = new Map(); }
 
   enqueue({ sessionId, step, origin } = {}) {
     if (!sessionId || !step || !origin) throw new Error('A browser request requires a session, step, and origin.');
@@ -36,7 +36,14 @@ class BrowserBridge {
 
   next({ sessionId } = {}) {
     const now = this.clock();
-    if (sessionId) this.lastSeen.set(sessionId, now);
+    if (sessionId) {
+      const previous = this.lastSeen.get(sessionId) || null;
+      const wasConnected = Boolean(previous && now - previous <= this.heartbeatMs);
+      this.lastSeen.set(sessionId, now);
+      if (!wasConnected && typeof this.onConnect === 'function') {
+        try { this.onConnect(sessionId, now); } catch (_) { /* A wake-up hook must not break browser polling. */ }
+      }
+    }
     for (const [id, request] of this.pending) {
       if (request.expiresAt <= now) {
         this.expire(id);
