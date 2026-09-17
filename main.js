@@ -1231,8 +1231,8 @@ async function start() {
       approvals: approvalService,
       registry: actionRegistry,
       providers: {
-        gmail: (action) => createGmailProvider(action),
-        calendar: (action) => createCalendarProvider(action),
+        gmail: (action) => googleProviderProcess?.provider('gmail') || createGmailProvider(action),
+        calendar: (action) => googleProviderProcess?.provider('calendar') || createCalendarProvider(action),
         accountAddress: () => mailCredentials?.load('gmail-account') || null,
       },
     });

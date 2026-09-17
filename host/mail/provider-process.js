@@ -53,6 +53,18 @@ class GoogleProviderProcess {
     return this._send({ kind, payload });
   }
 
+  provider(kind) {
+    if (kind === 'gmail') return {
+      sendReply: (payload) => this.request('action.gmail.send', payload),
+      reconcileReply: (payload) => this.request('action.gmail.reconcile', payload),
+    };
+    if (kind === 'calendar') return {
+      updateEvent: (eventId, changes, options) => this.request('action.calendar.update', { eventId, changes, options }),
+      getEvent: (eventId) => this.request('action.calendar.get', { eventId }),
+    };
+    throw new Error(`Unsupported remote Google provider: ${kind}.`);
+  }
+
   setCredentials(credentials = {}) {
     this.credentials = credentials && typeof credentials === 'object' ? { ...credentials } : {};
     return this._send({ method: 'set-credentials', credentials: this.credentials });

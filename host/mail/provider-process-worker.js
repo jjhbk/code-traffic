@@ -24,6 +24,10 @@ listen(async (message) => {
     else if (message.kind === 'connector.gmail.fetch') reply(message.id, await host.provider('gmail').sync(message.payload || {}));
     else if (message.kind === 'connector.calendar.fetch') reply(message.id, await host.provider('calendar').sync(message.payload || {}));
     else if (message.kind === 'connector.drive.fetch') reply(message.id, await host.provider('drive').sync(message.payload || {}));
+    else if (message.kind === 'action.gmail.send') reply(message.id, await host.provider('gmail').sendReply(message.payload || {}));
+    else if (message.kind === 'action.gmail.reconcile') reply(message.id, await host.provider('gmail').reconcileReply(message.payload || {}));
+    else if (message.kind === 'action.calendar.update') { const payload = message.payload || {}; reply(message.id, await host.provider('calendar').updateEvent(payload.eventId, payload.changes, payload.options || {})); }
+    else if (message.kind === 'action.calendar.get') reply(message.id, await host.provider('calendar').getEvent(message.payload?.eventId));
     else reply(message.id, null, new Error('Unsupported Google provider request.'));
   } catch (error) { reply(message.id, null, error); }
 });
