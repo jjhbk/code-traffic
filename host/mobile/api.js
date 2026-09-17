@@ -4,12 +4,12 @@ const PROTOCOL_VERSION = '1';
 const MOBILE_CONVERSATION_ID = 'mobile:default';
 
 class MobileApi {
-  constructor({ store, conversation, proactivity, approvals = null, pairing = null, getStatus = null, clock = () => Date.now() } = {}) {
+  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, getStatus = null, clock = () => Date.now() } = {}) {
     if (!store || !conversation || !proactivity) throw new Error('Mobile API requires store, conversation, and proactivity services.');
     this.store = store;
     this.conversation = conversation;
     this.proactivity = proactivity;
-    this.approvals = approvals; this.pairing = pairing;
+    this.approvals = approvals; this.pairing = pairing; this.context = context;
     this.getStatus = getStatus || (() => ({ running: true }));
     this.clock = clock;
   }
@@ -22,6 +22,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'pair') return this.pair(body);
       if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
       if (method === 'GET' && resource === 'today') return this.today();
+      if (method === 'GET' && resource === 'notifications') return { notifications: this.store.listPendingNotifications({ limit: 50 }) };
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
       if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
@@ -33,6 +34,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'status') return { task: this.updateTask(parts[4], body) };
       if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation({ ...body, deviceId: body.deviceId || device?.deviceId });
       if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body);
+      if (method === 'POST' && resource === 'context' && parts[4] === 'place') return this.savePlace(body);
       throw this._error(404, 'Mobile endpoint not found.');
     };
     if (method !== 'POST') return operation();
@@ -55,7 +57,7 @@ class MobileApi {
 
   today() {
     const tasks = this.store.listTasks();
-    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions: this.proactivity.evaluate(tasks), workflows: this.store.listWorkflows({ activeOnly: true }) };
+    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions: this.proactivity.evaluate(tasks), workflows: this.store.listWorkflows({ activeOnly: true }), notifications: this.store.listPendingNotifications({ limit: 20 }) };
   }
 
   sendMessage(body = {}) {
@@ -98,11 +100,19 @@ class MobileApi {
     } catch (error) { throw this._error(400, error.message); }
   }
 
+  savePlace(body = {}) {
+    if (!this.context) throw this._error(503, 'Location context is unavailable.');
+    try { return { place: this.context.savePlace(body) }; }
+    catch (error) { throw this._error(400, error.message); }
+  }
+
   ingestLocation(body = {}) {
     if (body.consent !== true) throw this._error(403, 'Location context requires explicit consent.');
     const latitude = Number(body.latitude); const longitude = Number(body.longitude); const accuracy = Number(body.accuracy);
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180 || !Number.isFinite(accuracy) || accuracy < 0) throw this._error(400, 'Location requires valid coordinates and non-negative accuracy.');
-    return this.ingestContextEvent({ ...body, payload: { latitude, longitude, accuracy, capturedAt: Number(body.capturedAt || this.clock()), consentScope: String(body.consentScope || 'location') } }, 'location');
+    const capturedAt = Number(body.capturedAt || this.clock());
+    const result = this.ingestContextEvent({ ...body, payload: { latitude, longitude, accuracy, capturedAt, consentScope: String(body.consentScope || 'location') } }, 'location');
+    return { ...result, location: this.context?.processLocation({ eventId: result.event.eventId, latitude, longitude, accuracy, capturedAt }) || { stale: true, triggers: [] } };
   }
 
   ingestSensor(body = {}) {

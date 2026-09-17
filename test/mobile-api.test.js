@@ -6,6 +6,7 @@ const { ApprovalService } = require('../host/approvals/service');
 const { ConversationService } = require('../host/conversation/service');
 const { ProactivityService } = require('../host/proactivity/service');
 const { MobileApi } = require('../host/mobile/api');
+const { MobileContextService } = require('../host/mobile/context');
 
 let commandSequence = 0;
 function request(port, pathname, { method = 'GET', token = 'mobile-secret', body = null, commandId = null } = {}) {
@@ -24,7 +25,8 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   const proactivity = new ProactivityService({ store });
   const conversation = new ConversationService({ store, channel: 'mobile', proactivity });
   const approvals = new ApprovalService({ store });
-  const mobileApi = new MobileApi({ store, conversation, proactivity, approvals, getStatus: () => ({ running: true, host: 'fixture' }) });
+  const context = new MobileContextService({ store });
+  const mobileApi = new MobileApi({ store, conversation, proactivity, approvals, context, getStatus: () => ({ running: true, host: 'fixture' }) });
   const board = new Board({ authToken: 'hook-secret', mobileAuthToken: 'mobile-secret', mobileApi });
   const port = 4950 + Math.floor(Math.random() * 50);
   await board.listen(port);
@@ -55,6 +57,10 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(location.status, 200); assert.equal(location.body.accepted.accepted, true);
   const duplicateLocation = await request(port, '/api/v1/mobile/context/location', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'location-1', latitude: 1, longitude: 2, accuracy: 5, consent: true } });
   assert.equal(duplicateLocation.body.accepted.duplicate, true);
+  const place = await request(port, '/api/v1/mobile/context/place', { method: 'POST', body: { placeKey: 'home', label: 'Home', latitude: 1, longitude: 2, radiusMeters: 150, consent: true } });
+  assert.equal(place.status, 200); assert.equal(place.body.place.recordType, 'place');
+  const notifications = await request(port, '/api/v1/mobile/notifications');
+  assert.equal(notifications.status, 200); assert.ok(Array.isArray(notifications.body.notifications));
 
   await board.closeServer(); store.close(); console.log('mobile API tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -322,6 +322,13 @@ const MIGRATIONS = [
     last_seen_at INTEGER,
     revoked_at INTEGER
   );`,
+  `CREATE TABLE IF NOT EXISTS location_triggers (
+    trigger_key TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    place_key TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    triggered_at INTEGER NOT NULL
+  );`,
 ];
 
 class SqliteStore {
@@ -408,6 +415,42 @@ class SqliteStore {
 
   listMobileDevices() {
     return this.db.prepare('SELECT device_id AS deviceId, device_name AS deviceName, created_at AS createdAt, last_seen_at AS lastSeenAt, revoked_at AS revokedAt FROM mobile_devices ORDER BY created_at DESC').all();
+  }
+
+  recordLocationTrigger({ triggerKey, taskId, placeKey, eventId, triggeredAt = this.clock() } = {}) {
+    if (!triggerKey || !taskId || !placeKey || !eventId || !Number.isFinite(triggeredAt)) throw new Error('Invalid location trigger.');
+    const result = this.db.prepare('INSERT INTO location_triggers(trigger_key, task_id, place_key, event_id, triggered_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(trigger_key) DO NOTHING')
+      .run(triggerKey, taskId, placeKey, eventId, triggeredAt);
+    return Number(result.changes) === 1;
+  }
+
+  listLocationTriggers({ taskId = null, placeKey = null } = {}) {
+    const clauses = []; const params = [];
+    if (taskId) { clauses.push('task_id = ?'); params.push(taskId); }
+    if (placeKey) { clauses.push('place_key = ?'); params.push(placeKey); }
+    return this.db.prepare(`SELECT trigger_key AS triggerKey, task_id AS taskId, place_key AS placeKey, event_id AS eventId, triggered_at AS triggeredAt FROM location_triggers ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY triggered_at DESC`).all(...params);
+  }
+
+  enqueueNotification({ notificationId = crypto.randomUUID(), dateKey, notificationClass, items } = {}) {
+    if (!notificationId || !dateKey || !notificationClass || !Array.isArray(items) || !items.length) throw new Error('Invalid notification.');
+    const now = this.clock();
+    try {
+      this.db.prepare('INSERT INTO notification_outbox(notification_id, date_key, notification_class, payload_json, status, created_at) VALUES (?, ?, ?, ?, \'pending\', ?)')
+        .run(notificationId, dateKey, notificationClass, JSON.stringify(items), now);
+      this.audit('notification-enqueued', null, null, { notificationId, notificationClass });
+      return { notificationId, dateKey, notificationClass, items, status: 'pending' };
+    } catch (error) {
+      if (/UNIQUE|constraint/i.test(error.message)) return null;
+      throw error;
+    }
+  }
+
+  listPendingNotifications({ notificationClass = null, limit = 50 } = {}) {
+    const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+    const row = notificationClass
+      ? this.db.prepare("SELECT notification_id AS notificationId, date_key AS dateKey, notification_class AS notificationClass, payload_json AS payloadJson, status, created_at AS createdAt FROM notification_outbox WHERE notification_class = ? AND status = 'pending' ORDER BY created_at DESC LIMIT ?").all(notificationClass, safeLimit)
+      : this.db.prepare("SELECT notification_id AS notificationId, date_key AS dateKey, notification_class AS notificationClass, payload_json AS payloadJson, status, created_at AS createdAt FROM notification_outbox WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?").all(safeLimit);
+    return row.map((item) => ({ ...item, items: JSON.parse(item.payloadJson) }));
   }
 
   enqueueJob({ jobId = crypto.randomUUID(), kind, payload = {}, runAt = this.clock(), maxAttempts = 5, dedupeKey = null } = {}) {
@@ -738,7 +781,7 @@ class SqliteStore {
   }
 
   upsertContext({ recordId = crypto.randomUUID(), recordType, recordKey, value, source = {}, confidence = 'inferred', confirmed = false, validUntil = null } = {}) {
-    const types = new Set(['person', 'project', 'goal', 'preference', 'fact']);
+    const types = new Set(['person', 'project', 'goal', 'preference', 'fact', 'place']);
     const confidences = new Set(['inferred', 'low', 'medium', 'high']);
     if (!types.has(recordType) || !recordKey || value === undefined || !confidences.has(confidence) || typeof confirmed !== 'boolean') throw new Error('Invalid context record.');
     if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('Context source must be an object.');
@@ -1048,7 +1091,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
