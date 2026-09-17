@@ -228,6 +228,27 @@ const MIGRATIONS = [
     PRIMARY KEY(workflow_id, step_id),
     FOREIGN KEY(workflow_id) REFERENCES workflows(workflow_id)
   );`,
+  `CREATE TABLE IF NOT EXISTS conversations (
+    conversation_id TEXT PRIMARY KEY,
+    principal TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS conversation_messages (
+    message_id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    external_id TEXT,
+    direction TEXT NOT NULL,
+    content TEXT NOT NULL,
+    task_id TEXT,
+    workflow_id TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(conversation_id) REFERENCES conversations(conversation_id),
+    FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+    FOREIGN KEY(workflow_id) REFERENCES workflows(workflow_id),
+    UNIQUE(conversation_id, external_id)
+  );`,
 ];
 
 class SqliteStore {
@@ -566,6 +587,36 @@ class SqliteStore {
     return this.getWorkflow(workflowId).steps.find((step) => step.stepId === stepId);
   }
 
+  getOrCreateConversation({ conversationId = crypto.randomUUID(), principal, channel } = {}) {
+    if (!principal || !channel) throw new Error('Conversation identity is required.');
+    const existing = this.db.prepare('SELECT conversation_id AS conversationId, principal, channel, created_at AS createdAt, updated_at AS updatedAt FROM conversations WHERE conversation_id = ?').get(conversationId);
+    if (existing) return existing;
+    const now = this.clock();
+    this.db.prepare('INSERT INTO conversations(conversation_id, principal, channel, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(conversationId, principal, channel, now, now);
+    return { conversationId, principal, channel, createdAt: now, updatedAt: now };
+  }
+
+  appendConversationMessage({ messageId = crypto.randomUUID(), conversationId, externalId = null, direction, content, taskId = null, workflowId = null } = {}) {
+    if (!conversationId || !['inbound', 'outbound', 'system'].includes(direction) || !String(content || '').trim()) throw new Error('Invalid conversation message.');
+    if (!this.db.prepare('SELECT conversation_id FROM conversations WHERE conversation_id = ?').get(conversationId)) throw new Error('Conversation not found.');
+    const existing = externalId ? this.db.prepare('SELECT message_id AS messageId FROM conversation_messages WHERE conversation_id = ? AND external_id = ?').get(conversationId, externalId) : null;
+    if (existing) return this.getConversationMessage(existing.messageId);
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO conversation_messages(message_id, conversation_id, external_id, direction, content, task_id, workflow_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(messageId, conversationId, externalId, direction, String(content), taskId, workflowId, now);
+    this.db.prepare('UPDATE conversations SET updated_at = ? WHERE conversation_id = ?').run(now, conversationId);
+    return this.getConversationMessage(messageId);
+  }
+
+  getConversationMessage(messageId) {
+    const row = this.db.prepare(`SELECT message_id AS messageId, conversation_id AS conversationId, external_id AS externalId, direction, content, task_id AS taskId, workflow_id AS workflowId, created_at AS createdAt FROM conversation_messages WHERE message_id = ?`).get(messageId);
+    return row || null;
+  }
+
+  listConversationMessages(conversationId, limit = 100) {
+    return this.db.prepare(`SELECT message_id AS messageId, conversation_id AS conversationId, external_id AS externalId, direction, content, task_id AS taskId, workflow_id AS workflowId, created_at AS createdAt FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?`).all(conversationId, Math.min(500, Math.max(1, Number(limit) || 100))).reverse();
+  }
+
   saveTaskCandidate(candidate) {
     if (!candidate?.candidateId || !candidate.observationId) throw new Error('Invalid task candidate.');
     const now = this.clock();
@@ -746,7 +797,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,

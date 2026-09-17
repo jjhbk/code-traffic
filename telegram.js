@@ -31,13 +31,14 @@ function telegramErrorText(error) {
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, assistantMessage = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
     this.listTasks = listTasks;
     this.updateTask = updateTask;
     this.recordDigestFeedback = recordDigestFeedback;
+    this.assistantMessage = assistantMessage;
     this.getHistory = getHistory;
     this.ensureSession = ensureSession;
     this.writeSession = writeSession;
@@ -269,6 +270,7 @@ class TelegramControl {
     if (!this.configured) return;
     if (incomingChatId !== this.chatId) return;
     try {
+      if (command.name === 'assistant' && command.argument) command.externalId = String(update.update_id || message.message_id || '');
       await this.handleCommand(command);
     } catch (error) {
       await this.send(`Could not complete that command: ${error.message}`);
@@ -462,7 +464,7 @@ class TelegramControl {
     return this.listSessions().find((session) => (session.tile || session.key) === this.selectedTile) || null;
   }
 
-  async handleCommand({ name, argument }) {
+  async handleCommand({ name, argument, externalId = null }) {
     if (name === 'start' || name === 'help') {
       await this.send('Signal Box remote control\n\n/sessions — list sessions\n/refresh — resend pending permission buttons\n/use <number> — select a session\n/status — show the selected session\n/send <text> — send a prompt\n/tail — show the last 3 input/output pairs\n/history — show the full conversation\n/interrupt — send Ctrl+C\n\nAfter selecting a session, plain text is also sent as a prompt.');
       return;
@@ -480,6 +482,12 @@ class TelegramControl {
         { text: 'Not useful', callback_data: this.addAction({ type: 'task-status', taskId: task.taskId, status: 'dismissed' }) },
       ]]);
       await this.send(`Today\n\n${text}`, { reply_markup: { inline_keyboard } });
+      return;
+    }
+    if (name === 'assistant') {
+      if (!argument) throw new Error('Add a message after /assistant.');
+      if (!this.assistantMessage) throw new Error('Assistant conversation is unavailable.');
+      await this.assistantMessage(argument, externalId);
       return;
     }
     if (name === 'sessions') {

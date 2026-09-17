@@ -31,6 +31,7 @@ const { TaskService } = require('./host/tasks/service');
 const { DigestScheduler } = require('./host/scheduling/digest');
 const { AssistantRuntime } = require('./host/runtime/assistant');
 const { ProactivityService } = require('./host/proactivity/service');
+const { ConversationService } = require('./host/conversation/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
 const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
@@ -94,6 +95,7 @@ let taskService;
 let digestScheduler;
 let assistantRuntime;
 let proactivityService;
+let conversationService;
 let mailSyncTimer;
 let calendarSyncTimer;
 let driveSyncTimer;
@@ -372,6 +374,7 @@ function wireIpc() {
   ipcMain.handle('model:probe', async () => modelRouter?.probe() || { localCall: false, redacted: false });
   ipcMain.handle('tasks:graph', () => hostStore?.taskGraph({ includeDismissed: true }) || { nodes: [], edges: [] });
   ipcMain.handle('assistant:decisions', () => proactivityService?.evaluate(hostStore?.listTasks() || []) || []);
+  ipcMain.handle('assistant:conversation', () => conversationService?.history('desktop:signal-box') || []);
   ipcMain.handle('activity:list', () => {
     const entries = hostStore?.recentAudit(60) || [];
     const diagnostics = modelRouter?.diagnostics();
@@ -976,6 +979,7 @@ async function start() {
   wireMailSync();
   taskService = hostStore ? new TaskService({ store: hostStore }) : null;
   proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
+  conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop' }) : null;
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -1012,6 +1016,13 @@ async function start() {
     listTasks: () => hostStore?.listTasks() || [],
     updateTask: (taskId, status) => hostStore?.setTaskStatus(taskId, status),
     recordDigestFeedback: (notificationId, useful) => hostStore?.recordNotificationFeedback(notificationId, useful, { channel: 'telegram' }),
+    assistantMessage: async (text, externalId = null) => {
+      if (!conversationService) throw new Error('Durable conversation storage is unavailable.');
+      const conversation = conversationService.open(`telegram:${appSettings.telegramChatId}`);
+      conversationService.receive(conversation.conversationId, text, externalId);
+      conversationService.respond(conversation.conversationId, 'Message saved. Assistant planning will use it as context.');
+      await telegram.send('Message saved. Assistant planning will use it as context.');
+    },
     getHistory: sessionHistoryWithTerminalQuestions,
     executeTerminal: executeRemoteTerminal,
     interruptTerminal: interruptRemoteTerminal,

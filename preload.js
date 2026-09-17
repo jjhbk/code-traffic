@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   listTasks: () => ipcRenderer.invoke('tasks:list'),
   getTaskGraph: () => ipcRenderer.invoke('tasks:graph'),
   getAssistantDecisions: () => ipcRenderer.invoke('assistant:decisions'),
+  getAssistantConversation: () => ipcRenderer.invoke('assistant:conversation'),
   getActivity: () => ipcRenderer.invoke('activity:list'),
   updateTask: (payload) => ipcRenderer.invoke('tasks:update', payload),
   snoozeTask: (payload) => ipcRenderer.invoke('tasks:snooze', payload),
