@@ -31,6 +31,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'approvals' && parts[4] && parts[5] === 'decide') return this.decideApproval(parts[4], body);
       if (method === 'POST' && resource === 'notifications' && parts[4] && parts[5] === 'ack') return this.acknowledgeNotification(parts[4], device);
       if (method === 'GET' && resource === 'context') return { context: this.store.listContext() };
+      if (method === 'POST' && resource === 'context' && parts[4] && parts[5] && parts[6] === 'delete') return this.deleteContext(parts[4], parts[5]);
       if (method === 'GET' && resource === 'permissions') return { permissions: this.store.listStandingGrants({ principal: 'signal-box-user' }) };
       if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
       if (method === 'POST' && resource === 'permissions') return { permission: this.createPermission(body) };
@@ -130,6 +131,11 @@ class MobileApi {
   savePlace(body = {}) {
     if (!this.context) throw this._error(503, 'Location context is unavailable.');
     try { return { place: this.context.savePlace(body) }; }
+    catch (error) { throw this._error(400, error.message); }
+  }
+
+  deleteContext(recordType, recordKey) {
+    try { return { deleted: this.store.deleteContext(recordType, decodeURIComponent(recordKey)) }; }
     catch (error) { throw this._error(400, error.message); }
   }
 

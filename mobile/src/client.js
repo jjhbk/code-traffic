@@ -56,6 +56,7 @@ class MobileCoreClient {
   async sendLocation(body) { return this.command('/api/v1/mobile/context/location', body); }
   async savePlace(body) { return this.command('/api/v1/mobile/context/place', body); }
   async sendSensor(body) { return this.command('/api/v1/mobile/context/sensor', body); }
+  async deleteContext(recordType, recordKey) { return this.command(`/api/v1/mobile/context/${encodeURIComponent(recordType)}/${encodeURIComponent(recordKey)}/delete`, {}); }
   async acknowledgeNotification(notificationId) { return this.command(`/api/v1/mobile/notifications/${encodeURIComponent(notificationId)}/ack`, {}); }
 
   async command(path, body, commandId = id()) {

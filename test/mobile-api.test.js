@@ -59,6 +59,12 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(duplicateLocation.body.accepted.duplicate, true);
   const place = await request(port, '/api/v1/mobile/context/place', { method: 'POST', body: { placeKey: 'home', label: 'Home', latitude: 1, longitude: 2, radiusMeters: 150, consent: true } });
   assert.equal(place.status, 200); assert.equal(place.body.place.recordType, 'place');
+  store.upsertContext({ recordType: 'preference', recordKey: 'response-style', value: 'concise', source: { channel: 'test' }, confidence: 'high', confirmed: true });
+  const contextSnapshot = await request(port, '/api/v1/mobile/context');
+  assert.equal(contextSnapshot.body.context.some((record) => record.recordKey === 'response-style'), true);
+  const deletedContext = await request(port, '/api/v1/mobile/context/preference/response-style/delete', { method: 'POST', commandId: 'delete-context-1', body: {} });
+  assert.equal(deletedContext.status, 200); assert.equal(deletedContext.body.deleted, true);
+  assert.equal((await request(port, '/api/v1/mobile/context')).body.context.some((record) => record.recordKey === 'response-style'), false);
   const notifications = await request(port, '/api/v1/mobile/notifications');
   assert.equal(notifications.status, 200); assert.ok(Array.isArray(notifications.body.notifications));
   store.enqueueNotification({ notificationId: 'mobile-notification-1', dateKey: 'mobile-1', notificationClass: 'location', items: [{ summary: 'Check pickup', reason: 'Arrived home' }] });
