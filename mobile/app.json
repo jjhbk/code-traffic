@@ -8,12 +8,14 @@
     "userInterfaceStyle": "dark",
     "scheme": "signalbox",
     "ios": {
+      "bundleIdentifier": "com.signalbox.assistant",
       "supportsTablet": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Signal Box uses your location only when you enable a location-aware assistant context."
       }
     },
     "android": {
+      "package": "com.signalbox.assistant",
       "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     }
   }
