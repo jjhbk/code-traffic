@@ -1122,7 +1122,7 @@ async function start() {
   try { installCodexHooks({ tokenFile: hookAuth.file }); } catch (error) { console.error(`[hooks] Codex install failed: ${error.message}`); }
   try {
     hostStore = new SqliteStore({ filename: path.join(app.getPath('userData'), 'signal-box.db') });
-    approvalService = new ApprovalService({ store: hostStore });
+    approvalService = new ApprovalService({ store: hostStore, registry: actionRegistry });
     if (appSettings.backgroundHost !== false) {
       try {
         backgroundHost = new BackgroundHost({

@@ -1,15 +1,17 @@
 const { PolicyEngine } = require('../policy/engine');
 
 class ApprovalService {
-  constructor({ store, clock = () => Date.now(), policyVersion = null, policy = null } = {}) {
+  constructor({ store, clock = () => Date.now(), policyVersion = null, policy = null, registry = null } = {}) {
     if (!store) throw new Error('An approval store is required.');
     this.store = store;
     this.clock = clock;
     this.policy = policy || new PolicyEngine({ version: policyVersion || 'single-user-1' });
+    this.registry = registry;
     this.policyVersion = policyVersion || this.policy.version;
   }
 
   request(actionProposal, { principal, surfaces = ['desktop'], expiresAt = this.clock() + 5 * 60 * 1000 } = {}) {
+    this.registry?.validateAction(actionProposal);
     const decisionPolicy = this.policy.evaluate(actionProposal, { surfaces });
     return this.store.createApproval({ action: { ...actionProposal, effects: actionProposal.effects || decisionPolicy.effects }, options: actionProposal.options || [{ optionId: 'allow', label: 'Allow once' }, { optionId: 'deny', label: 'Deny' }], principal, surfaces: decisionPolicy.surfaces, expiresAt, policyVersion: this.policyVersion });
   }
@@ -20,6 +22,7 @@ class ApprovalService {
   }
 
   authorizeStanding(action, { grantId, principal, surface = 'desktop' } = {}) {
+    this.registry?.validateAction(action);
     this.policy.evaluate({ ...action, autonomous: false }, { surfaces: [surface] });
     return this.store.consumeStandingGrant(grantId, action, { principal, surface, policyVersion: this.policyVersion, now: this.clock() });
   }
