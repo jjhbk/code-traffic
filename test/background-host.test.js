@@ -65,6 +65,19 @@ const { WorkflowService } = require('../host/workflows/service');
   const startup = failedHost.start();
   failedChild.emit('error', new Error('spawn failed'));
   await assert.rejects(startup, /spawn failed/);
+  const supervisedChildren = [];
+  const supervised = new BackgroundHost({ databasePath, restartDelayMs: 10, forkImpl: () => {
+    const child = new EventEmitter(); child.connected = true; child.send = (message) => {
+      if (message.method === 'shutdown') setImmediate(() => { child.emit('message', { type: 'response', id: message.id, result: { stopped: true } }); child.emit('exit', 0, null); });
+      else if (message.method === 'health') child.emit('message', { type: 'response', id: message.id, result: { running: true } });
+    }; child.disconnect = () => { child.connected = false; }; supervisedChildren.push(child); setImmediate(() => child.emit('message', { type: 'ready', health: { running: true } })); return child;
+  } });
+  await supervised.start();
+  supervisedChildren[0].emit('exit', 1, null);
+  const restartDeadline = Date.now() + 1000;
+  while (supervisedChildren.length < 2 && Date.now() < restartDeadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(supervisedChildren.length, 2, 'background host restarts an unexpected child exit');
+  await supervised.stop();
   fs.rmSync(directory, { recursive: true, force: true });
   console.log('background host tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

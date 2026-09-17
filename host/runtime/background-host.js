@@ -3,7 +3,7 @@ const path = require('path');
 const { fork } = require('child_process');
 
 class BackgroundHost {
-  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false } = {}) {
+  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false, supervise = true, restartDelayMs = 250 } = {}) {
     if (!databasePath) throw new Error('A background host database path is required.');
     this.databasePath = databasePath;
     this.workerPath = workerPath;
@@ -11,17 +11,22 @@ class BackgroundHost {
     this.token = token;
     this.onJob = onJob;
     this.paused = Boolean(paused);
+    this.supervise = Boolean(supervise);
+    this.restartDelayMs = Math.max(10, Number(restartDelayMs) || 250);
     this.child = null;
     this.pending = new Map();
     this.sequence = 0;
     this.ready = null;
+    this.restartTimer = null;
+    this.stopping = false;
   }
 
   start() {
     if (this.child) return this.ready;
+    this.stopping = false;
     this.ready = new Promise((resolve, reject) => {
       let readySettled = false;
-      const resolveReady = (health) => { if (!readySettled) { readySettled = true; resolve(health); } };
+      const resolveReady = (health) => { if (!readySettled) { readySettled = true; this.restartAttempts = 0; resolve(health); } };
       const rejectReady = (error) => { if (!readySettled) { readySettled = true; reject(error); } };
       const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0' } });
       this.child = child;
@@ -42,8 +47,9 @@ class BackgroundHost {
       child.once('exit', (code, signal) => {
         this.child = null;
         const error = new Error(`Background host exited${signal ? ` with ${signal}` : ` with code ${code}`}.`);
-        rejectReady(error);
+        if (!readySettled) rejectReady(error);
         this._failPending(error);
+        if (readySettled && this.supervise && !this.stopping) this._scheduleRestart();
       });
     });
     return this.ready;
@@ -62,9 +68,24 @@ class BackgroundHost {
   pause(paused) { return this.request('pause', { paused: Boolean(paused) }); }
 
   async stop() {
-    if (!this.child) return { stopped: true };
+    this.stopping = true;
+    if (this.restartTimer) { clearTimeout(this.restartTimer); this.restartTimer = null; }
+    if (!this.child) { this.ready = null; return { stopped: true }; }
+    const child = this.child;
     try { return await this.request('shutdown'); }
-    finally { this.child.disconnect?.(); this.child = null; this.ready = null; }
+    finally { child.disconnect?.(); if (this.child === child) this.child = null; this.ready = null; }
+  }
+
+  _scheduleRestart() {
+    if (this.restartTimer || this.stopping) return;
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (this.stopping || this.child) return;
+      this.start().catch((error) => {
+        if (!this.stopping) { console.error(`[assistant] background host restart failed: ${error.message}`); this._scheduleRestart(); }
+      });
+    }, this.restartDelayMs);
+    this.restartTimer.unref?.();
   }
 
   _failPending(error) {
