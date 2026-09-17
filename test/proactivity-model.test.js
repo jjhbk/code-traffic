@@ -29,6 +29,12 @@ const { ProactivityService } = require('../host/proactivity/service');
   assert.equal(decisions[1].type, 'digest', 'deterministic deadline policy remains authoritative');
   assert.equal(decisions[2].type, 'wait', 'model failure falls back to deterministic waiting');
   assert.equal(calls, 1, 'model budget bounds calls per evaluation');
+  const unsafeService = new ProactivityService({
+    store,
+    modelRouter: { proposeNextStep: async () => ({ decision: 'execute_browser', reason: 'Run a booking now.', requiresApproval: false }) },
+  });
+  const unsafe = await unsafeService.evaluateAsync([{ taskId: 'unsafe', status: 'active', summary: 'Book a ride' }]);
+  assert.equal(unsafe[0].type, 'wait', 'model output cannot authorize an external browser action');
   const cached = await service.evaluateAsync([{ taskId: 'follow-up', status: 'active', summary: 'Check in', owner: 'uncertain', blocker: 'uncertain' }]);
   assert.equal(cached[0].type, 'draft_follow_up');
   assert.equal(calls, 1, 'unchanged tasks use the model decision cooldown cache');

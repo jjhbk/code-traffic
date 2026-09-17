@@ -81,8 +81,16 @@ class ProactivityService {
       try {
         modelCalls += 1;
         const proposal = await this.modelRouter.proposeNextStep(task, this.contextForTask(task, context, { now }));
-        if (!proposal || proposal.decision === 'wait') { this.modelDecisionCache.set(task.taskId, { version, at: now, decision }); refined.push(decision); continue; }
-        const refinedDecision = this._decision(task, proposal.decision, proposal.reason, decision.evidence, { source: proposal.source || 'model', requiresApproval: proposal.requiresApproval });
+        const allowed = new Set(['wait', 'clarify', 'digest', 'draft_follow_up', 'suggest_resolution']);
+        const proposedType = String(proposal?.decision || '');
+        const proposedReason = String(proposal?.reason || '').trim();
+        // Model output can suggest attention or a reviewed draft, but it can
+        // never authorize an external write or invent a decision type. The
+        // deterministic policy remains the fallback for malformed output.
+        if (!proposal || proposedType === 'wait' || !allowed.has(proposedType) || !proposedReason) {
+          this.modelDecisionCache.set(task.taskId, { version, at: now, decision }); refined.push(decision); continue;
+        }
+        const refinedDecision = this._decision(task, proposedType, proposedReason.slice(0, 240), decision.evidence, { source: String(proposal.source || 'model').slice(0, 80), requiresApproval: proposedType === 'draft_follow_up' ? true : Boolean(proposal.requiresApproval) });
         this.modelDecisionCache.set(task.taskId, { version, at: now, decision: refinedDecision });
         refined.push(refinedDecision);
       } catch (_) {
