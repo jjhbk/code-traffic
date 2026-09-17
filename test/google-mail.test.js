@@ -33,6 +33,20 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   const result = await provider.sync({ cursor: 'c1' });
   assert.equal(result.nextCursor, 'c2');
   assert.equal(result.messages[0].body, 'Hi');
+  const pagedCalls = [];
+  const pagedProvider = new GmailProvider({ accessToken: 'access', fetchImpl: async (url) => {
+    pagedCalls.push(url);
+    if (url.includes('/history?')) {
+      if (url.includes('pageToken=next')) return { ok: true, status: 200, json: async () => ({ historyId: 'c3', history: [{ messagesAdded: [{ message: { id: 'm2', threadId: 't2' } }] }] }) };
+      return { ok: true, status: 200, json: async () => ({ historyId: 'c2', nextPageToken: 'next', history: [{ messagesAdded: [{ message: { id: 'm1', threadId: 't1' } }] }] }) };
+    }
+    if (url.endsWith('/messages/m1?format=full') || url.endsWith('/messages/m2?format=full')) return { ok: true, status: 200, json: async () => ({ id: url.includes('m2') ? 'm2' : 'm1', threadId: 't1', payload: { headers: [], body: { data: 'SGk=' } } }) };
+    throw new Error(`Unexpected paged URL ${url}`);
+  } });
+  const paged = await pagedProvider.sync({ cursor: 'c1', boundedWindow: 10 });
+  assert.equal(paged.nextCursor, 'c3');
+  assert.equal(paged.messages.length, 2);
+  assert.equal(pagedCalls.filter((url) => url.includes('/history?')).length, 2);
   const sent = await provider.sendReply({ to: 'a@example.com', subject: 'Re: Hello', body: 'Thanks', threadId: 't1' });
   assert.equal(sent.id, undefined);
   assert.equal(GMAIL_SCOPE, 'https://www.googleapis.com/auth/gmail.readonly');

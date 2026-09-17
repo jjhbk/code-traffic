@@ -197,13 +197,19 @@ class GmailProvider {
   async sync({ cursor = null, boundedWindow = 100 } = {}) {
     if (cursor) {
       try {
-        const history = await this.request(`/history?startHistoryId=${encodeURIComponent(cursor)}&historyTypes=messageAdded&maxResults=500`);
         const ids = new Map();
-        for (const entry of history.history || []) {
-          for (const added of entry.messagesAdded || []) ids.set(added.message.id, added.message.threadId);
-        }
+        let pageToken = null;
+        let nextHistoryId = cursor;
+        do {
+          const query = new URLSearchParams({ startHistoryId: String(cursor), historyTypes: 'messageAdded', maxResults: '500' });
+          if (pageToken) query.set('pageToken', pageToken);
+          const history = await this.request(`/history?${query}`);
+          for (const entry of history.history || []) for (const added of entry.messagesAdded || []) ids.set(added.message.id, added.message.threadId);
+          nextHistoryId = history.historyId || nextHistoryId;
+          pageToken = history.nextPageToken || null;
+        } while (pageToken && ids.size < boundedWindow);
         const messages = await Promise.all([...ids.keys()].map((id) => this.message(id)));
-        return { messages, nextCursor: history.historyId || cursor };
+        return { messages: messages.slice(0, boundedWindow), nextCursor: nextHistoryId };
       } catch (error) {
         if (error.status === 404) {
           const expired = new Error('Gmail history cursor expired.');
@@ -216,8 +222,14 @@ class GmailProvider {
 
     const ids = new Map();
     for (const labelId of ['INBOX', 'SENT']) {
-      const listed = await this.request(`/messages?labelIds=${labelId}&maxResults=${Math.min(500, boundedWindow)}`);
-      for (const message of listed.messages || []) ids.set(message.id, message.threadId);
+      let pageToken = null;
+      do {
+        const query = new URLSearchParams({ labelIds: labelId, maxResults: String(Math.min(500, boundedWindow)) });
+        if (pageToken) query.set('pageToken', pageToken);
+        const listed = await this.request(`/messages?${query}`);
+        for (const message of listed.messages || []) ids.set(message.id, message.threadId);
+        pageToken = listed.nextPageToken || null;
+      } while (pageToken && ids.size < boundedWindow);
     }
     const messages = await Promise.all([...ids.keys()].slice(0, boundedWindow).map((id) => this.message(id)));
     const profile = await this.request('/profile');
