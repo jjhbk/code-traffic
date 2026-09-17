@@ -13,6 +13,10 @@ class ProviderAutonomousActionService {
   async executeWithStandingGrant(action, { grantId, principal = 'signal-box-user', surface = 'desktop' } = {}) {
     const checked = this._validate(action);
     if (!grantId) throw new Error('A standing grant is required.');
+    this._assertFresh(checked);
+    if (checked.taskId && this.store.listAutonomousRuns().some((run) => run.action?.taskId === checked.taskId && ['prepared', 'authorized', 'dispatched'].includes(run.status))) {
+      throw new Error('An autonomous provider action is already in progress for this task.');
+    }
     const authorized = { ...checked, autonomous: false };
     this.approvals.authorizeStanding(authorized, { grantId, principal, surface });
     const actionDigest = digest(checked);
@@ -70,6 +74,12 @@ class ProviderAutonomousActionService {
     const factory = this.providers[key];
     if (typeof factory !== 'function') throw new Error(`No ${key} provider is configured.`);
     return factory(action);
+  }
+
+  _assertFresh(action) {
+    if (!action.taskId || action.taskVersion == null) return;
+    const current = this.store.listTasks({ includeDismissed: true }).find((task) => task.taskId === action.taskId);
+    if (!current || current.status !== 'active' || Number(current.updatedAt) !== Number(action.taskVersion)) throw new Error('This provider action is stale because the task changed.');
   }
 
   async _dispatch(action, runId) {

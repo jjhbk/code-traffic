@@ -35,11 +35,15 @@ const { ProviderAutonomousActionService } = require('../host/actions/provider-au
   assert.equal(providerRun.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(providerRun.runId).status, 'confirmed');
   assert.equal(sent, 1);
+  const providerTask = store.saveTaskCandidate({ candidateId: 'provider-freshness-task', observationId: 'provider-freshness-observation', summary: 'Send fresh update', evidence: { start: 0, end: 1, text: 'Send fresh update' }, extractorVersion: 'test' });
+  const providerTaskVersion = store.listTasks({ includeDismissed: true }).find((task) => task.taskId === providerTask.taskId).updatedAt;
+  const freshnessGrant = approvals.createStandingGrant({ capability: 'gmail.send' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { threadId: 'thread-provider' }, expiresAt: Date.now() + 60_000 });
+  await assert.rejects(() => providerService.executeWithStandingGrant({ capability: 'gmail.send', destination: 'alex@example.com', threadId: 'thread-provider', taskId: providerTask.taskId, taskVersion: providerTaskVersion - 1, content: { subject: 'Re: Handoff', body: 'Stale.' } }, { grantId: freshnessGrant.grantId }), /stale/);
   const result = await service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId });
   assert.equal(result.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(result.runId).status, 'confirmed');
   assert.equal(executions, 1);
-  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 2);
+  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 3);
   assert.equal(store.listAutonomousRuns({ grantId: grant.grantId }).length, 1);
   await assert.rejects(() => service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId }), /usage limit/);
   const revoked = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: {}, expiresAt: Date.now() + 60_000 });
