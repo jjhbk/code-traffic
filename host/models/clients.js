@@ -1,8 +1,14 @@
 class JsonModelClient {
-  constructor({ model, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ model, fetchImpl = globalThis.fetch, timeoutMs = 20_000 } = {}) {
     if (!model) throw new Error('A model name is required.');
     this.model = model;
     this.fetch = fetchImpl;
+    this.timeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 20_000;
+  }
+
+  requestOptions(options = {}) {
+    const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(this.timeoutMs) : undefined;
+    return signal ? { ...options, signal } : options;
   }
 }
 
@@ -30,10 +36,10 @@ class OllamaClient extends JsonModelClient {
   }
 
   async complete({ system, prompt, schema } = {}) {
-    const response = await this.fetch(`${this.baseUrl}/api/chat`, {
+    const response = await this.fetch(`${this.baseUrl}/api/chat`, this.requestOptions({
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: this.model, stream: false, format: schema, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }] }),
-    });
+    }));
     const body = await response.json();
     if (!response.ok) throw new Error(`Local model request failed: ${body.error || response.status}`);
     try { return JSON.parse(body.message?.content || '{}'); } catch (_) { throw new Error('Local model returned invalid JSON.'); }
@@ -49,10 +55,10 @@ class OpenAICompatibleClient extends JsonModelClient {
   }
 
   async complete({ system, prompt, schema } = {}) {
-    const response = await this.fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await this.fetch(`${this.baseUrl}/chat/completions`, this.requestOptions({
       method: 'POST', headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: this.model, temperature: 0, response_format: { type: 'json_schema', json_schema: { name: 'signal_box_result', strict: true, schema } }, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }] }),
-    });
+    }));
     const body = await response.json();
     if (!response.ok) throw new Error(`Frontier model request failed: ${body.error?.message || body.error || response.status}`);
     try { return JSON.parse(body.choices?.[0]?.message?.content || '{}'); } catch (_) { throw new Error('Frontier model returned invalid JSON.'); }
