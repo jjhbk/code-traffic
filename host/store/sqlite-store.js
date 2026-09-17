@@ -1240,7 +1240,33 @@ class SqliteStore {
     if (!candidate?.candidateId || !candidate.observationId) throw new Error('Invalid task candidate.');
     const now = this.clock();
     const existing = this.db.prepare('SELECT task_id AS taskId, status, task_json AS taskJson FROM tasks WHERE candidate_id = ?').get(candidate.candidateId);
-    if (existing) return { ...JSON.parse(existing.taskJson), taskId: existing.taskId, status: existing.status, preserved: true };
+    if (existing) {
+      const prior = JSON.parse(existing.taskJson);
+      if (['done', 'dismissed'].includes(existing.status)) return { ...prior, taskId: existing.taskId, status: existing.status, preserved: true };
+      const corrected = this.db.prepare('SELECT field_name AS fieldName, value_json AS valueJson FROM task_corrections WHERE task_id = ?').all(existing.taskId);
+      const next = { ...prior, ...candidate, taskId: existing.taskId };
+      if (prior.sourceUnavailable === true) next.sourceUnavailable = false;
+      for (const row of corrected) next[row.fieldName] = JSON.parse(row.valueJson);
+      const comparable = (value) => JSON.stringify(Object.fromEntries(Object.entries(value).filter(([key]) => !['taskId', 'status', 'createdAt', 'updatedAt'].includes(key))));
+      if (comparable(prior) === comparable(next)) return { ...prior, taskId: existing.taskId, status: existing.status, preserved: true };
+      const version = this._nextTaskVersion(existing.taskId, now);
+      this.db.exec('BEGIN');
+      try {
+        this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?')
+          .run(JSON.stringify(next), version, existing.taskId);
+        this.db.prepare('DELETE FROM task_evidence WHERE task_id = ? AND observation_id = ?').run(existing.taskId, candidate.observationId);
+        this.db.prepare(`INSERT INTO task_evidence(task_id, observation_id, start_offset, end_offset, evidence_text)
+          VALUES (?, ?, ?, ?, ?)`)
+          .run(existing.taskId, candidate.observationId, candidate.evidence.start, candidate.evidence.end, candidate.evidence.text);
+        this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'reconciled\', ?, ?)')
+          .run(existing.taskId, JSON.stringify({ observationId: candidate.observationId, extractorVersion: candidate.extractorVersion, sourceUpdated: true }), now);
+        this.db.exec('COMMIT');
+      } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+      this._invalidateTaskActions(existing.taskId, 'source-updated', now);
+      this.enqueueJob({ kind: 'assistant.replan', payload: { taskId: existing.taskId, reason: 'source-updated' }, runAt: now, dedupeKey: `assistant.replan:${existing.taskId}:source:${version}` });
+      this._enqueueTaskProactive(existing.taskId, version, now);
+      return { ...next, status: existing.status, updatedAt: version, preserved: false, reconciled: true };
+    }
     const evidenced = this.db.prepare(`SELECT t.task_id AS taskId, t.status, t.task_json AS taskJson
       FROM task_evidence te JOIN tasks t ON t.task_id = te.task_id
       WHERE te.observation_id = ? AND te.evidence_text = ? ORDER BY t.updated_at DESC LIMIT 1`).get(candidate.observationId, candidate.evidence?.text || '');
