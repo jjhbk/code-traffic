@@ -4,7 +4,7 @@ const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, safeStorage, screen, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, Tray, nativeImage, safeStorage, screen, shell } = require('electron');
 const { Board } = require('./board');
 const { runningAgents } = require('./processes');
 const { sessionArgs } = require('./session-command');
@@ -98,6 +98,7 @@ let assistantRuntime;
 let proactivityService;
 let conversationService;
 let followUpWorkflow;
+let trayRef;
 let mailSyncTimer;
 let calendarSyncTimer;
 let driveSyncTimer;
@@ -159,6 +160,20 @@ function createWindow() {
   windowRef.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   windowRef.on('close', () => saveWindowState(windowRef.getBounds()));
   windowRef.on('closed', () => { windowRef = null; });
+}
+
+function createTray() {
+  if (trayRef || typeof Tray === 'undefined') return;
+  const iconName = process.platform === 'win32' ? 'signal-box.ico' : 'signal-box.png';
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'branding', iconName));
+  trayRef = new Tray(icon);
+  trayRef.setToolTip('Signal Box assistant is running');
+  trayRef.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Signal Box', click: () => { if (!windowRef) createWindow(); else { windowRef.show(); windowRef.focus(); } } },
+    { type: 'separator' },
+    { label: 'Quit Signal Box', click: () => app.quit() },
+  ]));
+  trayRef.on('click', () => { if (!windowRef) createWindow(); else { windowRef.show(); windowRef.focus(); } });
 }
 
 function windowStatePath() { return path.join(app.getPath('userData'), 'window.json'); }
@@ -1104,6 +1119,7 @@ async function start() {
   livenessTimer.unref?.();
   wireIpc();
   createWindow();
+  createTray();
   if (appSettings.telegramEnabled !== false) telegram.start();
   assistantRuntime?.start();
   for (const session of board.list()) {
@@ -1257,7 +1273,8 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // The assistant runtime and Telegram connector remain active while the
+  // window is closed. Use the tray menu to reopen or explicitly quit.
 });
 
 app.on('before-quit', async () => {
@@ -1268,6 +1285,8 @@ app.on('before-quit', async () => {
   if (driveSyncTimer) clearInterval(driveSyncTimer);
   if (digestTimer) clearInterval(digestTimer);
   assistantRuntime?.stop();
+  trayRef?.destroy();
+  trayRef = null;
   telegram?.stop();
   modelRouter?.frontierClient?.close?.();
   for (const child of remoteCommands.values()) {
