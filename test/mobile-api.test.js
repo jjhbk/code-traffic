@@ -43,6 +43,9 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(pushRevoked.status, 200); assert.equal(pushRevoked.body.registration.revoked, true); assert.equal(store.listMobilePushTokens().length, 0);
   const today = await request(port, '/api/v1/mobile/today');
   assert.equal(today.status, 200); assert.ok(Array.isArray(today.body.tasks)); assert.ok(Array.isArray(today.body.workflows));
+  store.upsertContext({ recordType: 'goal', recordKey: 'pilot', value: 'Ship the assistant pilot', source: { channel: 'test' }, confidence: 'high', confirmed: true });
+  const todayWithGoal = await request(port, '/api/v1/mobile/today');
+  assert.equal(todayWithGoal.body.goals[0].recordKey, 'pilot');
   const graph = await request(port, '/api/v1/mobile/graph?depth=1&limit=20');
   assert.equal(graph.status, 200); assert.ok(Array.isArray(graph.body.graph.nodes));
 
