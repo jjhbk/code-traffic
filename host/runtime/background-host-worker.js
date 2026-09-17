@@ -1,5 +1,6 @@
 const { SqliteStore } = require('../store/sqlite-store');
 const { AssistantRuntime } = require('./assistant');
+const { MobilePushService } = require('../mobile/push');
 
 const token = process.env.SIGNAL_BOX_BACKGROUND_TOKEN || '';
 const databasePath = process.argv[2];
@@ -9,6 +10,7 @@ const listen = (handler) => parentPort ? parentPort.on('message', handler) : pro
 if (!databasePath || !token || (typeof process.send !== 'function' && !parentPort)) throw new Error('Background host requires a database path, token, and IPC parent.');
 
 const store = new SqliteStore({ filename: databasePath });
+const mobilePushService = new MobilePushService({ store });
 const parentCalls = new Map();
 let parentSequence = 0;
 function callParent(kind, payload) {
@@ -28,11 +30,12 @@ runtime.register('browser.availability.check', async (payload) => {
 runtime.register('meeting.prep', async (payload) => {
   delegate('meeting.prep', payload);
 });
-for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000], ['assistant.mobile-push', 30 * 1000]]) {
+for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
   runtime.register(kind, async (payload) => {
     delegate(kind, payload, { nextKind: kind, intervalMs });
   });
 }
+runtime.register('assistant.mobile-push', runIndependent('assistant.mobile-push', () => mobilePushService.deliverPending(), 30 * 1000));
 runtime.start();
 for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000], ['assistant.mobile-push', 30 * 1000]]) {
   runtime.schedule(kind, {}, Date.now(), `${kind}:${Math.floor(Date.now() / intervalMs)}`);
@@ -76,6 +79,19 @@ function delegate(kind, payload, { nextKind = null, nextPayload = {}, intervalMs
       scheduleLater(kind, payload, Date.now() + 1000, `retry:${kind}:${payload.workflowId || Date.now()}`);
     }
   });
+}
+
+function runIndependent(kind, handler, intervalMs) {
+  return async (payload) => {
+    const nextRunAt = Date.now() + intervalMs;
+    const nextKey = `${kind}:${Math.floor(nextRunAt / intervalMs)}`;
+    try { runtime.schedule(kind, {}, nextRunAt, nextKey); }
+    catch (error) {
+      console.error(`[background] schedule ${kind} failed: ${error.message}`);
+      scheduleLater(kind, {}, nextRunAt, nextKey, 250);
+    }
+    return handler(payload);
+  };
 }
 
 listen((message) => {

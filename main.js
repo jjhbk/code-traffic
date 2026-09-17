@@ -1130,7 +1130,6 @@ async function start() {
           paused: appSettings.assistantPaused === true,
           onJob: async (kind, payload) => {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
-            if (kind === 'assistant.mobile-push') return runMobilePushDelivery(payload);
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
