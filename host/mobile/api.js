@@ -57,8 +57,8 @@ class MobileApi {
       if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
       if (method === 'POST' && resource === 'permissions') return { permission: this.createPermission(body) };
       if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'status') return { task: this.updateTask(parts[4], body) };
-      if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation({ ...body, deviceId: body.deviceId || device?.deviceId });
-      if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body);
+      if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation(body, device);
+      if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body, device);
       if (method === 'POST' && resource === 'context' && parts[4] === 'place') return this.savePlace(body);
       throw this._error(404, 'Mobile endpoint not found.');
     };
@@ -189,25 +189,34 @@ class MobileApi {
     catch (error) { throw this._error(400, error.message); }
   }
 
-  ingestLocation(body = {}) {
+  ingestLocation(body = {}, device = null) {
     if (body.consent !== true) throw this._error(403, 'Location context requires explicit consent.');
+    const deviceId = this.contextDeviceId(body, device);
     const latitude = Number(body.latitude); const longitude = Number(body.longitude); const accuracy = Number(body.accuracy);
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180 || !Number.isFinite(accuracy) || accuracy < 0) throw this._error(400, 'Location requires valid coordinates and non-negative accuracy.');
     const capturedAt = Number(body.capturedAt || this.clock());
-    const result = this.ingestContextEvent({ ...body, payload: { latitude, longitude, accuracy, capturedAt, consentScope: String(body.consentScope || 'location') } }, 'location');
-    return { ...result, location: this.context?.processLocation({ eventId: result.event.eventId, latitude, longitude, accuracy, capturedAt }) || { stale: true, triggers: [] } };
+    const result = this.ingestContextEvent({ ...body, deviceId, payload: { latitude, longitude, accuracy, capturedAt, consentScope: String(body.consentScope || 'location') } }, 'location');
+    return { ...result, location: this.context?.processLocation({ eventId: result.event.eventId, latitude, longitude, accuracy, capturedAt, deviceId }) || { stale: true, triggers: [] } };
   }
 
-  ingestSensor(body = {}) {
+  ingestSensor(body = {}, device = null) {
     if (body.consent !== true) throw this._error(403, 'Sensor context requires explicit consent.');
+    const deviceId = this.contextDeviceId(body, device);
     const sensor = String(body.sensor || '').trim().toLowerCase();
     if (!sensor || !body.value || typeof body.value !== 'object' || Array.isArray(body.value)) throw this._error(400, 'Sensor context requires a sensor name and structured value.');
     const capturedAt = Number(body.capturedAt || this.clock());
-    const result = this.ingestContextEvent({ ...body, payload: { sensor, value: body.value, capturedAt, consentScope: String(body.consentScope || sensor) } }, 'sensor');
+    const result = this.ingestContextEvent({ ...body, deviceId, payload: { sensor, value: body.value, capturedAt, consentScope: String(body.consentScope || sensor) } }, 'sensor');
     const sensorContext = result.accepted.accepted
-      ? this.context?.processSensor({ sensor, value: body.value, capturedAt, deviceId: body.deviceId || null, consentScope: body.consentScope || sensor }) || { stale: true, context: null }
+      ? this.context?.processSensor({ sensor, value: body.value, capturedAt, deviceId, consentScope: body.consentScope || sensor }) || { stale: true, context: null }
       : { stale: false, duplicate: true, context: null };
     return { ...result, sensorContext };
+  }
+
+  contextDeviceId(body = {}, device = null) {
+    const supplied = body.deviceId ? String(body.deviceId) : null;
+    const authenticated = device?.deviceId ? String(device.deviceId) : null;
+    if (authenticated && supplied && supplied !== authenticated) throw this._error(403, 'Context device identity does not match the authenticated device.');
+    return authenticated || supplied || 'paired-device';
   }
 
   ingestContextEvent(body, kind) {

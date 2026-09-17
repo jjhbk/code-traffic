@@ -107,5 +107,13 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   const decision = await request(port, `/api/v1/mobile/approvals/${approval.request_id}/decide`, { method: 'POST', body: { optionId: 'allow' } });
   assert.equal(decision.status, 200); assert.equal(store.getDecision(approval.request_id).surface, 'mobile');
 
+  await assert.rejects(() => mobileApi.handle({
+    method: 'POST',
+    path: '/api/v1/mobile/context/location',
+    headers: { 'idempotency-key': 'spoofed-context-device' },
+    body: { deviceId: 'other-phone', eventId: 'spoofed-location', latitude: 1, longitude: 2, accuracy: 5, consent: true },
+    device: { deviceId: 'authenticated-phone' },
+  }), /device identity does not match/);
+
   await board.closeServer(); store.close(); console.log('mobile API tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
