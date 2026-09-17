@@ -18,7 +18,7 @@ Enter the `hostUrl` and token returned by Electron's mobile pairing endpoint/des
 
 For direct LAN access, configure the Electron profile with a non-loopback bind host plus a trusted TLS key/certificate (`mobileBindHost`, `mobileAdvertisedHost`, `mobileTlsKeyPath`, and `mobileTlsCertPath`). The core refuses a non-loopback HTTP bind. Do not use a self-signed certificate in a production mobile build unless the certificate is deliberately pinned/trusted by the app.
 
-The client sends an `Idempotency-Key` for every command, stores network-failed commands in a bounded local outbox, and persists an opaque notification cursor for reconnect-safe synchronization. Queued commands are shown as pending and are only considered accepted after the core acknowledges them.
+The client sends an `Idempotency-Key` for every command, uses stable event IDs for location and sensor context, stores network-failed commands in a bounded local outbox, and persists an opaque notification cursor for reconnect-safe synchronization. The background-location task also retries the outbox when it gets a later sample. Queued commands are shown as pending and are only considered accepted after the core acknowledges them.
 
 Run the client contract test from this directory with `npm run test:client`. It exercises offline queueing, replay, idempotency, and notification cursor persistence without requiring a device or live Electron process.
 

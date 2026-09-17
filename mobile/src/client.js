@@ -89,9 +89,9 @@ class MobileCoreClient {
   async createPermission(body) { return this.command('/api/v1/mobile/permissions', body); }
   async revokePermission(grantId) { return this.command(`/api/v1/mobile/permissions/${encodeURIComponent(grantId)}/revoke`, {}); }
   async decideApproval(requestId, optionId) { return this.command(`/api/v1/mobile/approvals/${encodeURIComponent(requestId)}/decide`, { optionId }); }
-  async sendLocation(body) { return this.command('/api/v1/mobile/context/location', body); }
+  async sendLocation(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/location', { ...body, eventId }, eventId); }
   async savePlace(body) { return this.command('/api/v1/mobile/context/place', body); }
-  async sendSensor(body) { return this.command('/api/v1/mobile/context/sensor', body); }
+  async sendSensor(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/sensor', { ...body, eventId }, eventId); }
   async deleteContext(recordType, recordKey) { return this.command(`/api/v1/mobile/context/${encodeURIComponent(recordType)}/${encodeURIComponent(recordKey)}/delete`, {}); }
   async acknowledgeNotification(notificationId) { return this.command(`/api/v1/mobile/notifications/${encodeURIComponent(notificationId)}/ack`, {}); }
   async registerPushToken(pushToken, platform = 'expo') { return this.command('/api/v1/mobile/devices/push-token', { pushToken, platform }); }

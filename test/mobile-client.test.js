@@ -48,5 +48,14 @@ assert.throws(() => new MobileCoreClient({ baseUrl: 'https://user:pass@assistant
   assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/assistant/autonomous-runs/run-1/confirm');
   assert.deepEqual(JSON.parse(calls.at(-1).options.body), { evidence: 'Verified provider confirmation.' });
   assert.equal(confirmed.accepted, true);
+  const location = await client.sendLocation({ latitude: 40, longitude: -73, accuracy: 10, consent: true });
+  const locationBody = JSON.parse(calls.at(-1).options.body);
+  assert.equal(calls.at(-1).options.headers['Idempotency-Key'], locationBody.eventId);
+  assert.equal(typeof locationBody.eventId, 'string');
+  assert.equal(location.accepted, true);
+  const sensor = await client.sendSensor({ sensor: 'battery', value: { level: 0.5 }, consent: true });
+  const sensorBody = JSON.parse(calls.at(-1).options.body);
+  assert.equal(calls.at(-1).options.headers['Idempotency-Key'], sensorBody.eventId);
+  assert.equal(sensor.accepted, true);
   console.log('mobile client tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

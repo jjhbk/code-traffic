@@ -21,7 +21,11 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
     if (!config?.backgroundLocationEnabled) return;
     const location = data.locations[data.locations.length - 1];
     const client = new MobileCoreClient({ ...config, storage: AsyncStorage });
-    await client.sendLocation({ consent: true, deviceId: config.deviceId || 'mobile-app', latitude: location.coords.latitude, longitude: location.coords.longitude, accuracy: location.coords.accuracy || 0, capturedAt: location.timestamp || Date.now(), consentScope: 'background-location' });
+    const capturedAt = location.timestamp || Date.now();
+    const deviceId = config.deviceId || 'mobile-app';
+    const eventId = `background-location:${deviceId}:${capturedAt}:${location.coords.latitude}:${location.coords.longitude}`;
+    await client.sendLocation({ consent: true, deviceId, eventId, latitude: location.coords.latitude, longitude: location.coords.longitude, accuracy: location.coords.accuracy || 0, capturedAt, consentScope: 'background-location' });
+    await client.flushOutbox();
   } catch (_) {
     // The client queues network failures in its durable mobile outbox.
   }
