@@ -18,7 +18,7 @@ function callParent(kind, payload) {
     send({ type: 'job', id, token, kind, payload });
   });
 }
-const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
+const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest', 'assistant.mobile-push'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
 runtime.register('workflow.resume', async (payload) => {
   delegate('workflow.resume', payload);
 });
@@ -28,13 +28,13 @@ runtime.register('browser.availability.check', async (payload) => {
 runtime.register('meeting.prep', async (payload) => {
   delegate('meeting.prep', payload);
 });
-for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
+for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000], ['assistant.mobile-push', 30 * 1000]]) {
   runtime.register(kind, async (payload) => {
     delegate(kind, payload, { nextKind: kind, intervalMs });
   });
 }
 runtime.start();
-for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
+for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000], ['assistant.mobile-push', 30 * 1000]]) {
   runtime.schedule(kind, {}, Date.now(), `${kind}:${Math.floor(Date.now() / intervalMs)}`);
 }
 

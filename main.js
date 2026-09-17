@@ -39,6 +39,7 @@ const { MeetingPrepWorkflow } = require('./host/workflows/meeting-prep');
 const { MobileApi, PROTOCOL_VERSION } = require('./host/mobile/api');
 const { MobilePairingService } = require('./host/mobile/pairing');
 const { MobileContextService } = require('./host/mobile/context');
+const { MobilePushService } = require('./host/mobile/push');
 const { resolveMobileTransport } = require('./host/mobile/transport');
 const { PlanningService } = require('./host/planning/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
@@ -115,6 +116,7 @@ let mobileConversationService;
 let mobileApi;
 let mobilePairing;
 let mobileContext;
+let mobilePushService;
 let mobileTransport = { host: '127.0.0.1', advertisedHost: '127.0.0.1', protocol: 'http', tls: false, serverOptions: null };
 let trayRef;
 let mailSyncTimer;
@@ -1111,6 +1113,7 @@ async function start() {
           paused: appSettings.assistantPaused === true,
           onJob: async (kind, payload) => {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
+            if (kind === 'assistant.mobile-push') return runMobilePushDelivery(payload);
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
@@ -1155,6 +1158,7 @@ async function start() {
   mobileConversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'mobile', proactivity: proactivityService }) : null;
   mobilePairing = hostStore ? new MobilePairingService({ store: hostStore }) : null;
   mobileContext = hostStore ? new MobileContextService({ store: hostStore }) : null;
+  mobilePushService = hostStore ? new MobilePushService({ store: hostStore }) : null;
   mobileApi = hostStore && mobileConversationService && proactivityService ? new MobileApi({
     store: hostStore,
     conversation: mobileConversationService,
@@ -1211,11 +1215,13 @@ async function start() {
       await runScheduledDigest();
       return { completed: true };
     });
+    assistantRuntime.register('assistant.mobile-push', async () => runMobilePushDelivery());
     if (!backgroundHost) {
       assistantRuntime.schedule('assistant.sync.gmail', {}, Date.now(), `assistant.sync.gmail:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
       assistantRuntime.schedule('assistant.sync.calendar', {}, Date.now(), `assistant.sync.calendar:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
       assistantRuntime.schedule('assistant.sync.drive', {}, Date.now(), `assistant.sync.drive:${Math.floor(Date.now() / (10 * 60 * 1000))}`);
       assistantRuntime.schedule('assistant.digest', {}, Date.now(), `assistant:digest:${Math.floor(Date.now() / 30_000)}`);
+      assistantRuntime.schedule('assistant.mobile-push', {}, Date.now(), `assistant:mobile-push:${Math.floor(Date.now() / 30_000)}`);
     }
   }
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
@@ -1397,6 +1403,11 @@ async function runDriveSync() {
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('drive:status-changed', { status: 'error', error: error.message });
     throw error;
   }
+}
+
+async function runMobilePushDelivery() {
+  if (!mobilePushService) return { attempted: 0, sent: 0, failed: 0, revoked: 0, skipped: true };
+  return mobilePushService.deliverPending({ limit: 50 });
 }
 
 async function runScheduledDigest() {
