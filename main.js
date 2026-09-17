@@ -34,6 +34,7 @@ const { ProactivityService } = require('./host/proactivity/service');
 const { ConversationService } = require('./host/conversation/service');
 const { WorkflowService } = require('./host/workflows/service');
 const { FollowUpWorkflow } = require('./host/workflows/follow-up');
+const { PlanningService } = require('./host/planning/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
 const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
@@ -101,6 +102,7 @@ let shuttingDown = false;
 let proactivityService;
 let conversationService;
 let followUpWorkflow;
+let planningService;
 let trayRef;
 let mailSyncTimer;
 let calendarSyncTimer;
@@ -437,6 +439,18 @@ function wireIpc() {
     return hostStore.revokeStandingGrant(grantId);
   });
   ipcMain.handle('assistant:autonomous-runs', (_event, { grantId = null, limit = 100 } = {}) => hostStore?.listAutonomousRuns({ grantId, limit }) || []);
+  ipcMain.handle('assistant:execute-standing-browser', async (_event, { recipeId, inputs = {}, grantId, sessionId = null, taskId = null } = {}) => {
+    if (!hostStore || !approvalService || !planningService || !browserBridge) throw new Error('Automatic browser execution is unavailable.');
+    const recipes = { [uberCabBooking.id]: uberCabBooking, [uberCabQuote.id]: uberCabQuote };
+    const recipe = recipes[recipeId];
+    if (!recipe) throw new Error('This browser recipe is not registered for automatic execution.');
+    const activeSessionId = sessionId || appSettings.browserSessionId;
+    if (!activeSessionId || !browserBridge.status(activeSessionId).connected) throw new Error('The required browser session is not connected.');
+    const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: recipe.origin });
+    const executor = new BrowserRecipeExecutor({ browser: adapter });
+    const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
+    return planningService.executeDecision({ decision: { type: 'execute_browser', requiresApproval: false, reason: 'standing permission matched' }, recipe, inputs, grantId, taskId, executor });
+  });
   ipcMain.handle('activity:list', () => {
     const entries = hostStore?.recentAudit(60) || [];
     const diagnostics = modelRouter?.diagnostics();
@@ -1072,7 +1086,11 @@ async function start() {
   taskService = hostStore ? new TaskService({ store: hostStore, modelRouter }) : null;
   proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
-  if (hostStore && approvalService) followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows: new WorkflowService({ store: hostStore }) });
+  if (hostStore && approvalService) {
+    const workflows = new WorkflowService({ store: hostStore });
+    followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows });
+    planningService = new PlanningService({ workflows, browserActions: new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null }) });
+  }
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,

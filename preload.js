@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   createStandingGrant: (payload) => ipcRenderer.invoke('assistant:create-standing-grant', payload),
   revokeStandingGrant: (payload) => ipcRenderer.invoke('assistant:revoke-standing-grant', payload),
   listAutonomousRuns: (payload) => ipcRenderer.invoke('assistant:autonomous-runs', payload),
+  executeStandingBrowser: (payload) => ipcRenderer.invoke('assistant:execute-standing-browser', payload),
   getActivity: () => ipcRenderer.invoke('activity:list'),
   updateTask: (payload) => ipcRenderer.invoke('tasks:update', payload),
   snoozeTask: (payload) => ipcRenderer.invoke('tasks:snooze', payload),

@@ -1,0 +1,24 @@
+const assert = require('node:assert/strict');
+const { SqliteStore } = require('../host/store/sqlite-store');
+const { ApprovalService } = require('../host/approvals/service');
+const { WorkflowService } = require('../host/workflows/service');
+const { BrowserActionService } = require('../host/browser/service');
+const { PlanningService } = require('../host/planning/service');
+
+(async () => {
+  const store = new SqliteStore();
+  const approvals = new ApprovalService({ store });
+  const workflows = new WorkflowService({ store });
+  const browser = new BrowserActionService({ approvals, store });
+  const planner = new PlanningService({ workflows, browserActions: browser });
+  const recipe = { id: 'planner.fixture.v1', origin: 'https://example.com', effects: 'read', inputs: {}, steps: [{ id: 'read', kind: 'read', target: 'title' }] };
+  const grant = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { recipeId: recipe.id }, expiresAt: Date.now() + 60_000, maxUses: 1 });
+  const result = await planner.executeDecision({ decision: { type: 'execute_browser', requiresApproval: false, reason: 'authorized availability check' }, recipe, grantId: grant.grantId, executor: { run: async () => ({ status: 'confirmed', title: 'Fixture' }) } });
+  assert.equal(result.state, 'completed');
+  assert.equal(result.payload.outcome, 'confirmed');
+  assert.equal(result.steps.find((step) => step.stepId === 'execute').state, 'completed');
+  await assert.rejects(() => planner.executeDecision({ decision: { type: 'execute_browser', requiresApproval: false }, recipe, grantId: grant.grantId, executor: { run: async () => ({ status: 'confirmed' }) } }), /usage limit/);
+  assert.equal(store.listWorkflows({ activeOnly: true }).length, 1);
+  store.close();
+  console.log('planning tests passed');
+})().catch((error) => { console.error(error); process.exitCode = 1; });
