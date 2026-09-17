@@ -37,6 +37,7 @@ const { FollowUpWorkflow } = require('./host/workflows/follow-up');
 const { AvailabilityWorkflow } = require('./host/workflows/availability');
 const { MobileApi, PROTOCOL_VERSION } = require('./host/mobile/api');
 const { MobilePairingService } = require('./host/mobile/pairing');
+const { MobileContextService } = require('./host/mobile/context');
 const { resolveMobileTransport } = require('./host/mobile/transport');
 const { PlanningService } = require('./host/planning/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
@@ -111,6 +112,7 @@ let availabilityWorkflow;
 let mobileConversationService;
 let mobileApi;
 let mobilePairing;
+let mobileContext;
 let mobileTransport = { host: '127.0.0.1', advertisedHost: '127.0.0.1', protocol: 'http', tls: false, serverOptions: null };
 let trayRef;
 let mailSyncTimer;
@@ -1131,12 +1133,14 @@ async function start() {
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
   mobileConversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'mobile', proactivity: proactivityService }) : null;
   mobilePairing = hostStore ? new MobilePairingService({ store: hostStore }) : null;
+  mobileContext = hostStore ? new MobileContextService({ store: hostStore }) : null;
   mobileApi = hostStore && mobileConversationService && proactivityService ? new MobileApi({
     store: hostStore,
     conversation: mobileConversationService,
     proactivity: proactivityService,
     approvals: approvalService,
     pairing: mobilePairing,
+    context: mobileContext,
     getStatus: async () => ({ ...(assistantRuntime?.health() || { running: false, paused: false }), background: backgroundHost ? await backgroundHost.health() : null }),
   }) : null;
   board.mobileApi = mobileApi;
