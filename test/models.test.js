@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { EntityVault, PrivacyGateway } = require('../host/privacy/gateway');
-const { ModelRouter, validateRanking } = require('../host/models/router');
+const { ModelRouter, validateRanking, validateNextStep } = require('../host/models/router');
 const { OllamaClient, OpenAICompatibleClient } = require('../host/models/clients');
 const { IsolatedFrontierClient } = require('../host/models/frontier-gateway');
 
@@ -18,6 +18,20 @@ const router = new ModelRouter({ privacyGateway: new PrivacyGateway({ vault: new
   assert.equal(result.items[0].taskId, 'task-1');
   assert.doesNotMatch(captured.messages[1].content, /alice@example.com/);
   assert.equal(validateRanking({ items: [{ taskId: 'unknown', score: 1, reason: 'bad' }, { taskId: 'task-2', score: 2, reason: 'bad' }] }, tasks).length, 0);
+  assert.throws(() => validateNextStep({ decision: 'draft_follow_up', reason: 'send it', requiresApproval: false }), /requires approval/);
+  const planner = new ModelRouter({
+    privacyGateway: new PrivacyGateway({ vault: new EntityVault() }),
+    localClient: { complete: async ({ schema, prompt }) => {
+      if (schema.required.includes('entities')) return { entities: [] };
+      assert.equal(schema.required.includes('decision'), true);
+      assert.doesNotMatch(prompt, /alice@example.com/);
+      return { decision: 'draft_follow_up', reason: 'The counterparty is blocking progress.', requiresApproval: true };
+    } },
+    mode: 'local',
+  });
+  const plan = await planner.proposeNextStep(tasks[0], [{ sourceId: 'mail-1', summary: 'Reply to alice@example.com', status: 'active' }]);
+  assert.equal(plan.decision, 'draft_follow_up');
+  assert.equal(planner.diagnostics().metrics.lastDecision.status, 'ok');
   const frontier = new OpenAICompatibleClient({ model: 'frontier-test', apiKey: 'secret', fetchImpl: async (_url, options) => {
     const body = JSON.parse(options.body);
     assert.equal(body.response_format.type, 'json_schema');

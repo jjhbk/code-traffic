@@ -8,6 +8,15 @@ const ENTITY_SCHEMA = {
   properties: { entities: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { type: { type: 'string', enum: ['person', 'organization', 'location', 'project'] }, value: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' } }, required: ['type', 'value', 'start', 'end'] } } },
   required: ['entities'],
 };
+const NEXT_STEP_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    decision: { type: 'string', enum: ['wait', 'clarify', 'draft_follow_up', 'suggest_resolution'] },
+    reason: { type: 'string' },
+    requiresApproval: { type: 'boolean' },
+  },
+  required: ['decision', 'reason', 'requiresApproval'],
+};
 
 function validateRanking(result, tasks) {
   if (!result || !Array.isArray(result.items)) throw new Error('Model ranking must contain an items array.');
@@ -20,6 +29,13 @@ function validateRanking(result, tasks) {
     seen.add(id);
     return true;
   });
+}
+
+function validateNextStep(result) {
+  const decisions = new Set(['wait', 'clarify', 'draft_follow_up', 'suggest_resolution']);
+  if (!result || !decisions.has(result.decision) || typeof result.reason !== 'string' || !result.reason.trim() || typeof result.requiresApproval !== 'boolean') throw new Error('Invalid next-step proposal.');
+  if (result.decision === 'draft_follow_up' && !result.requiresApproval) throw new Error('A follow-up proposal requires approval.');
+  return { decision: result.decision, reason: result.reason.trim(), requiresApproval: result.requiresApproval };
 }
 
 class ModelRouter {
@@ -36,6 +52,8 @@ class ModelRouter {
       privacyTransforms: 0,
       lastLocalCall: null,
       lastRanking: null,
+      planningCalls: 0,
+      lastDecision: null,
       lastPrivacyCheck: null,
     };
   }
@@ -119,6 +137,41 @@ class ModelRouter {
     }
   }
 
+  async proposeNextStep(task, context = []) {
+    if (!task?.taskId) throw new Error('A task is required for planning.');
+    this.metrics.planningCalls += 1;
+    const fallback = () => {
+      if (task.confidence === 'low' && !task.dueDate) return { decision: 'clarify', reason: 'The obligation is uncertain and has no deadline.', requiresApproval: false };
+      if (task.owner === 'counterparty' && task.blocker === 'self') return { decision: 'draft_follow_up', reason: 'The other party appears to be blocking progress.', requiresApproval: true };
+      return { decision: 'wait', reason: 'There is no safe next action yet.', requiresApproval: false };
+    };
+    if (this.mode === 'off') return { ...fallback(), source: 'deterministic' };
+    const client = this.mode === 'frontier' ? this.frontierClient : this.localClient;
+    if (!client) return { ...fallback(), source: 'deterministic', reason: 'model-not-configured' };
+    const safeTask = {};
+    for (const [key, value] of Object.entries({ taskId: task.taskId, summary: task.summary, owner: task.owner, blocker: task.blocker, counterparty: task.counterparty, dueDate: task.dueDate, confidence: task.confidence })) {
+      safeTask[key] = typeof value === 'string'
+        ? (await this.privacyGateway.pseudonymizeWithRecognizer(value, (text) => this.recognizeEntities(text))).text
+        : value;
+    }
+    const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate']));
+    const payload = JSON.stringify({ task: this.privacyGateway.prepareRemotePayload(safeTask), context: safeContext });
+    this.metrics.lastPrivacyCheck = { at: Date.now(), fields: 1 + safeContext.length, redacted: !/@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(payload), payloadBytes: Buffer.byteLength(payload), boundary: this.mode === 'frontier' ? 'pseudonymized-to-frontier' : 'local-model-only' };
+    try {
+      if (this.mode === 'frontier') this.metrics.frontierCalls += 1; else this.metrics.localCalls += 1;
+      const result = validateNextStep(await client.complete({
+        system: 'Choose the safest next step for a personal obligation. Return only JSON matching the schema. Never send, change, or approve anything. A draft follow-up always requires approval.',
+        prompt: payload,
+        schema: NEXT_STEP_SCHEMA,
+      }));
+      this.metrics.lastDecision = { source: this.mode, taskId: task.taskId, decision: result.decision, at: Date.now(), status: 'ok' };
+      return { ...result, source: this.mode };
+    } catch (error) {
+      this.metrics.lastDecision = { source: this.mode, taskId: task.taskId, at: Date.now(), status: 'error', error: error.message };
+      throw error;
+    }
+  }
+
   async availability() {
     let localAvailable = null;
     let localError = null;
@@ -171,4 +224,4 @@ class ModelRouter {
   }
 }
 
-module.exports = { ModelRouter, RANK_SCHEMA, ENTITY_SCHEMA, validateRanking };
+module.exports = { ModelRouter, RANK_SCHEMA, ENTITY_SCHEMA, NEXT_STEP_SCHEMA, validateRanking, validateNextStep };
