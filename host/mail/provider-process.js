@@ -3,12 +3,13 @@ const path = require('path');
 const { fork } = require('child_process');
 
 class GoogleProviderProcess {
-  constructor({ workerPath = path.join(__dirname, 'provider-process-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), supervise = true, restartDelayMs = 250 } = {}) {
+  constructor({ workerPath = path.join(__dirname, 'provider-process-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), supervise = true, restartDelayMs = 250, startupTimeoutMs = 10_000 } = {}) {
     this.workerPath = workerPath;
     this.forkImpl = forkImpl;
     this.token = token;
     this.supervise = Boolean(supervise);
     this.restartDelayMs = Math.max(10, Number(restartDelayMs) || 250);
+    this.startupTimeoutMs = Math.max(100, Number(startupTimeoutMs) || 10_000);
     this.child = null;
     this.pending = new Map();
     this.sequence = 0;
@@ -24,9 +25,19 @@ class GoogleProviderProcess {
     this.stopping = false;
     this.ready = new Promise((resolve, reject) => {
       let settled = false;
+      let startupTimer;
       const child = this.forkImpl(this.workerPath, [], { env: { ...process.env, SIGNAL_BOX_PROVIDER_TOKEN: this.token } });
       this.child = child;
-      const finish = (error, result) => { if (settled) return; settled = true; if (error) reject(error); else resolve(result); };
+      const finish = (error, result) => { if (settled) return; settled = true; clearTimeout(startupTimer); if (error) reject(error); else resolve(result); };
+      startupTimer = setTimeout(() => {
+        if (settled) return;
+        this.stopping = true;
+        const error = new Error(`Google provider process did not become ready within ${this.startupTimeoutMs}ms.`);
+        finish(error);
+        this._fail(error);
+        if (this.child === child) this.child = null;
+        child.disconnect?.();
+      }, this.startupTimeoutMs);
       child.on('message', (message) => {
         if (message.type === 'ready') {
           this._send({ method: 'set-credentials', credentials: this.credentials }).then(() => finish(null, { running: true })).catch(finish);
@@ -41,6 +52,7 @@ class GoogleProviderProcess {
       child.once('error', (error) => { finish(error); this._fail(error); });
       child.once('exit', (code, signal) => {
         this.child = null;
+        clearTimeout(startupTimer);
         const error = new Error(`Google provider process exited${signal ? ` with ${signal}` : ` with code ${code}`}.`);
         finish(error); this._fail(error);
         if (settled && this.supervise && !this.stopping) this._scheduleRestart();
