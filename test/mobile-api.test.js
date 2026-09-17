@@ -27,7 +27,7 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   const approvals = new ApprovalService({ store });
   const context = new MobileContextService({ store });
   let assistantPaused = false;
-  const mobileApi = new MobileApi({ store, conversation, proactivity, approvals, context, onPause: async ({ paused }) => { assistantPaused = paused; return { paused }; }, getStatus: () => ({ running: true, paused: assistantPaused, host: 'fixture' }) });
+  const mobileApi = new MobileApi({ store, conversation, proactivity, approvals, context, onPause: async ({ paused }) => { assistantPaused = paused; return { paused }; }, onReconcile: ({ runId, evidence }) => store.updateAutonomousRun(runId, 'confirmed', { details: { reconciliation: { source: 'mobile-test', evidence } }, receipt: { status: 'confirmed', verification: 'user-reconciled', evidence } }), getStatus: () => ({ running: true, paused: assistantPaused, host: 'fixture' }) });
   const board = new Board({ authToken: 'hook-secret', mobileAuthToken: 'mobile-secret', mobileApi });
   const port = 4950 + Math.floor(Math.random() * 50);
   await board.listen(port);
@@ -59,6 +59,12 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(permissions.body.permissions.length, 1);
   const revoked = await request(port, `/api/v1/mobile/permissions/${permission.body.permission.grantId}/revoke`, { method: 'POST', body: {} });
   assert.equal(revoked.status, 200); assert.equal(revoked.body.permission.status, 'revoked');
+  const unknownGrant = store.createStandingGrant({ principal: 'signal-box-user', capability: 'browser.read', surface: 'desktop', constraints: {}, expiresAt: Date.now() + 60_000 });
+  const unknownRun = store.createAutonomousRun({ grantId: unknownGrant.grantId, action: { taskId: 'mobile-unknown-task', capability: 'browser.read', recipeId: 'fixture.read.v1' }, actionDigest: 'mobile-unknown-digest', status: 'unknown' });
+  const runs = await request(port, '/api/v1/mobile/assistant/autonomous-runs?limit=5');
+  assert.equal(runs.status, 200); assert.ok(runs.body.runs.some((run) => run.runId === unknownRun.runId));
+  const confirmedRun = await request(port, `/api/v1/mobile/assistant/autonomous-runs/${unknownRun.runId}/confirm`, { method: 'POST', body: { evidence: 'Verified the provider confirmation.' } });
+  assert.equal(confirmedRun.status, 200); assert.equal(confirmedRun.body.run.status, 'confirmed');
 
   const deniedLocation = await request(port, '/api/v1/mobile/context/location', { method: 'POST', body: { latitude: 1, longitude: 2, accuracy: 5, consent: false } });
   assert.equal(deniedLocation.status, 403);

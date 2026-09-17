@@ -37,6 +37,7 @@ class MobileCoreClient {
 
   health() { return this.request('/api/v1/mobile/health'); }
   async setAssistantPaused(paused) { return this.command('/api/v1/mobile/assistant/pause', { paused: Boolean(paused) }); }
+  autonomousRuns(limit = 50) { return this.request(`/api/v1/mobile/assistant/autonomous-runs?limit=${encodeURIComponent(limit)}`); }
   today() { return this.request('/api/v1/mobile/today'); }
   taskGraph({ taskId = '', depth = 2, limit = 100 } = {}) { return this.request(`/api/v1/mobile/graph?taskId=${encodeURIComponent(taskId)}&depth=${encodeURIComponent(depth)}&limit=${encodeURIComponent(limit)}`); }
   conversation(conversationId = 'mobile:default') { return this.request(`/api/v1/mobile/conversation?conversationId=${encodeURIComponent(conversationId)}`); }
@@ -71,6 +72,7 @@ class MobileCoreClient {
   async acknowledgeNotification(notificationId) { return this.command(`/api/v1/mobile/notifications/${encodeURIComponent(notificationId)}/ack`, {}); }
   async registerPushToken(pushToken, platform = 'expo') { return this.command('/api/v1/mobile/devices/push-token', { pushToken, platform }); }
   async revokePushToken() { return this.command('/api/v1/mobile/devices/push-token/revoke', {}); }
+  async confirmAutonomousRun(runId, evidence) { return this.command(`/api/v1/mobile/assistant/autonomous-runs/${encodeURIComponent(runId)}/confirm`, { evidence }); }
 
   async command(path, body, commandId = id()) {
     try { return await this.request(path, { method: 'POST', body, idempotencyKey: commandId }); }

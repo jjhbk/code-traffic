@@ -26,5 +26,12 @@ const { MobileCoreClient, NOTIFICATION_CURSOR_KEY } = require('../mobile/src/cli
   assert.equal(calls.at(-1).url, 'http://core/api/v1/mobile/assistant/pause');
   assert.deepEqual(JSON.parse(calls.at(-1).options.body), { paused: true });
   assert.equal(pause.accepted, true);
+  const runs = await client.autonomousRuns(3);
+  assert.equal(calls.at(-1).url, 'http://core/api/v1/mobile/assistant/autonomous-runs?limit=3');
+  assert.deepEqual(runs, { accepted: true });
+  const confirmed = await client.confirmAutonomousRun('run-1', 'Verified provider confirmation.');
+  assert.equal(calls.at(-1).url, 'http://core/api/v1/mobile/assistant/autonomous-runs/run-1/confirm');
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { evidence: 'Verified provider confirmation.' });
+  assert.equal(confirmed.accepted, true);
   console.log('mobile client tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

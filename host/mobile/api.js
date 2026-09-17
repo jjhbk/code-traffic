@@ -18,12 +18,12 @@ function encodeNotificationCursor(cursor) {
 }
 
 class MobileApi {
-  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, onPause = null, getStatus = null, getConnections = null, clock = () => Date.now() } = {}) {
+  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, onPause = null, onReconcile = null, getStatus = null, getConnections = null, clock = () => Date.now() } = {}) {
     if (!store || !conversation || !proactivity) throw new Error('Mobile API requires store, conversation, and proactivity services.');
     this.store = store;
     this.conversation = conversation;
     this.proactivity = proactivity;
-    this.approvals = approvals; this.pairing = pairing; this.context = context; this.onApproval = onApproval; this.onPause = onPause;
+    this.approvals = approvals; this.pairing = pairing; this.context = context; this.onApproval = onApproval; this.onPause = onPause; this.onReconcile = onReconcile;
     this.getStatus = getStatus || (() => ({ running: true })); this.getConnections = getConnections || (() => []);
     this.clock = clock;
   }
@@ -36,6 +36,8 @@ class MobileApi {
       if (method === 'POST' && resource === 'pair') return this.pair(body);
       if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
       if (method === 'POST' && resource === 'assistant' && parts[4] === 'pause') return this.pauseAssistant(body);
+      if (method === 'GET' && resource === 'assistant' && parts[4] === 'autonomous-runs') return { runs: this.store.listAutonomousRuns({ limit: Number(query.limit || 50) }) };
+      if (method === 'POST' && resource === 'assistant' && parts[4] === 'autonomous-runs' && parts[6] === 'confirm') return this.confirmAutonomousRun(parts[5], body);
       if (method === 'GET' && resource === 'today') return this.today(device, query);
       if (method === 'GET' && resource === 'graph') return { graph: this.store.taskGraph({ includeDismissed: false, taskId: query.taskId || null, depth: query.depth === undefined ? 2 : Number(query.depth), limit: Number(query.limit || 100) }) };
       if (method === 'GET' && resource === 'notifications') return this.notifications(device, query);
@@ -92,6 +94,12 @@ class MobileApi {
     if (!this.onPause) throw this._error(503, 'Assistant pause control is unavailable.');
     if (typeof body.paused !== 'boolean') throw this._error(400, 'Assistant pause requires a boolean paused value.');
     try { return { health: await this.onPause({ paused: body.paused }) }; }
+    catch (error) { throw this._error(error.status || 409, error.message); }
+  }
+
+  async confirmAutonomousRun(runId, body = {}) {
+    if (!this.onReconcile) throw this._error(503, 'Autonomous run reconciliation is unavailable.');
+    try { return { run: await this.onReconcile({ runId, evidence: body.evidence }) }; }
     catch (error) { throw this._error(error.status || 409, error.message); }
   }
 

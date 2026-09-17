@@ -1187,6 +1187,7 @@ async function start() {
       if (backgroundHost) health.background = await backgroundHost.pause(appSettings.assistantPaused);
       return health;
     },
+    onReconcile: ({ runId, evidence }) => new BrowserActionService({ approvals: approvalService, store: hostStore }).reconcileUnknownRun(runId, { evidence }),
     getConnections: () => {
       const account = mailCredentials?.load('gmail-account') || '';
       const health = (provider) => account ? hostStore?.getConnectorHealth(`${provider}:${account}`) || null : null;
