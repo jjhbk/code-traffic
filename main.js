@@ -1066,7 +1066,7 @@ async function start() {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
             if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
             if (kind === 'assistant.replan') return runTaskReplan(payload);
-            if (kind === 'assistant.proactive-actions') return runProactiveActions();
+            if (kind === 'assistant.proactive-actions') return runProactiveActions(payload);
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
@@ -1441,16 +1441,21 @@ async function runScheduledDigest() {
   return digest;
 }
 
-async function runProactiveActions() {
+async function runProactiveActions({ decisions: delegatedDecisions = null } = {}) {
   if (!hostStore) return null;
   const tasks = hostStore.listTasks();
-  const decisions = proactivityService?.evaluateAsync
-    ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext() })
-    : (proactivityService?.evaluate(tasks) || []);
-  proactivityService?.enqueueAttentionNotifications(tasks, decisions);
+  const decisions = Array.isArray(delegatedDecisions)
+    ? delegatedDecisions.filter((decision) => {
+      const task = tasks.find((item) => item.taskId === decision.taskId);
+      return task && task.status === 'active' && (decision.taskVersion == null || Number(decision.taskVersion) === Number(task.updatedAt));
+    })
+    : (proactivityService?.evaluateAsync
+      ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext() })
+      : (proactivityService?.evaluate(tasks) || []));
+  if (!Array.isArray(delegatedDecisions)) proactivityService?.enqueueAttentionNotifications(tasks, decisions);
   await executeAutomaticBrowserDecisions(tasks, decisions);
   await prepareProactiveFollowUps(tasks, decisions);
-  return { tasks: tasks.length, decisions: decisions.length };
+  return { tasks: tasks.length, decisions: decisions.length, decisionsDelegated: Array.isArray(delegatedDecisions) };
 }
 
 async function runBrowserAvailabilityCheck({ workflowId } = {}) {

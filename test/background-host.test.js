@@ -23,11 +23,13 @@ const { WorkflowService } = require('../host/workflows/service');
 
   const liveStore = new SqliteStore({ filename: databasePath });
   let jobs = 0;
+  let delegatedDecision = null;
   let cadenceObserved = false;
   const host = new BackgroundHost({ databasePath, onJob: async (kind, payload) => {
     if (kind === 'workflow.resume') return new WorkflowService({ store: liveStore }).resume(payload.workflowId);
     if (kind === 'assistant.proactive-actions') {
       jobs += 1;
+      delegatedDecision = payload.decisions?.find((decision) => decision.taskId === 'background-replan-task') || null;
       await new Promise((resolve) => setTimeout(resolve, 200));
       cadenceObserved = liveStore.exportData().data.jobs.some((job) => job.kind === 'assistant.proactive-actions'
         && job.status === 'queued' && String(job.dedupe_key || '').startsWith('assistant.proactive-actions:'));
@@ -50,6 +52,7 @@ const { WorkflowService } = require('../host/workflows/service');
   }
   assert.equal(current.state, 'needs_attention');
   assert.equal(jobs, 1);
+  assert.equal(typeof delegatedDecision?.taskVersion, 'number', 'worker binds delegated decisions to the task version it evaluated');
   assert.equal(cadenceObserved, true);
   const replanProbe = new SqliteStore({ filename: databasePath });
   assert.equal(replanProbe.listPendingNotifications({ notificationClass: 'assistant-replan' }).length, 1);

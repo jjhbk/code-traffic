@@ -42,6 +42,19 @@ runtime.register('meeting.prep', async (payload) => meetingPrep.prepare(payload.
 runtime.register('tasks.reconcile', async (payload) => taskService.processAllAsync(payload.adapterId));
 for (const [kind, intervalMs] of [['assistant.proactive-actions', 30 * 1000], ['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000]]) {
   runtime.register(kind, async (payload) => {
+    if (kind === 'assistant.proactive-actions') {
+      // The worker owns deterministic eligibility and durable attention
+      // notifications. Only execution requiring Electron credentials,
+      // Telegram, or the browser bridge returns to the parent.
+      const tasks = store.listTasks();
+      const decisions = proactivity.evaluate(tasks).map((decision) => {
+        const task = tasks.find((item) => item.taskId === decision.taskId);
+        return { ...decision, taskVersion: task?.updatedAt || null };
+      });
+      proactivity.enqueueAttentionNotifications(tasks, decisions);
+      delegate(kind, { decisions }, { nextKind: kind, intervalMs });
+      return { tasks: tasks.length, decisions: decisions.length, decisionsDelegated: true };
+    }
     delegate(kind, payload, { nextKind: kind, intervalMs });
   });
 }
