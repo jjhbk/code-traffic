@@ -22,6 +22,12 @@ assert.deepEqual(service.selectAutomaticDecisions([
   { taskId: 'auto-1', type: 'execute_browser' },
   { taskId: 'auto-2', type: 'execute_browser' },
 ], { maxActions: 1 }).deferred.map((decision) => decision.taskId), ['auto-2']);
+assert.deepEqual(service.selectAutomaticDecisions([
+  { taskId: 'auto-browser', type: 'execute_browser' },
+  { taskId: 'auto-provider', type: 'execute_provider' },
+  { taskId: 'auto-third', type: 'execute_browser' },
+  { taskId: 'auto-deferred', type: 'execute_provider' },
+], { maxActions: 3 }).selected.map((decision) => decision.taskId), ['auto-browser', 'auto-provider', 'auto-third'], 'browser and provider actions share one autonomous frontier');
 const decide = (task) => service.decide(task, { now });
 assert.equal(decide({ taskId: 'a', status: 'active', dueDate: 'today' }).type, 'digest');
 assert.equal(decide({ taskId: 'removed', status: 'active', sourceUnavailable: true, dueDate: 'today' }).reason, 'source-unavailable');

@@ -103,10 +103,7 @@ class ProactivityService {
 
   selectAutomaticDecisions(decisions = [], { maxActions = this.maxAutomaticActionsPerCycle } = {}) {
     const limit = Number.isInteger(maxActions) && maxActions >= 0 ? maxActions : this.maxAutomaticActionsPerCycle;
-    // Browser execution has a separate bridge frontier. Provider actions use
-    // the same per-cycle limit at their dispatch boundary, but must not enter
-    // the browser recipe executor.
-    const eligible = decisions.filter((decision) => decision?.type === 'execute_browser');
+    const eligible = decisions.filter((decision) => ['execute_browser', 'execute_provider'].includes(decision?.type));
     return {
       selected: eligible.slice(0, limit),
       deferred: eligible.slice(limit),

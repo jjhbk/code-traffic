@@ -1518,8 +1518,11 @@ async function runProactiveActions({ decisions: delegatedDecisions = null } = {}
       ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext() })
       : (proactivityService?.evaluate(tasks) || []));
   if (!Array.isArray(delegatedDecisions)) proactivityService?.enqueueAttentionNotifications(tasks, decisions);
-  await executeAutomaticBrowserDecisions(tasks, decisions);
-  await executeAutomaticProviderDecisions(tasks, decisions);
+  const frontier = proactivityService?.selectAutomaticDecisions
+    ? proactivityService.selectAutomaticDecisions(decisions).selected
+    : decisions.filter((item) => ['execute_browser', 'execute_provider'].includes(item.type)).slice(0, 3);
+  await executeAutomaticBrowserDecisions(tasks, frontier);
+  await executeAutomaticProviderDecisions(tasks, frontier);
   await prepareProactiveFollowUps(tasks, decisions);
   return { tasks: tasks.length, decisions: decisions.length, decisionsDelegated: Array.isArray(delegatedDecisions) };
 }
@@ -1527,7 +1530,7 @@ async function runProactiveActions({ decisions: delegatedDecisions = null } = {}
 async function executeAutomaticProviderDecisions(tasks, decisions) {
   if (!providerAutonomousActionService) return [];
   const executed = [];
-  for (const decision of decisions.filter((item) => item.type === 'execute_provider').slice(0, 3)) {
+  for (const decision of decisions.filter((item) => item.type === 'execute_provider')) {
     const task = tasks.find((item) => item.taskId === decision.taskId);
     if (!task || !decision.action) continue;
     try {
