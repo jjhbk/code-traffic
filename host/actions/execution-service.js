@@ -6,7 +6,7 @@
  * execution transition, persist a receipt, and retain ambiguous outcomes.
  */
 class ActionExecutionService {
-  constructor({ store, approvals, registry = null, providers = {}, clock = () => Date.now(), preflight = null, onConfirmed = null, onFailure = null } = {}) {
+  constructor({ store, approvals, registry = null, providers = {}, clock = () => Date.now(), preflight = null, onConfirmed = null, onFailure = null, onPostCommitError = null } = {}) {
     if (!store || !approvals) throw new Error('Action execution requires a store and approval service.');
     this.store = store;
     this.approvals = approvals;
@@ -16,6 +16,7 @@ class ActionExecutionService {
     this.preflight = preflight;
     this.onConfirmed = onConfirmed;
     this.onFailure = onFailure;
+    this.onPostCommitError = onPostCommitError;
   }
 
   async executeApproved(requestId, { principal, surface, decision = null } = {}) {
@@ -38,8 +39,13 @@ class ActionExecutionService {
       this.approvals.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: providerKey, surface, resultId: result?.id || result?.eventId || null } });
       const receipt = receiptFor(providerKey, action, result);
       const receiptRef = this.approvals.receipt({ attemptId: attempt.attemptId, receipt });
-      await this.onConfirmed?.({ action, result, receipt, attempt, request, surface });
-      return { status: 'confirmed', attemptId: attempt.attemptId, result, receipt, receiptRef };
+      let postCommitError = null;
+      try { await this.onConfirmed?.({ action, result, receipt, attempt, request, surface }); }
+      catch (error) {
+        postCommitError = error;
+        try { await this.onPostCommitError?.({ action, result, receipt, attempt, request, surface, error }); } catch (_) { /* Never change a committed provider outcome. */ }
+      }
+      return { status: 'confirmed', attemptId: attempt.attemptId, result, receipt, receiptRef, postCommitError };
     } catch (error) {
       const status = classifyFailure(error);
       this.approvals.execution({ attemptId: attempt.attemptId, requestId, status, details: { provider: providerKey, surface, error: error.message } });
@@ -72,8 +78,13 @@ class ActionExecutionService {
     const receipt = receiptFor('gmail', request.action, result, { reconciled: true });
     this.approvals.execution({ attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', surface, reconciled: true, messageId: result.messageId } });
     this.approvals.receipt({ attemptId, receipt });
-    await this.onConfirmed?.({ action: request.action, result, receipt, attempt, request, surface, reconciled: true });
-    return { status: 'confirmed', attemptId, messageId: result.messageId, reconciled: true };
+    let postCommitError = null;
+    try { await this.onConfirmed?.({ action: request.action, result, receipt, attempt, request, surface, reconciled: true }); }
+    catch (error) {
+      postCommitError = error;
+      try { await this.onPostCommitError?.({ action: request.action, result, receipt, attempt, request, surface, reconciled: true, error }); } catch (_) { /* Never change a committed provider outcome. */ }
+    }
+    return { status: 'confirmed', attemptId, messageId: result.messageId, reconciled: true, postCommitError };
   }
 }
 
