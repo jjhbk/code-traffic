@@ -956,6 +956,14 @@ class SqliteStore {
     });
   }
 
+  renewConnectorLease(adapterId, leaseToken, leaseMs = 10 * 60 * 1000, now = this.clock()) {
+    if (!adapterId || !leaseToken || !Number.isFinite(leaseMs) || leaseMs <= 0 || !Number.isFinite(now)) throw new Error('Invalid connector lease renewal.');
+    const result = this.db.prepare('UPDATE connector_leases SET lease_until = ?, updated_at = ? WHERE adapter_id = ? AND lease_token = ? AND lease_until >= ?')
+      .run(now + leaseMs, now, adapterId, leaseToken, now);
+    if (Number(result.changes) !== 1) throw new Error('Connector lease is missing or expired.');
+    return { adapterId, leaseToken, leaseUntil: now + leaseMs };
+  }
+
   releaseConnectorLease(adapterId, leaseToken) {
     if (!adapterId || !leaseToken) return false;
     const result = this.db.prepare('DELETE FROM connector_leases WHERE adapter_id = ? AND lease_token = ?').run(adapterId, leaseToken);

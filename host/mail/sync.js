@@ -23,6 +23,12 @@ class MailSync {
     if (!adapterId) throw new Error('A mail adapter id is required.');
     const lease = this.store.acquireConnectorLease(adapterId, this.ownerId, this.leaseMs, this.clock());
     if (!lease) return { adapterId, skipped: true, reason: 'connector-sync-in-progress', fetched: 0, inserted: 0, removed: 0, observations: [], cursorReset: false, nextCursor: this.store.getConnectorCursor(adapterId), reconciliationQueued: false, syncedAt: this.clock() };
+    let leaseLost = false;
+    const heartbeat = setInterval(() => {
+      try { this.store.renewConnectorLease(adapterId, lease.leaseToken, this.leaseMs, this.clock()); }
+      catch (_) { leaseLost = true; }
+    }, Math.max(1_000, Math.floor(this.leaseMs / 3)));
+    heartbeat.unref?.();
     let cursor = this.store.getConnectorCursor(adapterId);
     let reset = false;
     let result;
@@ -34,6 +40,7 @@ class MailSync {
         reset = true;
         result = await this.provider.sync({ cursor: null, boundedWindow });
       }
+      if (leaseLost) throw new Error('Connector sync lease was lost before results could be applied.');
       const messages = Array.isArray(result?.messages) ? result.messages : [];
       return this.store.transaction(() => {
         let inserted = 0;
@@ -56,6 +63,7 @@ class MailSync {
         return { adapterId, fetched: messages.length, inserted, removed, observations, cursorReset: reset, nextCursor, reconciliationQueued: Boolean(reconciliation), syncedAt: this.clock() };
       });
     } finally {
+      clearInterval(heartbeat);
       this.store.releaseConnectorLease(adapterId, lease.leaseToken);
     }
   }

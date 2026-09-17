@@ -32,6 +32,7 @@ const sync = new MailSync({ store, provider, clock: () => 1770000000000 });
   assert.equal((await removedSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' })).removed, 1);
   assert.equal(store.observations('gmail:me').length, 1);
   const heldLease = store.acquireConnectorLease('gmail:me', 'desktop-sync', 60_000, 1770000000000);
+  assert.equal(store.renewConnectorLease('gmail:me', heldLease.leaseToken, 60_000, 1770000000001).leaseUntil, 1770000060001);
   let blockedCalls = 0;
   const blockedSync = new MailSync({ store, ownerId: 'background-sync', provider: { async sync() { blockedCalls += 1; return { messages: [], nextCursor: 'should-not-run' }; } }, clock: () => 1770000000000 });
   const blockedResult = await blockedSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' });
