@@ -1,7 +1,7 @@
 const { matchesGrantConstraints } = require('../store/sqlite-store');
 
 class ProactivityService {
-  constructor({ store, modelRouter = null, clock = () => Date.now(), followUpAfterMs = 48 * 60 * 60 * 1000, modelCooldownMs = 15 * 60 * 1000, modelMaxCalls = 20 } = {}) {
+  constructor({ store, modelRouter = null, clock = () => Date.now(), followUpAfterMs = 48 * 60 * 60 * 1000, modelCooldownMs = 15 * 60 * 1000, modelMaxCalls = 20, maxAutomaticActionsPerCycle = 3 } = {}) {
     if (!store) throw new Error('Proactivity service requires a store.');
     this.store = store;
     this.modelRouter = modelRouter;
@@ -9,6 +9,9 @@ class ProactivityService {
     this.followUpAfterMs = followUpAfterMs;
     this.modelCooldownMs = modelCooldownMs;
     this.modelMaxCalls = modelMaxCalls;
+    this.maxAutomaticActionsPerCycle = Number.isInteger(maxAutomaticActionsPerCycle) && maxAutomaticActionsPerCycle > 0
+      ? maxAutomaticActionsPerCycle
+      : 3;
     this.modelDecisionCache = new Map();
   }
 
@@ -65,6 +68,15 @@ class ProactivityService {
       }
     }
     return refined;
+  }
+
+  selectAutomaticDecisions(decisions = [], { maxActions = this.maxAutomaticActionsPerCycle } = {}) {
+    const limit = Number.isInteger(maxActions) && maxActions >= 0 ? maxActions : this.maxAutomaticActionsPerCycle;
+    const eligible = decisions.filter((decision) => decision?.type === 'execute_browser');
+    return {
+      selected: eligible.slice(0, limit),
+      deferred: eligible.slice(limit),
+    };
   }
 
   enqueueAttentionNotifications(tasks = [], decisions = this.evaluate(tasks)) {

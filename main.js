@@ -1512,7 +1512,13 @@ async function executeAutomaticBrowserDecisions(tasks, decisions) {
   if (!planningService || !hostStore || !approvalService || !browserBridge) return [];
   const recipes = { [uberCabBooking.id]: uberCabBooking, [uberCabQuote.id]: uberCabQuote };
   const executed = [];
-  for (const decision of decisions.filter((item) => item.type === 'execute_browser')) {
+  const frontier = proactivityService?.selectAutomaticDecisions
+    ? proactivityService.selectAutomaticDecisions(decisions)
+    : { selected: decisions.filter((item) => item.type === 'execute_browser').slice(0, 3), deferred: [] };
+  if (frontier.deferred.length) {
+    console.error(`[assistant] automatic action frontier deferred ${frontier.deferred.length} action(s) until the next cycle`);
+  }
+  for (const decision of frontier.selected) {
     const recipe = recipes[decision.recipeId];
     const task = tasks.find((item) => item.taskId === decision.taskId);
     if (!recipe || !task) continue;

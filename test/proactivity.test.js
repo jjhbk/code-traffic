@@ -5,6 +5,18 @@ const { ProactivityService } = require('../host/proactivity/service');
 let now = 100_000;
 const store = new SqliteStore({ clock: () => now });
 const service = new ProactivityService({ store, followUpAfterMs: 1_000 });
+const frontier = service.selectAutomaticDecisions([
+  { taskId: 'auto-1', type: 'execute_browser' },
+  { taskId: 'auto-2', type: 'execute_browser' },
+  { taskId: 'auto-3', type: 'execute_browser' },
+  { taskId: 'wait-1', type: 'wait' },
+]);
+assert.deepEqual(frontier.selected.map((decision) => decision.taskId), ['auto-1', 'auto-2', 'auto-3']);
+assert.deepEqual(frontier.deferred, [], 'the default action frontier accepts three automatic actions per cycle');
+assert.deepEqual(service.selectAutomaticDecisions([
+  { taskId: 'auto-1', type: 'execute_browser' },
+  { taskId: 'auto-2', type: 'execute_browser' },
+], { maxActions: 1 }).deferred.map((decision) => decision.taskId), ['auto-2']);
 const decide = (task) => service.decide(task, { now });
 assert.equal(decide({ taskId: 'a', status: 'active', dueDate: 'today' }).type, 'digest');
 assert.equal(decide({ taskId: 'removed', status: 'active', sourceUnavailable: true, dueDate: 'today' }).reason, 'source-unavailable');
