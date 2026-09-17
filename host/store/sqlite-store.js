@@ -723,7 +723,7 @@ class SqliteStore {
   }
 
   addTaskRelation(fromTaskId, toTaskId, relationType, details = {}) {
-    const allowed = new Set(['depends_on', 'blocks', 'belongs_to', 'supersedes', 'related_to']);
+    const allowed = new Set(['depends_on', 'blocks', 'belongs_to', 'waiting_on', 'supersedes', 'related_to']);
     if (!allowed.has(relationType)) throw new Error('Invalid task relation.');
     if (!fromTaskId || !toTaskId || fromTaskId === toTaskId) throw new Error('A task relation requires two distinct tasks.');
     if (!details || typeof details !== 'object' || Array.isArray(details)) throw new Error('Task relation details must be an object.');
