@@ -38,16 +38,16 @@ class BrowserActionService {
     }
   }
 
-  async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', taskId = null, taskVersion = null, executor = this.executor } = {}) {
+  async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', taskId = null, taskVersion = null, workflowId = null, executor = this.executor } = {}) {
     if (!grantId || !executor) throw new Error('A standing grant and browser executor are required.');
     const checked = validateRecipe(recipe);
-    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, allowedOrigins: checked.allowedOrigins, inputs: { ...inputs }, effects: checked.effects, taskId, taskVersion };
+    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, allowedOrigins: checked.allowedOrigins, inputs: { ...inputs }, effects: checked.effects, taskId, taskVersion, workflowId };
     if (taskId && taskVersion != null) {
       const currentTask = this.store.listTasks({ includeDismissed: true }).find((task) => task.taskId === taskId);
       if (!currentTask || currentTask.status !== 'active' || Number(currentTask.updatedAt) !== Number(taskVersion)) throw new Error('This browser action is stale because the task changed.');
     }
     const actionDigest = digest(action);
-    const run = this.approvals.createAuthorizedAutonomousRun(action, { grantId, actionDigest, principal, surface, details: { capability: action.capability, recipeId: action.recipeId, principal, surface } });
+    const run = this.approvals.createAuthorizedAutonomousRun(action, { grantId, actionDigest, principal, surface, recoveryKind: 'assistant.recover-browser-run', details: { capability: action.capability, recipeId: action.recipeId, principal, surface } });
     try {
       this.store.updateAutonomousRun(run.runId, 'dispatched', { details: { surface } });
       const receipt = await executor.run(checked, inputs, { approve: async () => true });
@@ -68,10 +68,35 @@ class BrowserActionService {
     const grant = this.store.getStandingGrant(run.grantId);
     if (!grant || grant.principal !== principal) throw new Error('The autonomous run is not owned by this user.');
     const details = { ...run.details, reconciliation: { source: 'user', principal, evidence: cleanEvidence, reconciledAt: this.clock() } };
-    return this.store.updateAutonomousRun(runId, 'confirmed', {
+    const reconciled = this.store.updateAutonomousRun(runId, 'confirmed', {
       details,
       receipt: { status: 'confirmed', verification: 'user-reconciled', evidence: cleanEvidence, runId, actionDigest: run.actionDigest },
     });
+    if (run.action?.workflowId) this.store.updateWorkflow(run.action.workflowId, { state: 'completed', payload: { ...this.store.getWorkflow(run.action.workflowId)?.payload, outcome: 'confirmed', verification: 'user-reconciled' }, details: { runId } });
+    return reconciled;
+  }
+
+  recoverInFlightRun(runId) {
+    let run = this.store.getAutonomousRun(runId);
+    if (!run) throw new Error('Browser run was not found.');
+    if (['authorized', 'dispatched'].includes(run.status)) {
+      run = this.store.updateAutonomousRun(runId, 'unknown', { details: { ...run.details, recoveredAfterRestart: true, recoveredAt: this.clock() } });
+    }
+    if (run.status !== 'unknown') return { status: run.status, runId, recovered: false };
+    if (run.action?.workflowId) {
+      const workflow = this.store.getWorkflow(run.action.workflowId);
+      if (workflow && !['completed', 'cancelled'].includes(workflow.state)) {
+        this.store.updateWorkflow(run.action.workflowId, { state: 'needs_attention', payload: { ...workflow.payload, outcome: 'unknown', runId }, details: { reason: 'browser-outcome-unknown', runId } });
+      }
+    }
+    const taskId = run.action?.taskId || runId;
+    this.store.enqueueNotification({
+      notificationId: `assistant-attention:${taskId}:${runId}`,
+      dateKey: `assistant-attention:${taskId}:${runId}`,
+      notificationClass: 'assistant-attention',
+      items: [{ taskId: run.action?.taskId || null, summary: `Browser action ${run.action?.recipeId || 'needs verification'}`, reason: 'An automatic browser action may have completed before restart.', evidence: { runId } }],
+    });
+    return { status: 'unknown', runId, recovered: true };
   }
 }
 

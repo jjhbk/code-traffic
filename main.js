@@ -1122,6 +1122,10 @@ async function start() {
               if (!providerAutonomousActionService) throw new Error('Provider autonomous execution is unavailable.');
               return providerAutonomousActionService.reconcileUnknownRun(payload.runId);
             }
+            if (kind === 'assistant.recover-browser-run') {
+              if (!hostStore || !approvalService) throw new Error('Browser recovery is unavailable.');
+              return new BrowserActionService({ approvals: approvalService, store: hostStore }).recoverInFlightRun(payload.runId);
+            }
             if (kind === 'assistant.proactive-actions') return runProactiveActions(payload);
             if (kind === 'connector.gmail.fetch' && googleProviderProcess) return googleProviderProcess.request(kind, payload);
             if (kind === 'connector.calendar.fetch' && googleProviderProcess) return googleProviderProcess.request(kind, payload);
@@ -1296,6 +1300,10 @@ async function start() {
     assistantRuntime.register('assistant.reconcile-provider-run', async ({ runId }) => {
       if (!providerAutonomousActionService) throw new Error('Provider autonomous execution is unavailable.');
       return providerAutonomousActionService.reconcileUnknownRun(runId);
+    });
+    assistantRuntime.register('assistant.recover-browser-run', async ({ runId }) => {
+      if (!hostStore || !approvalService) throw new Error('Browser recovery is unavailable.');
+      return new BrowserActionService({ approvals: approvalService, store: hostStore }).recoverInFlightRun(runId);
     });
     assistantRuntime.register('browser.availability.check', async (payload) => runBrowserAvailabilityCheck(payload));
     assistantRuntime.register('meeting.prep', async (payload) => runMeetingPrep(payload));

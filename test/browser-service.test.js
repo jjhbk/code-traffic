@@ -24,6 +24,12 @@ const { uberCabBooking } = require('../host/browser/recipes');
     executor: { run: async () => { const error = new Error('network timeout after request'); error.outcomeStatus = 'unknown'; throw error; } },
   }), /network timeout/);
   assert.equal(store.getExecutionAttempts(uncertainId)[0].status, 'unknown');
+  const grant = approvals.createStandingGrant({ capability: 'browser.commit' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { recipeId: uberCabBooking.id }, expiresAt: Date.now() + 60_000 });
+  const inFlight = await service.executeWithStandingGrant(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 }, { grantId: grant.grantId, workflowId: 'missing-workflow', executor: { run: async () => ({ status: 'confirmed' }) } });
+  const recoveryJob = store.exportData().data.jobs.find((job) => job.kind === 'assistant.recover-browser-run' && JSON.parse(job.payload_json).runId === inFlight.runId);
+  assert.ok(recoveryJob, 'browser authorization persists a recovery job');
+  const recovered = await service.recoverInFlightRun(inFlight.runId);
+  assert.equal(recovered.status, 'confirmed', 'completed browser runs are not downgraded during recovery');
   store.close();
   console.log('browser action service tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
