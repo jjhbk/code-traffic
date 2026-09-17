@@ -11,6 +11,7 @@ class WorkflowService {
   transition(workflowId, state, details = {}) {
     const workflow = this.store.getWorkflow(workflowId);
     if (!workflow) throw new Error('Workflow not found.');
+    if (state === 'cancelled' && ['completed', 'cancelled'].includes(workflow.state)) throw new Error(`Workflow is already ${workflow.state}.`);
     if (!ACTIVE_STATES.has(workflow.state) && state !== 'cancelled') throw new Error('Completed workflows cannot transition.');
     return this.store.updateWorkflow(workflowId, { state, details });
   }

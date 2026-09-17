@@ -114,6 +114,10 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
     body: { deviceId: 'other-phone', eventId: 'spoofed-location', latitude: 1, longitude: 2, accuracy: 5, consent: true },
     device: { deviceId: 'authenticated-phone' },
   }), /device identity does not match/);
+  const terminalWorkflow = store.createWorkflow({ workflowType: 'terminal-mobile-control', state: 'completed', payload: {} });
+  const terminalCancel = await request(port, `/api/v1/mobile/workflows/${terminalWorkflow.workflowId}/cancel`, { method: 'POST', body: {} });
+  assert.equal(terminalCancel.status, 409);
+  assert.equal(store.getWorkflow(terminalWorkflow.workflowId).state, 'completed');
 
   await board.closeServer(); store.close(); console.log('mobile API tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

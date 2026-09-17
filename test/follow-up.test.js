@@ -42,7 +42,7 @@ store.updateWorkflow(noSentAt.workflow.workflowId, { state: 'waiting_event', pay
 assert.equal(followUp.observeReplies([{ observationId: 'old-no-sent-at', threadId: 'thread-no-sent-at', direction: 'incoming', timestamp: noSentAt.workflow.createdAt - 1, body: 'Old reply.' }]).length, 0);
 assert.equal(followUp.observeReplies([{ observationId: 'fresh-no-sent-at', threadId: 'thread-no-sent-at', direction: 'incoming', timestamp: noSentAt.workflow.createdAt + 1, body: 'Fresh reply.' }])[0].state, 'verifying');
 assert.throws(() => followUp.prepare({ taskId: 'task-2', status: 'done', counterparty: 'alex@example.com', threadId: 'thread-2' }, { body: 'No' }), /active tasks/);
-followUp.cancel(result.workflow.workflowId);
-assert.equal(store.getWorkflow(result.workflow.workflowId).state, 'cancelled');
+assert.throws(() => followUp.cancel(result.workflow.workflowId), /already completed/);
+assert.equal(store.getWorkflow(result.workflow.workflowId).state, 'completed');
 store.close();
 console.log('follow-up workflow tests passed');

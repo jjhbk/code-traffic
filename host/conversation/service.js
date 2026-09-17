@@ -1,3 +1,5 @@
+const { WorkflowService } = require('../workflows/service');
+
 class ConversationService {
   constructor({ store, principal = 'signal-box-user', channel = 'desktop', proactivity = null, clock = () => Date.now() } = {}) {
     if (!store) throw new Error('Conversation service requires a store.');
@@ -6,6 +8,7 @@ class ConversationService {
     this.channel = channel;
     this.proactivity = proactivity;
     this.clock = clock;
+    this.workflows = new WorkflowService({ store });
   }
 
   open(conversationId = null) {
@@ -46,7 +49,7 @@ class ConversationService {
       if (!workflow) response = `I couldn't find workflow ${workflowCommand[1]}.`;
       else if (['completed', 'cancelled'].includes(workflow.state)) response = `Workflow “${workflow.workflowType}” is already ${workflow.state}.`;
       else {
-        const cancelled = this.store.updateWorkflow(workflow.workflowId, { state: 'cancelled', details: { reason: 'conversation-user-cancelled', channel: this.channel } });
+        const cancelled = this.workflows.cancel(workflow.workflowId, `conversation-user-cancelled:${this.channel}`);
         response = `Cancelled workflow “${cancelled.workflowType}”.`;
         reference = { workflowId: cancelled.workflowId };
       }

@@ -1,4 +1,5 @@
 const { normalizeIngestEvent } = require('../events/event-contract');
+const { WorkflowService } = require('../workflows/service');
 
 const PROTOCOL_VERSION = '1';
 const MOBILE_CONVERSATION_ID = 'mobile:default';
@@ -48,7 +49,7 @@ class MobileApi {
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
       if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
-      if (method === 'POST' && resource === 'workflows' && parts[4] && parts[5] === 'cancel') return { workflow: this.store.updateWorkflow(parts[4], { state: 'cancelled', details: { reason: 'mobile-user-cancelled' } }) };
+      if (method === 'POST' && resource === 'workflows' && parts[4] && parts[5] === 'cancel') return this.cancelWorkflow(parts[4]);
       if (method === 'POST' && resource === 'approvals' && parts[4] && parts[5] === 'decide') return this.decideApproval(parts[4], body);
       if (method === 'POST' && resource === 'notifications' && parts[4] && parts[5] === 'ack') return this.acknowledgeNotification(parts[4], device);
       if (method === 'GET' && resource === 'context') return { context: this.store.listContext() };
@@ -177,6 +178,11 @@ class MobileApi {
       if (body.snoozeUntilAt !== undefined) return this.store.snoozeTask(taskId, Number(body.snoozeUntilAt));
       throw new Error('A task status or snoozeUntilAt is required.');
     } catch (error) { throw this._error(400, error.message); }
+  }
+
+  cancelWorkflow(workflowId) {
+    try { return { workflow: new WorkflowService({ store: this.store }).cancel(workflowId, 'mobile-user-cancelled') }; }
+    catch (error) { throw this._error(409, error.message); }
   }
 
   savePlace(body = {}) {
