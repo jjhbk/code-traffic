@@ -187,14 +187,48 @@ class GoogleDriveProvider {
   }
 
   async sync({ cursor = null, boundedWindow = 100 } = {}) {
-    const query = new URLSearchParams({ q: 'trashed = false', pageSize: String(Math.min(1000, boundedWindow)), orderBy: 'modifiedTime desc', fields: 'nextPageToken,files(id,name,mimeType,description,modifiedTime,webViewLink,owners(emailAddress))' });
-    if (cursor) query.set('pageToken', cursor);
+    const limit = Math.max(1, Math.min(1000, Number(boundedWindow) || 100));
+    const bootstrap = decodeSyncCursor(cursor, 'drive-bootstrap');
+    const changes = decodeSyncCursor(cursor, 'drive-changes');
+    const legacyPageToken = cursor && !String(cursor).startsWith('sb1.') ? cursor : null;
+    if (bootstrap || legacyPageToken || !cursor) {
+      const query = new URLSearchParams({ q: 'trashed = false', pageSize: String(limit), orderBy: 'modifiedTime desc', fields: 'nextPageToken,files(id,name,mimeType,description,modifiedTime,webViewLink,owners(emailAddress))' });
+      const pageToken = bootstrap?.pageToken || legacyPageToken;
+      if (pageToken) query.set('pageToken', pageToken);
+      let result;
+      try { result = await this.request(`/files?${query}`); } catch (error) {
+        if (cursor && [400, 410].includes(error.status)) { const expired = new Error('Google Drive sync cursor expired.'); expired.code = 'CURSOR_EXPIRED'; throw expired; }
+        throw error;
+      }
+      const messages = (result.files || []).slice(0, limit).map((file) => this.normalizeFile(file));
+      if (result.nextPageToken) return { messages, nextCursor: encodeSyncCursor({ kind: 'drive-bootstrap', pageToken: result.nextPageToken }) };
+      const startPageToken = await this.startPageToken();
+      return { messages, nextCursor: encodeSyncCursor({ kind: 'drive-changes', pageToken: startPageToken }) };
+    }
+    if (!changes) throw Object.assign(new Error('Google Drive sync cursor is invalid.'), { code: 'CURSOR_EXPIRED' });
+    const query = new URLSearchParams({ pageToken: changes.pageToken, pageSize: String(limit), includeRemoved: 'true', fields: 'nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,description,modifiedTime,webViewLink,owners(emailAddress)))' });
     let result;
-    try { result = await this.request(`/files?${query}`); } catch (error) {
-      if (cursor && [400, 410].includes(error.status)) { const expired = new Error('Google Drive sync cursor expired.'); expired.code = 'CURSOR_EXPIRED'; throw expired; }
+    try { result = await this.request(`/changes?${query}`); } catch (error) {
+      if ([400, 410].includes(error.status)) { const expired = new Error('Google Drive sync cursor expired.'); expired.code = 'CURSOR_EXPIRED'; throw expired; }
       throw error;
     }
-    return { messages: (result.files || []).slice(0, boundedWindow).map((file) => ({ provider: 'google-drive', id: file.id, threadId: `drive:${file.id}`, etag: file.modifiedTime, subject: file.name || '(unnamed file)', body: [file.mimeType, file.description, file.webViewLink].filter(Boolean).join('\n'), timestamp: file.modifiedTime, from: file.owners?.[0]?.emailAddress || '', to: [], labels: [file.mimeType].filter(Boolean) })), nextCursor: result.nextPageToken || null };
+    const messages = (result.changes || []).slice(0, limit).map((change) => change.removed || !change.file
+      ? { provider: 'google-drive', id: change.fileId, threadId: `drive:${change.fileId}`, removed: true }
+      : this.normalizeFile(change.file));
+    const nextCursor = result.nextPageToken
+      ? encodeSyncCursor({ kind: 'drive-changes', pageToken: result.nextPageToken })
+      : encodeSyncCursor({ kind: 'drive-changes', pageToken: result.newStartPageToken || changes.pageToken });
+    return { messages, nextCursor };
+  }
+
+  normalizeFile(file = {}) {
+    return { provider: 'google-drive', id: file.id, threadId: `drive:${file.id}`, etag: file.modifiedTime, subject: file.name || '(unnamed file)', body: [file.mimeType, file.description, file.webViewLink].filter(Boolean).join('\n'), timestamp: file.modifiedTime, from: file.owners?.[0]?.emailAddress || '', to: [], labels: [file.mimeType].filter(Boolean) };
+  }
+
+  async startPageToken() {
+    const result = await this.request('/changes/startPageToken?fields=startPageToken');
+    if (!result.startPageToken) throw new Error('Google Drive did not return a change page token.');
+    return result.startPageToken;
   }
 
   async request(pathname, options = {}) {

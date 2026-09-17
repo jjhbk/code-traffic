@@ -22,14 +22,19 @@ class MailSync {
     }
     const messages = Array.isArray(result?.messages) ? result.messages : [];
     let inserted = 0;
+    let removed = 0;
     for (const raw of messages) {
+      if (raw?.removed) {
+        if (this.store.removeObservation(adapterId, raw.id)) removed += 1;
+        continue;
+      }
       const observation = normalizeMessage(raw, { accountAddress, adapterId });
       if (this.store.saveObservation(observation, adapterId)) inserted += 1;
     }
     if (result?.nextCursor !== undefined && result.nextCursor !== null) {
       this.store.setConnectorCursor(adapterId, String(result.nextCursor));
     }
-    return { adapterId, fetched: messages.length, inserted, cursorReset: reset, nextCursor: result?.nextCursor ?? cursor ?? null, syncedAt: this.clock() };
+    return { adapterId, fetched: messages.length, inserted, removed, cursorReset: reset, nextCursor: result?.nextCursor ?? cursor ?? null, syncedAt: this.clock() };
   }
 }
 

@@ -19,10 +19,14 @@ const provider = {
 const sync = new MailSync({ store, provider, clock: () => 1770000000000 });
 
 (async () => {
-  assert.deepEqual(await sync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' }), { adapterId: 'gmail:me', fetched: 1, inserted: 1, cursorReset: false, nextCursor: 'c1', syncedAt: 1770000000000 });
+  assert.deepEqual(await sync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' }), { adapterId: 'gmail:me', fetched: 1, inserted: 1, removed: 0, cursorReset: false, nextCursor: 'c1', syncedAt: 1770000000000 });
   assert.equal((await sync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' })).cursorReset, true);
   assert.equal(store.getConnectorCursor('gmail:me'), 'c2');
   assert.equal(store.observations('gmail:me').length, 2);
+  const removedProvider = { async sync() { return { messages: [{ id: 'm1', threadId: 't1', removed: true }], nextCursor: 'c3' }; } };
+  const removedSync = new MailSync({ store, provider: removedProvider, clock: () => 1770000000000 });
+  assert.equal((await removedSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' })).removed, 1);
+  assert.equal(store.observations('gmail:me').length, 1);
   store.close();
   console.log('mail sync tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -109,10 +109,23 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   assert.equal(calendarCalls[1].options.method, 'PUT');
   assert.match(calendarCalls[1].options.body, /New title/);
   await assert.rejects(() => editableCalendar.updateEvent('event-1', { summary: 'Conflict' }, { etag: 'stale' }), (error) => error.code === 'PRECONDITION_FAILED');
-  const drive = new GoogleDriveProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => ({ nextPageToken: 'drive-2', files: [{ id: 'file-1', name: 'Brief', mimeType: 'text/plain', modifiedTime: '2026-09-18T15:00:00Z', webViewLink: 'https://drive.google.com/file/file-1' }] }) }) });
+  let driveCalls = 0;
+  const drive = new GoogleDriveProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => {
+    driveCalls += 1;
+    if (url.includes('/changes/startPageToken')) return { startPageToken: 'drive-start' };
+    if (driveCalls === 1) return { nextPageToken: 'drive-2', files: [{ id: 'file-1', name: 'Brief', mimeType: 'text/plain', modifiedTime: '2026-09-18T15:00:00Z', webViewLink: 'https://drive.google.com/file/file-1' }] };
+    return { files: [{ id: 'file-2', name: 'Second', mimeType: 'text/plain', modifiedTime: '2026-09-18T15:30:00Z' }] };
+  } }) });
   const driveResult = await drive.sync({ boundedWindow: 10 });
-  assert.equal(driveResult.nextCursor, 'drive-2');
+  assert.match(driveResult.nextCursor, /^sb1\./);
   assert.equal(driveResult.messages[0].subject, 'Brief');
+  const driveBootstrapResult = await drive.sync({ cursor: driveResult.nextCursor, boundedWindow: 10 });
+  assert.equal(driveBootstrapResult.messages[0].subject, 'Second');
+  const driveChanges = new GoogleDriveProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => ({ newStartPageToken: 'drive-next', changes: [{ fileId: 'file-1', removed: true }, { fileId: 'file-2', file: { id: 'file-2', name: 'Updated', mimeType: 'text/plain', modifiedTime: '2026-09-18T16:00:00Z' } }] }) }) });
+  const driveChangesResult = await driveChanges.sync({ cursor: driveBootstrapResult.nextCursor, boundedWindow: 10 });
+  assert.equal(driveChangesResult.messages[0].removed, true);
+  assert.equal(driveChangesResult.messages[1].subject, 'Updated');
+  assert.match(driveChangesResult.nextCursor, /^sb1\./);
   const expiredDrive = new GoogleDriveProvider({ accessToken: 'access', fetchImpl: async () => ({ ok: false, status: 410, json: async () => ({ error: { message: 'expired' } }) }) });
   await assert.rejects(() => expiredDrive.sync({ cursor: 'expired-token' }), (error) => error.code === 'CURSOR_EXPIRED');
   const spam = classifyMessage({ from: 'news@marketing.example', subject: 'Limited time sale', body: 'Unsubscribe from this newsletter', headers: [{ name: 'List-Unsubscribe', value: '<https://example.test/unsubscribe>' }] });

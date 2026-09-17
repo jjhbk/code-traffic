@@ -853,6 +853,25 @@ class SqliteStore {
     return Number(result.changes) === 1;
   }
 
+  removeObservation(adapterId, messageId) {
+    const rows = this.db.prepare('SELECT observation_id AS observationId, observation_json AS observationJson FROM observations WHERE adapter_id = ? AND message_id = ?').all(adapterId, String(messageId));
+    if (!rows.length) return false;
+    const now = this.clock();
+    const update = this.db.prepare('UPDATE observations SET observation_json = ?, observed_at = ? WHERE observation_id = ?');
+    const remove = this.db.prepare('DELETE FROM observations WHERE observation_id = ?');
+    for (const row of rows) {
+      const referenced = this.db.prepare('SELECT 1 FROM task_evidence WHERE observation_id = ? LIMIT 1').get(row.observationId);
+      if (referenced) {
+        const observation = JSON.parse(row.observationJson);
+        update.run(JSON.stringify({ ...observation, removed: true, removedAt: now }), now, row.observationId);
+      } else {
+        remove.run(row.observationId);
+      }
+      this.audit('observation-removed', null, null, { observationId: row.observationId, adapterId, messageId: String(messageId), tombstone: Boolean(referenced) });
+    }
+    return true;
+  }
+
   observations(adapterId = null) {
     const rows = adapterId
       ? this.db.prepare('SELECT observation_json AS observationJson FROM observations WHERE adapter_id = ? ORDER BY observed_at').all(adapterId)
