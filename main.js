@@ -396,7 +396,13 @@ function wireIpc() {
     if (!conversationService) throw new Error('Assistant conversation is unavailable.');
     return conversationService.handle({ conversationId: 'desktop:signal-box', text, externalId: `desktop:${crypto.randomUUID()}` });
   });
-  ipcMain.handle('assistant:status', () => assistantRuntime?.health() || { running: false, busy: false });
+  ipcMain.handle('assistant:status', () => assistantRuntime?.health() || { running: false, busy: false, paused: false });
+  ipcMain.handle('assistant:pause', (_event, { paused } = {}) => {
+    if (!assistantRuntime) throw new Error('Assistant runtime is unavailable.');
+    appSettings = { ...appSettings, assistantPaused: Boolean(paused) };
+    writeSettings(app.getPath('userData'), appSettings);
+    return assistantRuntime.setPaused(appSettings.assistantPaused);
+  });
   ipcMain.handle('assistant:workflows', () => hostStore?.listWorkflows({ activeOnly: true }) || []);
   ipcMain.handle('assistant:cancel-workflow', (_event, { workflowId } = {}) => {
     if (!workflowId || !hostStore) throw new Error('Assistant workflow storage is unavailable.');
@@ -1029,6 +1035,7 @@ async function start() {
   assistantRuntime = hostStore ? new AssistantRuntime({
     store: hostStore,
     intervalMs: 30 * 1000,
+    paused: appSettings.assistantPaused === true,
     onError: (error) => console.error(`[assistant] runtime tick failed: ${error.message}`),
   }) : null;
   if (assistantRuntime) {

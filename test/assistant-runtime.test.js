@@ -9,6 +9,10 @@ let processed = 0;
 runtime.register('unit', async (payload) => { processed += payload.amount; });
 runtime.schedule('unit', { amount: 2 }, now, 'unit:first');
 (async () => {
+  assert.equal(runtime.health().paused, false);
+  assert.equal(runtime.setPaused(true).paused, true);
+  assert.deepEqual(await runtime.tick(), []);
+  runtime.setPaused(false);
   await runtime.tick();
   assert.equal(processed, 2);
   assert.equal(runtime.health().busy, false);

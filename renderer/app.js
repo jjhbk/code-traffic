@@ -499,6 +499,10 @@ async function loadAssistantConversation() {
   workflowsTarget.replaceChildren();
   target.replaceChildren();
   try {
+    const status = await window.signalBox.getAssistantStatus();
+    const pauseButton = document.getElementById('assistant-pause');
+    pauseButton.textContent = status.paused ? 'Resume' : 'Pause';
+    pauseButton.dataset.paused = status.paused ? 'true' : 'false';
     const [messages, decisions, workflows] = await Promise.all([
       window.signalBox.getAssistantConversation(), window.signalBox.getAssistantDecisions(), window.signalBox.getAssistantWorkflows(),
     ]);
@@ -535,6 +539,13 @@ async function loadAssistantConversation() {
 }
 document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));
 document.getElementById('assistant-refresh').addEventListener('click', loadAssistantConversation);
+document.getElementById('assistant-pause').addEventListener('click', async () => {
+  const button = document.getElementById('assistant-pause');
+  button.disabled = true;
+  try { await window.signalBox.setAssistantPaused({ paused: button.dataset.paused !== 'true' }); await loadAssistantConversation(); }
+  catch (caught) { showError(caught.message || 'Could not change assistant state.'); }
+  finally { button.disabled = false; }
+});
 document.getElementById('assistant-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const input = document.getElementById('assistant-input');

@@ -1,7 +1,7 @@
 const { JobRunner } = require('../workflows/job-runner');
 
 class AssistantRuntime {
-  constructor({ store, handlers = {}, workerId = `assistant-${process.pid}`, intervalMs = 30_000, clock = () => Date.now(), onError = null } = {}) {
+  constructor({ store, handlers = {}, workerId = `assistant-${process.pid}`, intervalMs = 30_000, clock = () => Date.now(), onError = null, paused = false } = {}) {
     if (!store) throw new Error('Assistant runtime requires a store.');
     this.store = store;
     this.clock = clock;
@@ -11,6 +11,7 @@ class AssistantRuntime {
     this.timer = null;
     this.startedAt = null;
     this.running = false;
+    this.paused = Boolean(paused);
   }
 
   register(kind, handler) { this.runner.register(kind, handler); }
@@ -20,6 +21,7 @@ class AssistantRuntime {
   }
 
   async tick() {
+    if (this.paused) return [];
     if (this.running) return [];
     this.running = true;
     try { return await this.runner.runOnce(); }
@@ -41,8 +43,10 @@ class AssistantRuntime {
     this.running = false;
   }
 
+  setPaused(paused) { this.paused = Boolean(paused); return this.health(); }
+
   health() {
-    return { running: Boolean(this.timer), busy: this.running, startedAt: this.startedAt, intervalMs: this.intervalMs };
+    return { running: Boolean(this.timer), busy: this.running, paused: this.paused, startedAt: this.startedAt, intervalMs: this.intervalMs };
   }
 }
 
