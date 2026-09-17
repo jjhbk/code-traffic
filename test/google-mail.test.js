@@ -75,6 +75,11 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   assert.match(calls[2].options.body, /threadId/);
   const reconciled = await provider.reconcileReply({ to: 'a@example.com', subject: 'Re: Hello', body: 'Thanks', threadId: 't1' });
   assert.deepEqual(reconciled, { found: true, messageId: 'sent-1', threadId: 't1' });
+  const preciseProvider = new GmailProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => url.includes('/threads/') ? ({ messages: [
+    { id: 'old-similar', threadId: 't1', internalDate: '1999999999000', payload: { headers: [{ name: 'To', value: 'a@example.com' }, { name: 'Subject', value: 'Re: Hello' }], body: { data: 'VGhhbmtz' } } },
+    { id: 'exact-attempt', threadId: 't1', internalDate: '2000000001000', payload: { headers: [{ name: 'X-Signal-Box-Attempt', value: 'attempt-1' }, { name: 'To', value: 'different@example.com' }], body: { data: 'VW5yZWxhdGVk' } } },
+  ] }) : {} }) });
+  assert.deepEqual(await preciseProvider.reconcileReply({ to: 'a@example.com', subject: 'Re: Hello', body: 'Thanks', threadId: 't1', signalBoxAttemptId: 'attempt-1', sentAfter: 2000000000000 }), { found: true, messageId: 'exact-attempt', threadId: 't1' });
   const calendar = new GoogleCalendarProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => ({ nextSyncToken: 'cal-2', items: [{ id: 'event-1', summary: 'Design review', start: { dateTime: '2026-09-18T15:00:00Z' }, end: { dateTime: '2026-09-18T16:00:00Z' }, organizer: { email: 'organizer@example.com' } }] }) }) });
   const calendarResult = await calendar.sync({ cursor: 'cal-1' });
   assert.equal(calendarResult.nextCursor, 'cal-2');

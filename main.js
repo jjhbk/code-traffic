@@ -768,8 +768,8 @@ async function dispatchApprovedReply(requestId, principal, surface, { decision =
   const attempt = approvalService.claimExecution({ requestId, details: { capability: action.capability, destination: action.destination, surface } });
   approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: resolvedDecision.decisionId, surface } });
   try {
-    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'gmail', surface } });
-    const sent = await provider.sendReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId, inReplyTo: action.inReplyTo, references: action.references });
+    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'gmail', surface, dispatchedAt: Date.now() } });
+    const sent = await provider.sendReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId, inReplyTo: action.inReplyTo, references: action.references, signalBoxAttemptId: attempt.attemptId });
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId } });
     approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId, destination: action.destination } });
     if (action.workflowId) {
@@ -829,7 +829,15 @@ async function reconcileApprovedReply(requestId, attemptId, surface) {
   if (attempt.status !== 'unknown') return { status: attempt.status, attemptId };
   const action = request.action;
   const provider = createGmailProvider();
-  const result = await provider.reconcileReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId });
+  const result = await provider.reconcileReply({
+    to: action.destination,
+    subject: action.content.subject,
+    body: action.content.body,
+    threadId: action.threadId,
+    signalBoxAttemptId: attempt.attemptId,
+    sentAfter: attempt.details?.dispatchedAt || null,
+    accountAddress: mailCredentials?.load('gmail-account') || null,
+  });
   if (!result.found) return { status: 'unknown', attemptId, reconciled: false };
   approvalService.execution({ attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', surface, reconciled: true, messageId: result.messageId } });
   approvalService.receipt({ attemptId, receipt: { provider: 'gmail', messageId: result.messageId, threadId: result.threadId, destination: action.destination, reconciled: true } });

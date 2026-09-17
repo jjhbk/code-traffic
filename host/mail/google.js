@@ -287,11 +287,12 @@ class GmailProvider {
     };
   }
 
-  async sendReply({ to, subject, body, threadId, inReplyTo = null, references = null } = {}) {
+  async sendReply({ to, subject, body, threadId, inReplyTo = null, references = null, signalBoxAttemptId = null } = {}) {
     if (!to || !/^\S+@\S+\.\S+$/.test(to)) throw new Error('A valid reply recipient is required.');
     if (!subject || !String(body || '').trim()) throw new Error('Reply subject and body are required.');
     if (!threadId) throw new Error('A Gmail thread ID is required for a reply.');
     const headers = [`To: ${to}`, `Subject: ${String(subject).replace(/[\r\n]/g, ' ')}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8'];
+    if (signalBoxAttemptId) headers.splice(2, 0, `X-Signal-Box-Attempt: ${String(signalBoxAttemptId).replace(/[\r\n]/g, ' ')}`);
     if (inReplyTo) headers.splice(1, 0, `In-Reply-To: ${String(inReplyTo).replace(/[\r\n]/g, ' ')}`);
     if (references) headers.splice(2, 0, `References: ${String(references).replace(/[\r\n]/g, ' ')}`);
     const raw = Buffer.from(`${headers.join('\r\n')}\r\n\r\n${String(body).replace(/[\r\n]+$/, '')}\r\n`, 'utf8')
@@ -299,13 +300,17 @@ class GmailProvider {
     return this.request('/messages/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw, threadId }) });
   }
 
-  async reconcileReply({ to, subject, body, threadId } = {}) {
+  async reconcileReply({ to, subject, body, threadId, signalBoxAttemptId = null, sentAfter = null, accountAddress = null } = {}) {
     if (!to || !subject || !body || !threadId) throw new Error('Reply reconciliation requires the original message details.');
     const thread = await this.request(`/threads/${encodeURIComponent(threadId)}?format=full`);
     const wantedBody = String(body).trim();
     const match = (thread.messages || []).find((message) => {
       const headers = Object.fromEntries((message.payload?.headers || []).map((header) => [String(header.name || '').toLowerCase(), String(header.value || '')]));
-      return headers.to?.includes(to) && headers.subject === subject && bodyFromPayload(message.payload).includes(wantedBody);
+      if (signalBoxAttemptId && headers['x-signal-box-attempt'] === String(signalBoxAttemptId)) return true;
+      if (sentAfter !== null && Number(message.internalDate || 0) < Number(sentAfter)) return false;
+      if (accountAddress && !String(headers.from || '').toLowerCase().includes(String(accountAddress).toLowerCase())) return false;
+      if (!headers.to?.toLowerCase().includes(String(to).toLowerCase()) || headers.subject !== subject) return false;
+      return bodyFromPayload(message.payload).includes(wantedBody);
     });
     return match ? { found: true, messageId: match.id, threadId: match.threadId || threadId } : { found: false, threadId };
   }
