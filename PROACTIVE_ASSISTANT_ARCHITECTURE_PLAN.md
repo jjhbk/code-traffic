@@ -64,6 +64,8 @@ Build the React Native application as a separate project with its own build, tes
 
 Share versioned API contracts and a small generated or published client package, not desktop UI/runtime code. Separate the Electron core from its renderer lifecycle, not from the Electron product. Keep credentials, graph state and browser execution on the host. For mobile access away from home, choose an authenticated encrypted direct connection or an outbound relay transport after a connectivity spike. A relay is transport only, not a hosted assistant; do not expose existing local control ports publicly.
 
+Electron remains a complete, independently usable first-class client. Feature parity is required for assistant conversation, Today/attention views, task and workflow inspection, approvals, cancellation/pause, memory and preference management, connected-source setup, browser-session controls, diagnostics, export/deletion and existing session-board functionality. The mobile app is the preferred daily surface and contributes mobile context; it is not a reason to remove or permanently hide any Electron capability. Both clients operate on the same authoritative core state and show the same verified workflow outcomes, with surface-specific controls where the device allows them.
+
 Mobile/Electron-core contract:
 
 - Explicit pairing to an Electron profile, per-device credentials, revocable sessions and strict profile isolation. The core authorizes every task, context record, grant and workflow reference. Relay use must not weaken device authentication or payload confidentiality.

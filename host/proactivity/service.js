@@ -11,6 +11,8 @@ class ProactivityService {
     if (['done', 'dismissed'].includes(task.status)) return this._decision(task, 'wait', 'task-closed', []);
     if (task.status === 'snoozed' && Number(task.snoozedUntil || 0) > now) return this._decision(task, 'wait', 'task-snoozed', []);
     if (task.counterparty && this.store.isSuppressed('counterparty', task.counterparty, now)) return this._decision(task, 'wait', 'counterparty-suppressed', []);
+    const blockers = this._blockingTasks(task);
+    if (blockers.length) return this._decision(task, 'wait', 'blocked-by-dependency', blockers.map((item) => `Waiting on “${item.summary || item.taskId}”.`), { blockingTaskIds: blockers.map((item) => item.taskId) });
     const evidence = task.evidence?.text ? [task.evidence.text] : [];
     if (task.confidence === 'low' && !task.dueDate) return this._decision(task, 'clarify', 'low-confidence-obligation', evidence);
     if (task.dueDate === 'today' || task.dueDate === 'tomorrow') return this._decision(task, 'digest', `due-${task.dueDate}`, evidence);
@@ -25,8 +27,19 @@ class ProactivityService {
     return tasks.map((task) => this.decide(task, options));
   }
 
-  _decision(task, type, reason, evidence) {
-    return { taskId: task.taskId, type, reason, evidence, capability: type === 'draft_follow_up' ? 'gmail.send' : null, requiresApproval: type === 'draft_follow_up' };
+  _blockingTasks(task) {
+    const relations = this.store.taskRelations(task.taskId);
+    const tasks = new Map(this.store.listTasks({ includeDismissed: true }).map((item) => [item.taskId, item]));
+    const blockerIds = relations.flatMap((relation) => {
+      if (['depends_on', 'waiting_on'].includes(relation.relationType) && relation.fromTaskId === task.taskId) return [relation.toTaskId];
+      if (relation.relationType === 'blocks' && relation.toTaskId === task.taskId) return [relation.fromTaskId];
+      return [];
+    });
+    return [...new Set(blockerIds)].map((taskId) => tasks.get(taskId)).filter((item) => item && !['done', 'dismissed'].includes(item.status));
+  }
+
+  _decision(task, type, reason, evidence, details = {}) {
+    return { taskId: task.taskId, type, reason, evidence, ...details, capability: type === 'draft_follow_up' ? 'gmail.send' : null, requiresApproval: type === 'draft_follow_up' };
   }
 }
 

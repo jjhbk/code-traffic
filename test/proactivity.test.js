@@ -12,5 +12,14 @@ assert.equal(decide({ taskId: 'c', status: 'active', owner: 'counterparty', bloc
 store.setSuppression('counterparty', 'alex@example.com');
 assert.equal(decide({ taskId: 'c', status: 'active', owner: 'counterparty', blocker: 'self', updatedAt: now - 2_000, counterparty: 'alex@example.com' }).type, 'wait');
 assert.equal(decide({ taskId: 'd', status: 'snoozed', snoozedUntil: now + 100 }).reason, 'task-snoozed');
+store.saveTaskCandidate({ candidateId: 'blocked-task', observationId: 'blocked-observation', summary: 'Prepare proposal', evidence: { start: 0, end: 1, text: 'Prepare proposal' }, extractorVersion: 'test' });
+store.saveTaskCandidate({ candidateId: 'dependency-task', observationId: 'dependency-observation', summary: 'Get pricing', evidence: { start: 0, end: 1, text: 'Get pricing' }, extractorVersion: 'test' });
+store.addTaskRelation('blocked-task', 'dependency-task', 'depends_on', { reason: 'pricing is required' });
+const blocked = decide({ taskId: 'blocked-task', status: 'active', dueDate: 'today' });
+assert.equal(blocked.type, 'wait');
+assert.equal(blocked.reason, 'blocked-by-dependency');
+assert.deepEqual(blocked.blockingTaskIds, ['dependency-task']);
+store.setTaskStatus('dependency-task', 'done', { reason: 'received' });
+assert.equal(decide({ taskId: 'blocked-task', status: 'active', dueDate: 'today' }).type, 'digest');
 store.close();
 console.log('proactivity tests passed');
