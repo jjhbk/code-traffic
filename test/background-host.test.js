@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { SqliteStore } = require('../host/store/sqlite-store');
 const { BackgroundHost } = require('../host/runtime/background-host');
+const { WorkflowService } = require('../host/workflows/service');
 
 (async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-background-'));
@@ -14,8 +15,9 @@ const { BackgroundHost } = require('../host/runtime/background-host');
   store.enqueueJob({ kind: 'assistant.digest', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest' });
   store.close();
 
+  const liveStore = new SqliteStore({ filename: databasePath });
   let jobs = 0;
-  const host = new BackgroundHost({ databasePath, onJob: async (kind) => { if (kind === 'assistant.digest') jobs += 1; } });
+  const host = new BackgroundHost({ databasePath, onJob: async (kind, payload) => { if (kind === 'workflow.resume') return new WorkflowService({ store: liveStore }).resume(payload.workflowId); if (kind === 'assistant.digest') jobs += 1; } });
   const initial = await host.start();
   assert.equal(initial.running, true);
   assert.equal((await host.health()).paused, false);
@@ -33,6 +35,7 @@ const { BackgroundHost } = require('../host/runtime/background-host');
   assert.equal(current.state, 'needs_attention');
   assert.equal(jobs, 1);
   assert.deepEqual(await host.stop(), { stopped: true });
+  liveStore.close();
   fs.rmSync(directory, { recursive: true, force: true });
   console.log('background host tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

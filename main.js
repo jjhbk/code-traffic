@@ -1110,6 +1110,7 @@ async function start() {
           forkImpl: forkBackgroundUtility,
           paused: appSettings.assistantPaused === true,
           onJob: async (kind, payload) => {
+            if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);

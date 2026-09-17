@@ -1,6 +1,5 @@
 const { SqliteStore } = require('../store/sqlite-store');
 const { AssistantRuntime } = require('./assistant');
-const { WorkflowService } = require('../workflows/service');
 
 const token = process.env.SIGNAL_BOX_BACKGROUND_TOKEN || '';
 const databasePath = process.argv[2];
@@ -20,19 +19,18 @@ function callParent(kind, payload) {
   });
 }
 const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
-runtime.register('workflow.resume', async ({ workflowId }) => {
-  if (workflowId) new WorkflowService({ store }).resume(workflowId);
+runtime.register('workflow.resume', async (payload) => {
+  delegate('workflow.resume', payload);
 });
 runtime.register('browser.availability.check', async (payload) => {
-  await callParent('browser.availability.check', payload);
+  delegate('browser.availability.check', payload);
 });
 runtime.register('meeting.prep', async (payload) => {
-  await callParent('meeting.prep', payload);
+  delegate('meeting.prep', payload);
 });
 for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
   runtime.register(kind, async (payload) => {
-    await callParent(kind, payload);
-    runtime.schedule(kind, {}, Date.now() + intervalMs, `${kind}:${Math.floor((Date.now() + intervalMs) / intervalMs)}`);
+    delegate(kind, payload, { nextKind: kind, intervalMs });
   });
 }
 runtime.start();
@@ -42,6 +40,32 @@ for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['ass
 
 function reply(id, result, error = null) {
   send({ type: 'response', id, result, error: error ? error.message : null });
+}
+
+function scheduleLater(kind, payload, runAt, dedupeKey, delayMs = 0) {
+  const timer = setTimeout(() => {
+    try { runtime.schedule(kind, payload, runAt, dedupeKey); }
+    catch (error) {
+      console.error(`[background] schedule ${kind} delayed: ${error.message}`);
+      scheduleLater(kind, payload, runAt, dedupeKey, 250);
+    }
+  }, delayMs);
+  timer.unref?.();
+}
+
+function delegate(kind, payload, { nextKind = null, nextPayload = {}, intervalMs = null } = {}) {
+  // Let JobRunner complete the claimed scheduler row before the parent opens a
+  // write transaction on the shared database. The parent remains the only
+  // owner of provider/workflow mutations; failed delegates are re-enqueued.
+  setImmediate(async () => {
+    try { await callParent(kind, payload); }
+    catch (error) {
+      console.error(`[background] ${kind} delegation failed: ${error.message}`);
+      scheduleLater(kind, payload, Date.now() + 1000, `retry:${kind}:${payload.workflowId || Date.now()}`);
+      return;
+    }
+    if (nextKind && Number.isFinite(intervalMs)) scheduleLater(nextKind, nextPayload, Date.now() + intervalMs, `${nextKind}:${Math.floor((Date.now() + intervalMs) / intervalMs)}`, 100);
+  });
 }
 
 listen((message) => {
