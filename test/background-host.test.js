@@ -19,14 +19,19 @@ const { WorkflowService } = require('../host/workflows/service');
   store.enqueueJob({ kind: 'tasks.reconcile', payload: { adapterId: 'background-fixture' }, runAt: Date.now(), dedupeKey: 'background-reconcile-fixture' });
   store.enqueueJob({ kind: 'assistant.digest.plan', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest-plan-fixture' });
   store.enqueueJob({ kind: 'assistant.proactive-actions', payload: {}, runAt: Date.now(), dedupeKey: 'background-proactive-actions' });
+  store.enqueueJob({ kind: 'assistant.sync.gmail', payload: {}, runAt: Date.now(), dedupeKey: 'background-gmail-sync' });
   store.close();
 
   const liveStore = new SqliteStore({ filename: databasePath });
   let jobs = 0;
   let delegatedDecision = null;
   let cadenceObserved = false;
-  const host = new BackgroundHost({ databasePath, onJob: async (kind, payload) => {
+  const host = new BackgroundHost({ databasePath, connectorAccounts: { gmail: 'owner@example.com' }, onJob: async (kind, payload) => {
     if (kind === 'workflow.resume') return new WorkflowService({ store: liveStore }).resume(payload.workflowId);
+    if (kind === 'connector.gmail.fetch') {
+      assert.equal(payload.cursor, null);
+      return { nextCursor: 'gmail-history-1', messages: [{ provider: 'gmail', id: 'background-message-1', threadId: 'background-thread-1', from: 'requester@example.com', to: ['owner@example.com'], subject: 'Background request', body: 'Please send the background update by Friday.', timestamp: Date.now() }] };
+    }
     if (kind === 'assistant.proactive-actions') {
       jobs += 1;
       delegatedDecision = payload.decisions?.find((decision) => decision.taskId === 'background-replan-task') || null;
@@ -46,8 +51,9 @@ const { WorkflowService } = require('../host/workflows/service');
     const probe = new SqliteStore({ filename: databasePath });
     current = probe.getWorkflow(workflow.workflowId);
     const notifications = probe.listPendingNotifications({ notificationClass: 'assistant-replan' });
+    const syncReady = probe.listTasks({ includeDismissed: true }).some((task) => task.summary === 'Background request');
     probe.close();
-    if (current.state === 'needs_attention' && jobs === 1 && cadenceObserved && notifications.length === 1) break;
+    if (current.state === 'needs_attention' && jobs === 1 && cadenceObserved && notifications.length === 1 && syncReady) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(current.state, 'needs_attention');
@@ -61,6 +67,10 @@ const { WorkflowService } = require('../host/workflows/service');
   assert.equal(reconciled.getWorkflow(workflow.workflowId).state, 'needs_attention');
   assert.equal(reconciled.listTasks().some((task) => task.summary === 'Background task'), true, 'background host reconciles tasks without Electron');
   assert.equal(reconciled.listPendingNotifications({ notificationClass: 'digest' }).length, 1, 'background host plans digests without Electron');
+  const syncedTask = reconciled.listTasks({ includeDismissed: true }).find((task) => task.summary === 'Background request');
+  assert.ok(syncedTask, 'background host applies connector results and extracts tasks without Electron');
+  assert.equal(reconciled.getConnectorCursor('gmail:owner@example.com'), 'gmail-history-1');
+  assert.equal(reconciled.getConnectorHealth('gmail:owner@example.com').status, 'healthy');
   reconciled.close();
   assert.deepEqual(await host.stop(), { stopped: true });
   liveStore.close();
