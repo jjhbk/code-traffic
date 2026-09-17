@@ -52,7 +52,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'workflows' && parts[4] && parts[5] === 'cancel') return this.cancelWorkflow(parts[4]);
       if (method === 'POST' && resource === 'approvals' && parts[4] && parts[5] === 'decide') return this.decideApproval(parts[4], body);
       if (method === 'POST' && resource === 'notifications' && parts[4] && parts[5] === 'ack') return this.acknowledgeNotification(parts[4], device);
-      if (method === 'GET' && resource === 'context') return { context: this.store.listContext() };
+      if (method === 'GET' && resource === 'context') return { context: this.store.listContext({ recordType: query.recordType || null }) };
       if (method === 'POST' && resource === 'context' && parts[4] && parts[5] && parts[6] === 'delete') return this.deleteContext(parts[4], parts[5]);
       if (method === 'GET' && resource === 'permissions') return { permissions: this.store.listStandingGrants({ principal: 'signal-box-user' }) };
       if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
@@ -112,7 +112,7 @@ class MobileApi {
     const decisions = this.proactivity.evaluateAsync
       ? await this.proactivity.evaluateAsync(tasks, { context: this.store.listContext() })
       : this.proactivity.evaluate(tasks);
-    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions, workflows: this.store.listWorkflows({ activeOnly: true }), notifications: this.notifications(device, query).notifications };
+    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions, workflows: this.store.listWorkflows({ activeOnly: true }), goals: this.store.listContext({ recordType: 'goal' }), notifications: this.notifications(device, query).notifications };
   }
 
   notifications(device = null, query = {}) {

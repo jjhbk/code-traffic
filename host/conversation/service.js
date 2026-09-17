@@ -36,6 +36,8 @@ class ConversationService {
     const command = content.match(/^\s*(dismiss|snooze)\s+([a-f0-9-]{8,})(?:\s+(\d+))?\s*$/i);
     const workflowCommand = content.match(/^\s*cancel\s+(?:workflow|work)\s+([a-f0-9-]{8,})\s*$/i);
     const memoryCommand = content.match(/^\s*(?:remember|save preference)\s+([^:]{2,80})\s*:\s*(.{1,500})\s*$/i);
+    const goalCommand = content.match(/^\s*(?:goal|set goal)\s+([^:]{2,80})\s*:\s*(.{1,1000})\s*$/i);
+    const goalsCommand = content.match(/^\s*(?:goals|my goals)\s*$/i);
     const forgetCommand = content.match(/^\s*forget\s+(person|project|goal|preference|fact|place)\s+(.{1,120})\s*$/i);
     const correctionCommand = content.match(/^\s*correct\s+([a-f0-9-]{8,})\s+(summary|due[- ]?date|owner|counterparty)\s*:\s*(.{1,500})\s*$/i);
     let response;
@@ -59,6 +61,17 @@ class ConversationService {
       response = deleted
         ? `Forgot ${recordType} “${recordKey}”.`
         : `I couldn't find ${recordType} “${recordKey}”.`;
+    } else if (goalCommand) {
+      const recordKey = goalCommand[1].trim().toLowerCase();
+      const value = goalCommand[2].trim();
+      this.store.upsertContext({ recordType: 'goal', recordKey, value, source: { channel: this.channel, conversationId: conversation.conversationId }, confidence: 'high', confirmed: true });
+      response = `I’ll track the goal “${recordKey}”.`;
+      reference = { goalKey: recordKey };
+    } else if (goalsCommand) {
+      const goals = this.store.listContext({ recordType: 'goal' });
+      response = goals.length
+        ? `Your goals:\n${goals.slice(0, 12).map((goal) => `• ${goal.recordKey}: ${typeof goal.value === 'object' ? JSON.stringify(goal.value) : goal.value}`).join('\n')}`
+        : 'You have no saved goals yet. Try “goal <name>: <outcome>”.';
     } else if (memoryCommand) {
       const recordKey = memoryCommand[1].trim().toLowerCase();
       const value = memoryCommand[2].trim();
