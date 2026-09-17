@@ -40,7 +40,7 @@ class FollowUpWorkflow {
       const reply = observations.find((observation) => {
         if (observation.threadId !== workflow.payload.threadId || observation.direction !== 'incoming') return false;
         if (!sentAt) return true;
-        const observedAt = Number(observation.timestamp || observation.internalDate || observation.createdAt || 0);
+        const observedAt = observationTime(observation.timestamp || observation.internalDate || observation.createdAt);
         return observedAt > sentAt;
       });
       if (!reply) continue;
@@ -52,6 +52,35 @@ class FollowUpWorkflow {
     }
     return changed;
   }
+
+  reconcileReply(workflowId, { resolved, reason, evidence = null } = {}) {
+    const workflow = this.store.getWorkflow(workflowId);
+    if (!workflow || workflow.workflowType !== 'gmail-follow-up' || workflow.state !== 'verifying') throw new Error('A follow-up must be verifying before its reply can be reconciled.');
+    const responseEvidence = evidence || workflow.payload.responseEvidence || null;
+    const payload = { ...workflow.payload, resolution: resolved ? 'resolved' : 'uncertain', resolutionReason: reason || null };
+    if (resolved) {
+      if (workflow.taskId) this.store.setTaskStatus(workflow.taskId, 'done', { workflowId, responseObservationId: workflow.payload.responseObservationId, evidence: responseEvidence, reason: reason || 'reply-confirmed' });
+      return this.store.updateWorkflow(workflowId, { state: 'completed', payload, details: { responseObservationId: workflow.payload.responseObservationId, reason: reason || 'reply-confirmed' } });
+    }
+    return this.store.updateWorkflow(workflowId, { state: 'needs_attention', payload, details: { responseObservationId: workflow.payload.responseObservationId, reason: reason || 'reply-needs-review' } });
+  }
+
+  reconcileReplies(observations = []) {
+    const changed = this.observeReplies(observations);
+    return changed.map((workflow) => this.reconcileReply(workflow.workflowId, classifyReply(workflow.payload.responseEvidence)));
+  }
+}
+
+function observationTime(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function classifyReply(body) {
+  const text = String(body || '').trim();
+  const resolved = /\b(done|complete(?:d)?|finished|ready|sent|attached|taken care of|handled|resolved)\b/i.test(text);
+  return { resolved, reason: resolved ? 'resolution-signal' : 'reply-needs-user-confirmation', evidence: text || null };
 }
 
 module.exports = { FollowUpWorkflow };
