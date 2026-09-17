@@ -1,22 +1,23 @@
 const crypto = require('crypto');
+const { resolveDueAt } = require('./dates');
 
-function candidateFromObservation(observation, { filters = null, extractorVersion = 'local-1' } = {}) {
-  return candidatesFromObservation(observation, { filters, extractorVersion })[0] || null;
+function candidateFromObservation(observation, { filters = null, extractorVersion = 'local-1', timeZone = observation?.timeZone || 'UTC', now = Date.now() } = {}) {
+  return candidatesFromObservation(observation, { filters, extractorVersion, timeZone, now })[0] || null;
 }
 
-function candidatesFromObservation(observation, { filters = null, extractorVersion = 'local-1' } = {}) {
+function candidatesFromObservation(observation, { filters = null, extractorVersion = 'local-1', timeZone = observation?.timeZone || 'UTC', now = Date.now() } = {}) {
   const text = `${observation.subject}\n${observation.body}`.trim();
   const commitment = /\b(i['’]?ll|i will|we['’]?ll|we will|can do|will (?:send|share|follow up|review|provide|finish)|i can|we can|please (?:send|share|review|confirm|provide|finish|follow up)|could you|would you|can you|need you to)\b/i.test(text);
   const eligibleUpdate = Boolean(filters?.existingTaskUpdate);
   if ((!commitment && !eligibleUpdate) || (filters && !filters.eligible)) return [];
   const clauses = splitObligationClauses(text);
   const candidates = clauses.map((clause, index) => candidateForClause(observation, clause, {
-    eligibleUpdate, extractorVersion, index, fallbackText: text, clauseCount: clauses.length,
+    eligibleUpdate, extractorVersion, index, fallbackText: text, clauseCount: clauses.length, timeZone, now,
   })).filter(Boolean);
   return candidates.length ? candidates : [candidateForClause(observation, text, { eligibleUpdate, extractorVersion, index: 0, fallbackText: text, clauseCount: 1 })].filter(Boolean);
 }
 
-function candidatesFromStructured(observation, obligations, { filters = null, extractorVersion = 'structured-1' } = {}) {
+function candidatesFromStructured(observation, obligations, { filters = null, extractorVersion = 'structured-1', timeZone = observation?.timeZone || 'UTC', now = Date.now() } = {}) {
   if (!Array.isArray(obligations) || (filters && !filters.eligible)) return [];
   const source = `${observation.subject}\n${observation.body}`.trim();
   return obligations.map((obligation, index) => {
@@ -38,6 +39,8 @@ function candidatesFromStructured(observation, obligations, { filters = null, ex
       counterparty: obligation.counterparty || (observation.direction === 'incoming' ? observation.from : observation.to?.[0] || null),
       dueDate: obligation.dueDate || null,
       dueDateBasis: obligation.dueDateBasis || null,
+      dueAt: resolveDueAt(obligation.dueDate, observation.timestamp, timeZone, now),
+      timeZone,
       confidence: ['low', 'medium', 'high'].includes(obligation.confidence) ? obligation.confidence : 'low',
       evidence: { start, end, text: evidenceText },
       extractorVersion,
@@ -50,7 +53,7 @@ function splitObligationClauses(text) {
   return String(text || '').split(/(?:\r?\n+|[.!?]+\s+|,\s+(?:and|then)\s+)/i).map((clause) => clause.trim()).filter((clause) => clause.length >= 8 && /\b(i['’]?ll|i will|we['’]?ll|we will|will|please|could you|would you|can you|need you to)\b/i.test(clause));
 }
 
-function candidateForClause(observation, clause, { eligibleUpdate, extractorVersion, index, fallbackText, clauseCount }) {
+function candidateForClause(observation, clause, { eligibleUpdate, extractorVersion, index, fallbackText, clauseCount, timeZone = observation?.timeZone || 'UTC', now = Date.now() }) {
   const text = String(clause || '').trim();
   const dueMatch = /\b(by|before|due)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(text);
   const evidenceText = text || fallbackText;
@@ -66,6 +69,8 @@ function candidateForClause(observation, clause, { eligibleUpdate, extractorVers
     counterparty: observation.direction === 'incoming' ? observation.from : observation.to?.[0] || null,
     dueDate: dueMatch ? dueMatch[2].toLowerCase() : null,
     dueDateBasis: dueMatch ? 'message-text' : null,
+    dueAt: resolveDueAt(dueMatch?.[2], observation.timestamp, timeZone, now),
+    timeZone,
     confidence: eligibleUpdate && !dueMatch ? 'low' : (dueMatch ? 'medium' : 'low'),
     evidence: { start: 0, end: evidenceText.length, text: evidenceText },
     extractorVersion,

@@ -42,6 +42,7 @@ const candidate = candidateFromObservation(observation, { filters: { eligible: t
 assert.equal(candidate.owner, 'self');
 assert.equal(candidate.blocker, 'counterparty');
 assert.equal(candidate.dueDate, 'friday');
+assert.equal(typeof candidate.dueAt, 'number');
 assert.equal(candidate.evidence.text.includes('by Friday'), true);
 console.log('privacy and task tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

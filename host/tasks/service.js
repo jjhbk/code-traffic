@@ -2,17 +2,19 @@ const { candidateFilters } = require('../mail/normalize');
 const { candidatesFromObservation, candidatesFromStructured } = require('./extract');
 
 class TaskService {
-  constructor({ store, extractorVersion = 'local-1', modelRouter = null } = {}) {
+  constructor({ store, extractorVersion = 'local-1', modelRouter = null, timeZone = 'UTC', clock = () => Date.now() } = {}) {
     if (!store) throw new Error('Task service requires a store.');
     this.store = store;
     this.extractorVersion = extractorVersion;
     this.modelRouter = modelRouter;
+    this.timeZone = timeZone;
+    this.clock = clock;
   }
 
   processObservation(observation) {
     if (observation?.removed) return [];
     const filters = candidateFilters(observation, { existingTaskThreadIds: new Set(this.store.taskThreadIds()) });
-    const candidates = candidatesFromObservation(observation, { filters, extractorVersion: this.extractorVersion });
+    const candidates = candidatesFromObservation(observation, { filters, extractorVersion: this.extractorVersion, timeZone: observation.timeZone || this.timeZone, now: this.clock() });
     if (!candidates.length) return [];
     return candidates.map((candidate) => this.store.saveTaskCandidate(candidate));
   }
@@ -27,7 +29,7 @@ class TaskService {
     if (this.modelRouter?.extractObligations) {
       try {
         const structured = await this.modelRouter.extractObligations(observation);
-        const candidates = candidatesFromStructured(observation, structured.obligations, { filters, extractorVersion: structured.version || 'structured-1' });
+        const candidates = candidatesFromStructured(observation, structured.obligations, { filters, extractorVersion: structured.version || 'structured-1', timeZone: observation.timeZone || this.timeZone, now: this.clock() });
         if (candidates.length) return candidates.map((candidate) => this.store.saveTaskCandidate(candidate));
       } catch (_) {
         // Model extraction is advisory. Deterministic extraction remains the safe fallback.
