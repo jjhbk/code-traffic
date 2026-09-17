@@ -60,6 +60,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'permissions') return { permission: this.createPermission(body) };
       if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'status') return { task: this.updateTask(parts[4], body) };
       if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'context-trigger') return { task: this.setTaskContextTrigger(parts[4], body) };
+      if (method === 'POST' && resource === 'context' && parts[4] === 'location' && parts[5] === 'delete') return this.deleteMobileLocationHistory();
       if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation(body, device);
       if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body, device);
       if (method === 'POST' && resource === 'context' && parts[4] === 'place') return this.savePlace(body);
@@ -200,6 +201,11 @@ class MobileApi {
 
   deleteContext(recordType, recordKey) {
     try { return { deleted: this.store.deleteContext(recordType, decodeURIComponent(recordKey)) }; }
+    catch (error) { throw this._error(400, error.message); }
+  }
+
+  deleteMobileLocationHistory() {
+    try { return { deleted: this.store.deleteMobileContextEvents('location') }; }
     catch (error) { throw this._error(400, error.message); }
   }
 

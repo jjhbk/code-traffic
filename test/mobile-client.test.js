@@ -57,5 +57,8 @@ assert.throws(() => new MobileCoreClient({ baseUrl: 'https://user:pass@assistant
   const sensorBody = JSON.parse(calls.at(-1).options.body);
   assert.equal(calls.at(-1).options.headers['Idempotency-Key'], sensorBody.eventId);
   assert.equal(sensor.accepted, true);
+  const deletedLocation = await client.deleteLocationHistory();
+  assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/context/location/delete');
+  assert.equal(deletedLocation.accepted, true);
   console.log('mobile client tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

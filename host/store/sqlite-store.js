@@ -745,6 +745,15 @@ class SqliteStore {
     return Number(result.changes);
   }
 
+  deleteMobileContextEvents(contextType = null) {
+    const allowed = contextType === null ? null : String(contextType).trim().toLowerCase();
+    if (allowed !== null && !['location', 'sensor'].includes(allowed)) throw new Error('Mobile context type must be location or sensor.');
+    const result = allowed === null
+      ? this.db.prepare(`DELETE FROM events WHERE adapter_id LIKE 'mobile:%' AND event_type = 'observation' AND json_extract(payload_json, '$.contextType') IN ('location', 'sensor')`).run()
+      : this.db.prepare(`DELETE FROM events WHERE adapter_id LIKE 'mobile:%' AND event_type = 'observation' AND json_extract(payload_json, '$.contextType') = ?`).run(allowed);
+    return Number(result.changes);
+  }
+
   createApproval({ requestId = crypto.randomUUID(), action, options, principal, surfaces = ['desktop'], expiresAt, policyVersion = '1' }) {
     if (!requestId || !action || !Array.isArray(options) || !options.length || !principal || !Number.isFinite(expiresAt)) throw new Error('Invalid approval request.');
     const actionJson = JSON.stringify(action);

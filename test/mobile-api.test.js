@@ -75,6 +75,9 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(location.status, 200); assert.equal(location.body.accepted.accepted, true);
   const duplicateLocation = await request(port, '/api/v1/mobile/context/location', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'location-1', latitude: 1, longitude: 2, accuracy: 5, consent: true } });
   assert.equal(duplicateLocation.body.accepted.duplicate, true);
+  const deletedLocationHistory = await request(port, '/api/v1/mobile/context/location/delete', { method: 'POST', commandId: 'delete-location-history-1', body: {} });
+  assert.equal(deletedLocationHistory.status, 200); assert.equal(deletedLocationHistory.body.deleted, 1);
+  assert.equal(store.exportData().data.events.some((event) => event.event_id === 'location-1'), false, 'location history deletion removes raw location events');
   store.ingestEvent({ eventId: 'old-mobile-location', adapterId: 'mobile:phone-1', type: 'observation', payload: { contextType: 'location', latitude: 1, longitude: 2 } });
   store.db.prepare('UPDATE events SET accepted_at = ? WHERE event_id = ?').run(Date.now() - 31 * 24 * 60 * 60 * 1000, 'old-mobile-location');
   const battery = await request(port, '/api/v1/mobile/context/sensor', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'battery-1', sensor: 'battery', value: { level: 0.35, state: 'unplugged' }, consent: true } });

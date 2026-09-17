@@ -90,6 +90,7 @@ class MobileCoreClient {
   async revokePermission(grantId) { return this.command(`/api/v1/mobile/permissions/${encodeURIComponent(grantId)}/revoke`, {}); }
   async decideApproval(requestId, optionId) { return this.command(`/api/v1/mobile/approvals/${encodeURIComponent(requestId)}/decide`, { optionId }); }
   async sendLocation(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/location', { ...body, eventId }, eventId); }
+  async deleteLocationHistory() { return this.command('/api/v1/mobile/context/location/delete', {}); }
   async savePlace(body) { return this.command('/api/v1/mobile/context/place', body); }
   async sendSensor(body = {}) { const eventId = body.eventId || id(); return this.command('/api/v1/mobile/context/sensor', { ...body, eventId }, eventId); }
   async deleteContext(recordType, recordKey) { return this.command(`/api/v1/mobile/context/${encodeURIComponent(recordType)}/${encodeURIComponent(recordKey)}/delete`, {}); }
