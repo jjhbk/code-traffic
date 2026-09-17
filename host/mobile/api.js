@@ -19,7 +19,7 @@ function encodeNotificationCursor(cursor) {
 }
 
 class MobileApi {
-  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, onPause = null, onReconcile = null, getStatus = null, getConnections = null, clock = () => Date.now() } = {}) {
+  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, onPause = null, onReconcile = null, getStatus = null, getConnections = null, clock = () => Date.now(), mobileContextRetentionMs = 30 * 24 * 60 * 60 * 1000 } = {}) {
     if (!store || !conversation || !proactivity) throw new Error('Mobile API requires store, conversation, and proactivity services.');
     this.store = store;
     this.conversation = conversation;
@@ -27,6 +27,7 @@ class MobileApi {
     this.approvals = approvals; this.pairing = pairing; this.context = context; this.onApproval = onApproval; this.onPause = onPause; this.onReconcile = onReconcile;
     this.getStatus = getStatus || (() => ({ running: true })); this.getConnections = getConnections || (() => []);
     this.clock = clock;
+    this.mobileContextRetentionMs = Number.isFinite(Number(mobileContextRetentionMs)) && Number(mobileContextRetentionMs) > 0 ? Number(mobileContextRetentionMs) : 30 * 24 * 60 * 60 * 1000;
   }
 
   async handle({ method, path, query = {}, body = {}, headers = {}, device = null } = {}) {
@@ -235,7 +236,9 @@ class MobileApi {
   ingestContextEvent(body, kind) {
     try {
       const event = normalizeIngestEvent({ eventId: body.eventId, source: 'mobile', actorId: body.deviceId || 'paired-device', producerEpoch: body.producerEpoch, seq: body.sequence, kind: 'observation', payload: { contextType: kind, ...body.payload } });
-      return { accepted: this.store.ingestEvent(event), event: { eventId: event.eventId, type: kind, receivedAt: this.clock() } };
+      const accepted = this.store.ingestEvent(event);
+      const purged = this.store.purgeMobileContextEvents(this.clock() - this.mobileContextRetentionMs);
+      return { accepted, purged, event: { eventId: event.eventId, type: kind, receivedAt: this.clock() } };
     } catch (error) { throw this._error(400, error.message); }
   }
 

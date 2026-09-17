@@ -731,6 +731,16 @@ class SqliteStore {
     return { accepted: true, duplicate: false, eventId };
   }
 
+  purgeMobileContextEvents(before) {
+    if (!Number.isFinite(Number(before))) throw new Error('A mobile context retention boundary is required.');
+    const result = this.db.prepare(`DELETE FROM events
+      WHERE adapter_id LIKE 'mobile:%'
+        AND event_type = 'observation'
+        AND accepted_at < ?
+        AND json_extract(payload_json, '$.contextType') IN ('location', 'sensor')`).run(Number(before));
+    return Number(result.changes);
+  }
+
   createApproval({ requestId = crypto.randomUUID(), action, options, principal, surfaces = ['desktop'], expiresAt, policyVersion = '1' }) {
     if (!requestId || !action || !Array.isArray(options) || !options.length || !principal || !Number.isFinite(expiresAt)) throw new Error('Invalid approval request.');
     const actionJson = JSON.stringify(action);

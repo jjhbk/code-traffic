@@ -75,8 +75,10 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(location.status, 200); assert.equal(location.body.accepted.accepted, true);
   const duplicateLocation = await request(port, '/api/v1/mobile/context/location', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'location-1', latitude: 1, longitude: 2, accuracy: 5, consent: true } });
   assert.equal(duplicateLocation.body.accepted.duplicate, true);
+  store.ingestEvent({ eventId: 'old-mobile-location', adapterId: 'mobile:phone-1', type: 'observation', payload: { contextType: 'location', latitude: 1, longitude: 2 } });
+  store.db.prepare('UPDATE events SET accepted_at = ? WHERE event_id = ?').run(Date.now() - 31 * 24 * 60 * 60 * 1000, 'old-mobile-location');
   const battery = await request(port, '/api/v1/mobile/context/sensor', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'battery-1', sensor: 'battery', value: { level: 0.35, state: 'unplugged' }, consent: true } });
-  assert.equal(battery.status, 200); assert.equal(battery.body.sensorContext.context.recordKey, 'mobile.sensor.battery');
+  assert.equal(battery.status, 200); assert.equal(battery.body.sensorContext.context.recordKey, 'mobile.sensor.battery'); assert.equal(battery.body.purged, 1, 'mobile context retention purges stale raw events');
   assert.equal(store.exportData().data.events.some((event) => event.event_id === 'battery-1'), true);
   const deletedBattery = await request(port, '/api/v1/mobile/context/fact/mobile.sensor.battery/delete', { method: 'POST', commandId: 'delete-battery-1', body: {} });
   assert.equal(deletedBattery.status, 200); assert.equal(deletedBattery.body.deleted, true);
