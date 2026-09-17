@@ -14,6 +14,16 @@ class ApprovalService {
     return this.store.createApproval({ action: { ...actionProposal, effects: actionProposal.effects || decisionPolicy.effects }, options: actionProposal.options || [{ optionId: 'allow', label: 'Allow once' }, { optionId: 'deny', label: 'Deny' }], principal, surfaces: decisionPolicy.surfaces, expiresAt, policyVersion: this.policyVersion });
   }
 
+  createStandingGrant(actionProposal, { principal, surface = 'desktop', constraints = {}, expiresAt, maxUses = null, cooldownMs = 0 } = {}) {
+    const decisionPolicy = this.policy.evaluate({ ...actionProposal, autonomous: false }, { surfaces: [surface] });
+    return this.store.createStandingGrant({ principal, capability: decisionPolicy.capability, surface, constraints, expiresAt, maxUses, cooldownMs, policyVersion: this.policyVersion });
+  }
+
+  authorizeStanding(action, { grantId, principal, surface = 'desktop' } = {}) {
+    this.policy.evaluate({ ...action, autonomous: false }, { surfaces: [surface] });
+    return this.store.consumeStandingGrant(grantId, action, { principal, surface, policyVersion: this.policyVersion, now: this.clock() });
+  }
+
   decide(requestId, optionId, { principal, surface } = {}) {
     if (!principal || !surface) throw new Error('Approval identity is required.');
     return this.store.decide({ requestId, optionId, principal, surface });

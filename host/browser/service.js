@@ -33,6 +33,26 @@ class BrowserActionService {
       throw error;
     }
   }
+
+  async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', executor = this.executor } = {}) {
+    if (!grantId || !executor) throw new Error('A standing grant and browser executor are required.');
+    const checked = validateRecipe(recipe);
+    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects };
+    this.approvals.authorizeStanding(action, { grantId, principal, surface });
+    const actionDigest = digest(action);
+    const run = this.store.createAutonomousRun({ grantId, action, actionDigest, details: { capability: action.capability, recipeId: action.recipeId, surface } });
+    this.store.updateAutonomousRun(run.runId, 'authorized', { details: { principal, surface } });
+    try {
+      this.store.updateAutonomousRun(run.runId, 'dispatched', { details: { surface } });
+      const receipt = await executor.run(checked, inputs, { approve: async () => true });
+      this.store.updateAutonomousRun(run.runId, 'confirmed', { details: { receiptStatus: receipt.status, surface }, receipt: { ...receipt, runId: run.runId, grantId, actionDigest } });
+      return { runId: run.runId, receipt };
+    } catch (error) {
+      const status = error.outcomeStatus === 'unknown' ? 'unknown' : 'failed';
+      this.store.updateAutonomousRun(run.runId, status, { details: { error: error.message, surface } });
+      throw error;
+    }
+  }
 }
 
 module.exports = { BrowserActionService };

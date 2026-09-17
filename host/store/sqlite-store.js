@@ -7,6 +7,23 @@ function loadSqlite() {
   catch (error) { throw new Error(`SQLite requires a runtime with node:sqlite support: ${error.message}`); }
 }
 
+function matchesGrantConstraints(action, constraints = {}) {
+  for (const key of ['recipeId', 'origin', 'destination', 'recipient']) {
+    if (constraints[key] !== undefined && String(action[key] || '') !== String(constraints[key])) return false;
+  }
+  for (const key of ['allowedOrigins', 'allowedRecipients', 'allowedRecipeIds']) {
+    if (constraints[key] !== undefined && (!Array.isArray(constraints[key]) || !constraints[key].includes(action[key]))) return false;
+  }
+  if (constraints.maxAmount !== undefined) {
+    const amount = Number(action.amount ?? action.cost ?? action.inputs?.amount);
+    if (!Number.isFinite(amount) || amount > Number(constraints.maxAmount)) return false;
+  }
+  if (constraints.inputs && typeof constraints.inputs === 'object') {
+    for (const [key, value] of Object.entries(constraints.inputs)) if (action.inputs?.[key] !== value) return false;
+  }
+  return true;
+}
+
 const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS adapters (
     adapter_id TEXT PRIMARY KEY,
@@ -257,6 +274,33 @@ const MIGRATIONS = [
     FOREIGN KEY(workflow_id) REFERENCES workflows(workflow_id),
     UNIQUE(conversation_id, external_id)
   );`,
+  `CREATE TABLE IF NOT EXISTS standing_grants (
+    grant_id TEXT PRIMARY KEY,
+    principal TEXT NOT NULL,
+    capability TEXT NOT NULL,
+    surface TEXT NOT NULL,
+    constraints_json TEXT NOT NULL,
+    policy_version TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    max_uses INTEGER,
+    used_count INTEGER NOT NULL,
+    cooldown_ms INTEGER NOT NULL,
+    last_used_at INTEGER,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS autonomous_runs (
+    run_id TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL,
+    action_json TEXT NOT NULL,
+    action_digest TEXT NOT NULL,
+    status TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    receipt_json TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`,
 ];
 
 class SqliteStore {
@@ -470,6 +514,72 @@ class SqliteStore {
   getExecutionAttempts(requestId) {
     return this.db.prepare('SELECT attempt_id AS attemptId, request_id AS requestId, status, details_json AS detailsJson, created_at AS createdAt, updated_at AS updatedAt FROM execution_attempts WHERE request_id = ? ORDER BY created_at, attempt_id')
       .all(requestId).map((row) => ({ ...row, details: JSON.parse(row.detailsJson) }));
+  }
+
+  createStandingGrant({ grantId = crypto.randomUUID(), principal, capability, surface, constraints = {}, policyVersion = '1', expiresAt, maxUses = null, cooldownMs = 0 } = {}) {
+    if (!grantId || !principal || !capability || !surface || !constraints || typeof constraints !== 'object' || Array.isArray(constraints) || !Number.isFinite(expiresAt) || (maxUses !== null && (!Number.isInteger(maxUses) || maxUses < 1)) || !Number.isInteger(cooldownMs) || cooldownMs < 0) throw new Error('Invalid standing grant.');
+    const now = this.clock();
+    if (expiresAt <= now) throw new Error('Standing grant must expire in the future.');
+    this.db.prepare(`INSERT INTO standing_grants(grant_id, principal, capability, surface, constraints_json, policy_version, expires_at, max_uses, used_count, cooldown_ms, last_used_at, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 'active', ?, ?)`)
+      .run(grantId, principal, capability, surface, JSON.stringify(constraints), policyVersion, expiresAt, maxUses, cooldownMs, now, now);
+    this.audit('standing-grant-created', null, null, { grantId, principal, capability, surface, expiresAt, maxUses });
+    return this.getStandingGrant(grantId);
+  }
+
+  getStandingGrant(grantId) {
+    const row = this.db.prepare(`SELECT grant_id AS grantId, principal, capability, surface, constraints_json AS constraintsJson, policy_version AS policyVersion, expires_at AS expiresAt, max_uses AS maxUses, used_count AS usedCount, cooldown_ms AS cooldownMs, last_used_at AS lastUsedAt, status, created_at AS createdAt, updated_at AS updatedAt FROM standing_grants WHERE grant_id = ?`).get(grantId);
+    return row ? { ...row, constraints: JSON.parse(row.constraintsJson) } : null;
+  }
+
+  revokeStandingGrant(grantId, reason = 'user-revoked') {
+    const result = this.db.prepare("UPDATE standing_grants SET status = 'revoked', updated_at = ? WHERE grant_id = ? AND status = 'active'").run(this.clock(), grantId);
+    if (!Number(result.changes)) throw new Error('Standing grant not found or already inactive.');
+    this.audit('standing-grant-revoked', null, null, { grantId, reason });
+    return this.getStandingGrant(grantId);
+  }
+
+  consumeStandingGrant(grantId, action, { principal, surface, policyVersion = null, now = this.clock() } = {}) {
+    if (!grantId || !action || !principal || !surface || !Number.isFinite(now)) throw new Error('Standing grant authorization is incomplete.');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const grant = this.getStandingGrant(grantId);
+      if (!grant || grant.status !== 'active') throw new Error('Standing grant is not active.');
+      if (grant.principal !== principal || grant.surface !== surface || grant.capability !== action.capability) throw new Error('Standing grant does not match this action.');
+      if (policyVersion && grant.policyVersion !== policyVersion) throw new Error('Standing grant uses an outdated policy.');
+      if (now >= grant.expiresAt) throw new Error('Standing grant has expired.');
+      if (grant.maxUses !== null && grant.usedCount >= grant.maxUses) throw new Error('Standing grant usage limit reached.');
+      if (grant.lastUsedAt !== null && now - grant.lastUsedAt < grant.cooldownMs) throw new Error('Standing grant cooldown is active.');
+      if (!matchesGrantConstraints(action, grant.constraints)) throw new Error('Action is outside standing grant constraints.');
+      this.db.prepare('UPDATE standing_grants SET used_count = used_count + 1, last_used_at = ?, updated_at = ? WHERE grant_id = ? AND status = \'active\'').run(now, now, grantId);
+      this.audit('standing-grant-consumed', null, null, { grantId, capability: action.capability, surface });
+      this.db.exec('COMMIT');
+      return this.getStandingGrant(grantId);
+    } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
+  }
+
+  createAutonomousRun({ runId = crypto.randomUUID(), grantId, action, actionDigest, status = 'prepared', details = {} } = {}) {
+    if (!runId || !grantId || !action || !actionDigest || !['prepared', 'authorized', 'dispatched', 'confirmed', 'failed', 'unknown'].includes(status)) throw new Error('Invalid autonomous run.');
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO autonomous_runs(run_id, grant_id, action_json, action_digest, status, details_json, receipt_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`)
+      .run(runId, grantId, JSON.stringify(action), actionDigest, status, JSON.stringify(details), now, now);
+    this.audit(`autonomous-run-${status}`, null, actionDigest, { runId, grantId, ...details });
+    return this.getAutonomousRun(runId);
+  }
+
+  updateAutonomousRun(runId, status, { details = {}, receipt = null } = {}) {
+    const run = this.getAutonomousRun(runId);
+    if (!run) throw new Error('Autonomous run not found.');
+    const transitions = { prepared: new Set(['authorized', 'failed']), authorized: new Set(['dispatched', 'failed']), dispatched: new Set(['confirmed', 'failed', 'unknown']), unknown: new Set(['confirmed', 'failed']), confirmed: new Set(), failed: new Set() };
+    if (run.status !== status && !transitions[run.status]?.has(status)) throw new Error(`Invalid autonomous run transition: ${run.status} to ${status}.`);
+    this.db.prepare('UPDATE autonomous_runs SET status = ?, details_json = ?, receipt_json = COALESCE(?, receipt_json), updated_at = ? WHERE run_id = ?').run(status, JSON.stringify(details), receipt ? JSON.stringify(receipt) : null, this.clock(), runId);
+    this.audit(`autonomous-run-${status}`, null, run.actionDigest, { runId, ...details });
+    return this.getAutonomousRun(runId);
+  }
+
+  getAutonomousRun(runId) {
+    const row = this.db.prepare('SELECT run_id AS runId, grant_id AS grantId, action_json AS actionJson, action_digest AS actionDigest, status, details_json AS detailsJson, receipt_json AS receiptJson, created_at AS createdAt, updated_at AS updatedAt FROM autonomous_runs WHERE run_id = ?').get(runId);
+    return row ? { ...row, action: JSON.parse(row.actionJson), details: JSON.parse(row.detailsJson), receipt: row.receiptJson ? JSON.parse(row.receiptJson) : null } : null;
   }
 
   recordReceipt({ receiptId = crypto.randomUUID(), attemptId, receipt }) {
@@ -992,4 +1102,4 @@ class SqliteStore {
   }
 }
 
-module.exports = { SqliteStore, MIGRATIONS };
+module.exports = { SqliteStore, MIGRATIONS, matchesGrantConstraints };
