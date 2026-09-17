@@ -36,9 +36,17 @@ class ConversationService {
     const command = content.match(/^\s*(dismiss|snooze)\s+([a-f0-9-]{8,})(?:\s+(\d+))?\s*$/i);
     const workflowCommand = content.match(/^\s*cancel\s+(?:workflow|work)\s+([a-f0-9-]{8,})\s*$/i);
     const memoryCommand = content.match(/^\s*(?:remember|save preference)\s+([^:]{2,80})\s*:\s*(.{1,500})\s*$/i);
+    const forgetCommand = content.match(/^\s*forget\s+(person|project|goal|preference|fact|place)\s+(.{1,120})\s*$/i);
     let response;
     let reference = {};
-    if (memoryCommand) {
+    if (forgetCommand) {
+      const recordType = forgetCommand[1].toLowerCase();
+      const recordKey = forgetCommand[2].trim().toLowerCase();
+      const deleted = this.store.deleteContext(recordType, recordKey);
+      response = deleted
+        ? `Forgot ${recordType} “${recordKey}”.`
+        : `I couldn't find ${recordType} “${recordKey}”.`;
+    } else if (memoryCommand) {
       const recordKey = memoryCommand[1].trim().toLowerCase();
       const value = memoryCommand[2].trim();
       this.store.upsertContext({ recordType: 'preference', recordKey, value, source: { channel: this.channel, conversationId: conversation.conversationId }, confidence: 'high', confirmed: true });
