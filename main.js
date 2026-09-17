@@ -998,10 +998,17 @@ async function start() {
     onError: (error) => console.error(`[assistant] runtime tick failed: ${error.message}`),
   }) : null;
   if (assistantRuntime) {
+    const scheduleNext = (kind, intervalMs) => assistantRuntime.schedule(kind, {}, Date.now() + intervalMs, `${kind}:${Math.floor((Date.now() + intervalMs) / intervalMs)}`);
+    assistantRuntime.register('assistant.sync.gmail', async () => { await runMailSync(); scheduleNext('assistant.sync.gmail', 5 * 60 * 1000); });
+    assistantRuntime.register('assistant.sync.calendar', async () => { await runCalendarSync(); scheduleNext('assistant.sync.calendar', 5 * 60 * 1000); });
+    assistantRuntime.register('assistant.sync.drive', async () => { await runDriveSync(); scheduleNext('assistant.sync.drive', 10 * 60 * 1000); });
     assistantRuntime.register('assistant.digest', async () => {
       await runScheduledDigest();
       return { completed: true };
     });
+    assistantRuntime.schedule('assistant.sync.gmail', {}, Date.now(), `assistant.sync.gmail:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
+    assistantRuntime.schedule('assistant.sync.calendar', {}, Date.now(), `assistant.sync.calendar:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
+    assistantRuntime.schedule('assistant.sync.drive', {}, Date.now(), `assistant.sync.drive:${Math.floor(Date.now() / (10 * 60 * 1000))}`);
     assistantRuntime.schedule('assistant.digest', {}, Date.now(), `assistant:digest:${Math.floor(Date.now() / 30_000)}`);
   }
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
@@ -1097,15 +1104,6 @@ async function start() {
   livenessTimer.unref?.();
   wireIpc();
   createWindow();
-  runMailSync().catch((error) => console.error(`[mail] initial sync failed: ${error.message}`));
-  mailSyncTimer = setInterval(() => runMailSync().catch((error) => console.error(`[mail] scheduled sync failed: ${error.message}`)), 5 * 60 * 1000);
-  mailSyncTimer.unref?.();
-  runCalendarSync().catch((error) => console.error(`[calendar] initial sync failed: ${error.message}`));
-  calendarSyncTimer = setInterval(() => runCalendarSync().catch((error) => console.error(`[calendar] scheduled sync failed: ${error.message}`)), 5 * 60 * 1000);
-  calendarSyncTimer.unref?.();
-  runDriveSync().catch((error) => console.error(`[drive] initial sync failed: ${error.message}`));
-  driveSyncTimer = setInterval(() => runDriveSync().catch((error) => console.error(`[drive] scheduled sync failed: ${error.message}`)), 10 * 60 * 1000);
-  driveSyncTimer.unref?.();
   if (appSettings.telegramEnabled !== false) telegram.start();
   assistantRuntime?.start();
   for (const session of board.list()) {
