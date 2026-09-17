@@ -1,4 +1,12 @@
 const board = document.getElementById('board');
+const softwareCursor = document.getElementById('software-cursor');
+document.documentElement.classList.add('software-cursor-enabled');
+window.addEventListener('mousemove', (event) => {
+  softwareCursor.style.left = `${event.clientX}px`;
+  softwareCursor.style.top = `${event.clientY}px`;
+  softwareCursor.style.opacity = '1';
+});
+window.addEventListener('mouseleave', () => { softwareCursor.style.opacity = '0'; });
 const summary = document.getElementById('summary');
 const error = document.getElementById('error');
 const terminalView = document.getElementById('terminal-view');
