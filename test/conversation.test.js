@@ -26,6 +26,8 @@ assert.equal(handled.taskId, candidate.taskId);
 const duplicate = assistant.handle({ conversationId: 'desktop:test', text: 'What needs attention?', externalId: 'desktop-message-1' });
 assert.equal(duplicate.duplicate, true);
 assert.equal(assistant.history('desktop:test').length, 2);
+assistant.handle({ conversationId: 'desktop:test', text: 'remember response style: concise and direct', externalId: 'desktop-message-memory' });
+assert.equal(store.getContext('preference', 'response style').value, 'concise and direct');
 assistant.handle({ conversationId: 'desktop:test', text: `snooze ${candidate.taskId} 2`, externalId: 'desktop-message-2' });
 assert.equal(store.listTasks().find((task) => task.taskId === candidate.taskId).status, 'snoozed');
 store.close();

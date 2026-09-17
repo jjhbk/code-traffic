@@ -32,9 +32,15 @@ class ConversationService {
     if (duplicate || inbound.direction !== 'inbound') return { duplicate: true, response: null, decisions: [], history: this.history(conversation.conversationId) };
     const tasks = this.store.listTasks({ includeDismissed: true });
     const command = content.match(/^\s*(dismiss|snooze)\s+([a-f0-9-]{8,})(?:\s+(\d+))?\s*$/i);
+    const memoryCommand = content.match(/^\s*(?:remember|save preference)\s+([^:]{2,80})\s*:\s*(.{1,500})\s*$/i);
     let response;
     let reference = {};
-    if (command) {
+    if (memoryCommand) {
+      const recordKey = memoryCommand[1].trim().toLowerCase();
+      const value = memoryCommand[2].trim();
+      this.store.upsertContext({ recordType: 'preference', recordKey, value, source: { channel: this.channel, conversationId: conversation.conversationId }, confidence: 'high', confirmed: true });
+      response = `I’ll remember your preference for “${recordKey}”.`;
+    } else if (command) {
       const task = tasks.find((item) => item.taskId === command[2]);
       if (!task) response = `I couldn't find task ${command[2]}.`;
       else if (command[1].toLowerCase() === 'dismiss') {
