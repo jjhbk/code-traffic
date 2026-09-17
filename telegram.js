@@ -291,14 +291,22 @@ class TelegramControl {
   }
 
   async recoverAssistantUpdates() {
-    const updates = this.callbackStore?.listRecoverableTelegramAssistantUpdates?.() || [];
+    const updates = this.callbackStore?.listRecoverableTelegramUpdates?.()
+      || this.callbackStore?.listRecoverableTelegramAssistantUpdates?.()
+      || [];
     for (const record of updates) {
-      if (parseCommand(record.update?.message?.text)?.name !== 'assistant') {
+      const isAssistant = parseCommand(record.update?.message?.text)?.name === 'assistant';
+      const isCallback = Boolean(record.update?.callback_query);
+      if (!isAssistant && !isCallback) {
         this.callbackStore?.completeTelegramUpdate?.(record.updateId);
         continue;
       }
-      await this.handleUpdate(record.update);
-      this.callbackStore?.completeTelegramUpdate?.(record.updateId);
+      try {
+        await this.handleUpdate(record.update);
+        this.callbackStore?.completeTelegramUpdate?.(record.updateId);
+      } catch (error) {
+        console.error(`[telegram] recoverable update ${record.updateId} will be retried: ${telegramErrorText(error)}`);
+      }
     }
   }
 

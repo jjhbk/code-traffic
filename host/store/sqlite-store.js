@@ -472,11 +472,15 @@ class SqliteStore {
     return Number(result.changes) > 0;
   }
 
-  listRecoverableTelegramAssistantUpdates({ maxAgeMs = 24 * 60 * 60 * 1000, limit = 50 } = {}) {
+  listRecoverableTelegramUpdates({ maxAgeMs = 24 * 60 * 60 * 1000, limit = 50 } = {}) {
     const cutoff = this.clock() - Math.max(1, Number(maxAgeMs) || 1);
     return this.db.prepare("SELECT update_id AS updateId, payload_json AS payloadJson, received_at AS receivedAt FROM telegram_updates WHERE status = 'processing' AND payload_json IS NOT NULL AND received_at >= ? ORDER BY received_at, update_id LIMIT ?")
       .all(cutoff, Math.min(100, Math.max(1, Number(limit) || 50)))
       .map((row) => ({ updateId: row.updateId, receivedAt: row.receivedAt, update: JSON.parse(row.payloadJson) }));
+  }
+
+  listRecoverableTelegramAssistantUpdates(options = {}) {
+    return this.listRecoverableTelegramUpdates(options).filter((record) => String(record.update?.message?.text || '').trim().startsWith('/assistant'));
   }
 
   completeTelegramUpdate(updateId) {
