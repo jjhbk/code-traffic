@@ -49,6 +49,7 @@ const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
 const { BrowserBridge } = require('./host/browser/bridge');
 const { BrowserActionService } = require('./host/browser/service');
 const { ActionRegistry } = require('./host/actions/registry');
+const { ActionExecutionService } = require('./host/actions/execution-service');
 const { BrowserRecipeExecutor } = require('./host/browser/executor');
 const { BridgeBrowserAdapter } = require('./host/browser/bridge-adapter');
 const { uberCabBooking, uberCabQuote } = require('./host/browser/recipes');
@@ -112,6 +113,7 @@ let proactivityService;
 let conversationService;
 let followUpWorkflow;
 let planningService;
+let actionExecutionService;
 const actionRegistry = new ActionRegistry({ recipes: [uberCabBooking, uberCabQuote] });
 let availabilityWorkflow;
 let meetingPrepWorkflow;
@@ -766,97 +768,20 @@ async function executeMobileApproval({ requestId, optionId } = {}) {
 }
 
 async function dispatchApprovedReply(requestId, principal, surface, { decision = null } = {}) {
-  if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
-  const request = hostStore.getApproval(requestId);
-  if (!request || request.action?.capability !== 'gmail.send') throw new Error('Reply approval not found.');
-  const action = request.action;
-  const currentTask = action.taskId ? hostStore.listTasks({ includeDismissed: true }).find((task) => task.taskId === action.taskId) : null;
-  if (action.taskId && (!currentTask || currentTask.status !== 'active')) throw new Error('This follow-up is no longer attached to an active task.');
-  if (action.taskVersion != null && currentTask && Number(currentTask.updatedAt) !== Number(action.taskVersion)) throw new Error('This follow-up is stale because the task changed.');
-  const provider = createGmailProvider();
-  const resolvedDecision = decision || approvalService.decide(requestId, 'send', { principal, surface });
-  const attempt = approvalService.claimExecution({ requestId, details: { capability: action.capability, destination: action.destination, surface } });
-  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: resolvedDecision.decisionId, surface } });
-  try {
-    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'gmail', surface, dispatchedAt: Date.now() } });
-    const sent = await provider.sendReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId, inReplyTo: action.inReplyTo, references: action.references, signalBoxAttemptId: attempt.attemptId });
-    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId } });
-    approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId, destination: action.destination } });
-    if (action.workflowId) {
-      const wakeAt = Date.now() + 48 * 60 * 60 * 1000;
-      hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: sent.id || null, sentAt: Date.now(), outcome: 'confirmed' }, details: { attemptId: attempt.attemptId } });
-      followUpWorkflow?.workflows.scheduleResume(action.workflowId, wakeAt);
-    }
-    return { status: 'confirmed', attemptId: attempt.attemptId, messageId: sent.id || null };
-  } catch (error) {
-    const status = error.name === 'AbortError' || /timeout|network|fetch/i.test(error.message) ? 'unknown' : 'failed';
-    approvalService.execution({ attemptId: attempt.attemptId, requestId, status, details: { provider: 'gmail', error: error.message, surface } });
-    if (action.workflowId) hostStore.updateWorkflow(action.workflowId, { state: status === 'unknown' ? 'needs_attention' : 'needs_attention', payload: { ...hostStore.getWorkflow(action.workflowId).payload, outcome: status, error: error.message }, details: { attemptId: attempt.attemptId } });
-    if (status === 'unknown') {
-      error.code = 'EXECUTION_UNKNOWN';
-      error.attemptId = attempt.attemptId;
-      error.requestId = requestId;
-    }
-    throw error;
-  }
+  if (!actionExecutionService) throw new Error('Durable action execution is unavailable.');
+  const result = await actionExecutionService.executeApproved(requestId, { principal, surface, decision });
+  return { status: result.status, attemptId: result.attemptId, messageId: result.result?.id || result.result?.messageId || null };
 }
 
 async function dispatchCalendarUpdate(requestId, principal, surface, { decision = null } = {}) {
-  if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
-  const request = hostStore.getApproval(requestId);
-  if (!request || request.action?.capability !== 'calendar.update') throw new Error('Calendar edit approval not found.');
-  const action = request.action;
-  const account = mailCredentials?.load('gmail-account') || '';
-  const refreshToken = mailCredentials?.load('gmail-refresh-token') || '';
-  const clientId = mailCredentials?.load('gmail-client-id') || GOOGLE_CLIENT_ID || '';
-  const clientSecret = mailCredentials?.load('gmail-client-secret') || null;
-  if (!account || !refreshToken || !clientId) throw new Error('Connect Google before editing Calendar.');
-  const provider = new GoogleCalendarProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
-  const resolvedDecision = decision || approvalService.decide(requestId, 'update', { principal, surface });
-  const attempt = approvalService.claimExecution({ requestId, details: { capability: action.capability, eventId: action.eventId, surface } });
-  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: resolvedDecision.decisionId, surface } });
-  try {
-    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'google-calendar', eventId: action.eventId, surface } });
-    const changes = { ...action.changes };
-    for (const key of ['start', 'end']) if (typeof changes[key] === 'string') changes[key] = { dateTime: new Date(changes[key]).toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
-    const updated = await provider.updateEvent(action.eventId, changes, { etag: action.etag });
-    approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: 'google-calendar', eventId: updated.id || action.eventId, surface } });
-    approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'google-calendar', eventId: updated.id || action.eventId, etag: updated.etag || null, changedFields: Object.keys(changes) } });
-    return { status: 'confirmed', attemptId: attempt.attemptId, eventId: updated.id || action.eventId };
-  } catch (error) {
-    const status = error.name === 'AbortError' || /timeout|network|fetch/i.test(error.message) ? 'unknown' : 'failed';
-    approvalService.execution({ attemptId: attempt.attemptId, requestId, status, details: { provider: 'google-calendar', eventId: action.eventId, error: error.message, surface } });
-    if (status === 'unknown') { error.code = 'EXECUTION_UNKNOWN'; error.attemptId = attempt.attemptId; error.requestId = requestId; }
-    throw error;
-  }
+  if (!actionExecutionService) throw new Error('Durable action execution is unavailable.');
+  const result = await actionExecutionService.executeApproved(requestId, { principal, surface, decision });
+  return { status: result.status, attemptId: result.attemptId, eventId: result.result?.id || result.result?.eventId || null };
 }
 
 async function reconcileApprovedReply(requestId, attemptId, surface) {
-  if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
-  const request = hostStore.getApproval(requestId);
-  const attempt = hostStore.getExecutionAttempt(attemptId);
-  if (!request || !attempt || attempt.requestId !== requestId) throw new Error('Reply execution record not found.');
-  if (attempt.status !== 'unknown') return { status: attempt.status, attemptId };
-  const action = request.action;
-  const provider = createGmailProvider();
-  const result = await provider.reconcileReply({
-    to: action.destination,
-    subject: action.content.subject,
-    body: action.content.body,
-    threadId: action.threadId,
-    signalBoxAttemptId: attempt.attemptId,
-    sentAfter: attempt.details?.dispatchedAt || null,
-    accountAddress: mailCredentials?.load('gmail-account') || null,
-  });
-  if (!result.found) return { status: 'unknown', attemptId, reconciled: false };
-  approvalService.execution({ attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', surface, reconciled: true, messageId: result.messageId } });
-  approvalService.receipt({ attemptId, receipt: { provider: 'gmail', messageId: result.messageId, threadId: result.threadId, destination: action.destination, reconciled: true } });
-  if (action.workflowId) {
-    const wakeAt = Date.now() + 48 * 60 * 60 * 1000;
-    hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: result.messageId, outcome: 'reconciled' }, details: { attemptId, reconciled: true } });
-    followUpWorkflow?.workflows.scheduleResume(action.workflowId, wakeAt);
-  }
-  return { status: 'confirmed', attemptId, messageId: result.messageId, reconciled: true };
+  if (!actionExecutionService) throw new Error('Durable action execution is unavailable.');
+  return actionExecutionService.reconcileGmail(requestId, attemptId, { surface });
 }
 
 async function spawnSession(tile, cwd, agent, sessionId, reopening) {
@@ -1219,6 +1144,35 @@ async function start() {
   if (hostStore && approvalService) {
     const workflows = new WorkflowService({ store: hostStore });
     followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows });
+    actionExecutionService = new ActionExecutionService({
+      store: hostStore,
+      approvals: approvalService,
+      registry: actionRegistry,
+      providers: {
+        gmail: () => createGmailProvider(),
+        calendar: () => createCalendarProvider(),
+        accountAddress: () => mailCredentials?.load('gmail-account') || null,
+      },
+      preflight: ({ action }) => {
+        const currentTask = action.taskId ? hostStore.listTasks({ includeDismissed: true }).find((task) => task.taskId === action.taskId) : null;
+        if (action.taskId && (!currentTask || currentTask.status !== 'active')) throw new Error('This follow-up is no longer attached to an active task.');
+        if (action.taskVersion != null && currentTask && Number(currentTask.updatedAt) !== Number(action.taskVersion)) throw new Error('This follow-up is stale because the task changed.');
+      },
+      onConfirmed: ({ action, result, attempt }) => {
+        if (action.workflowId && action.capability === 'gmail.send') {
+          const wakeAt = Date.now() + 48 * 60 * 60 * 1000;
+          const current = hostStore.getWorkflow(action.workflowId);
+          hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt, payload: { ...current.payload, sentMessageId: result.id || null, sentAt: Date.now(), outcome: 'confirmed' }, details: { attemptId: attempt.attemptId } });
+          followUpWorkflow?.workflows.scheduleResume(action.workflowId, wakeAt);
+        }
+      },
+      onFailure: ({ action, error, status, attempt }) => {
+        if (action.workflowId) {
+          const current = hostStore.getWorkflow(action.workflowId);
+          if (current) hostStore.updateWorkflow(action.workflowId, { state: 'needs_attention', payload: { ...current.payload, outcome: status, error: error.message }, details: { attemptId: attempt.attemptId } });
+        }
+      },
+    });
     planningService = new PlanningService({ workflows, browserActions: new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null }), registry: actionRegistry });
     availabilityWorkflow = new AvailabilityWorkflow({ store: hostStore, workflows });
     meetingPrepWorkflow = new MeetingPrepWorkflow({ store: hostStore, workflows });
@@ -1390,6 +1344,15 @@ function createGmailProvider() {
   const clientSecret = mailCredentials.load('gmail-client-secret');
   if (!refreshToken || !clientId) throw new Error('Connect Gmail before sending a reply.');
   return new GmailProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret: clientSecret || null }) });
+}
+
+function createCalendarProvider() {
+  if (!mailCredentials) throw new Error('Protected credential storage is unavailable.');
+  const refreshToken = mailCredentials.load('gmail-refresh-token');
+  const clientId = mailCredentials.load('gmail-client-id') || GOOGLE_CLIENT_ID || '';
+  const clientSecret = mailCredentials.load('gmail-client-secret') || null;
+  if (!refreshToken || !clientId) throw new Error('Connect Google before editing Calendar.');
+  return new GoogleCalendarProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
 }
 
 async function runMailSync() {
