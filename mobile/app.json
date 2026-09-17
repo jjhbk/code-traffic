@@ -2,6 +2,7 @@
   "expo": {
     "name": "Signal Box",
     "slug": "signal-box-mobile",
+    "plugins": ["expo-notifications"],
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
