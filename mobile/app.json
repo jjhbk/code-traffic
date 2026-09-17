@@ -5,6 +5,7 @@
     "icon": "./assets/icon.png",
     "plugins": ["expo-notifications", ["expo-location", { "locationAlwaysAndWhenInUsePermission": "Signal Box uses your location in the background only when you enable location-aware assistant context." }]],
     "version": "0.1.0",
+    "platforms": ["ios", "android"],
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "signalbox",

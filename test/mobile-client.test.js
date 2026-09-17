@@ -40,6 +40,10 @@ assert.throws(() => new MobileCoreClient({ baseUrl: 'https://user:pass@assistant
   const graph = await client.taskGraph({ depth: 1, limit: 10 });
   assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/graph?taskId=&depth=1&limit=10');
   assert.deepEqual(graph, { accepted: true });
+  const arrival = await client.setTaskContextTrigger('task-1', { placeKey: 'home' });
+  assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/tasks/task-1/context-trigger');
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { placeKey: 'home' });
+  assert.equal(arrival.accepted, true);
   const confirmed = await client.confirmAutonomousRun('run-1', 'Verified provider confirmation.');
   assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/assistant/autonomous-runs/run-1/confirm');
   assert.deepEqual(JSON.parse(calls.at(-1).options.body), { evidence: 'Verified provider confirmation.' });
