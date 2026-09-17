@@ -47,17 +47,29 @@ class MobileContextService {
   }
 
   processSensor({ sensor, value, capturedAt = this.clock(), deviceId = null, consentScope = null } = {}) {
-    if (String(sensor || '').toLowerCase() !== 'battery' || !value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Only structured battery context is currently supported.');
-    const level = Number(value.level);
-    if (!Number.isFinite(level) || level < 0 || level > 1) throw new Error('Battery context requires a level between 0 and 1.');
+    const normalizedSensor = String(sensor || '').toLowerCase();
+    if (!['battery', 'motion'].includes(normalizedSensor) || !value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Supported mobile sensors require a structured battery or motion value.');
+    let normalizedValue;
+    if (normalizedSensor === 'battery') {
+      const level = Number(value.level);
+      if (!Number.isFinite(level) || level < 0 || level > 1) throw new Error('Battery context requires a level between 0 and 1.');
+      normalizedValue = { sensor: 'battery', level, state: value.state || null, capturedAt };
+    } else {
+      const activities = new Set(['stationary', 'walking', 'running', 'cycling', 'unknown']);
+      const active = value.active;
+      const activity = String(value.activity || 'unknown').toLowerCase();
+      const confidence = value.confidence == null ? null : Number(value.confidence);
+      if (typeof active !== 'boolean' || !activities.has(activity) || (confidence !== null && (!Number.isFinite(confidence) || confidence < 0 || confidence > 1))) throw new Error('Motion context requires active, supported activity, and optional confidence values.');
+      normalizedValue = { sensor: 'motion', active, activity, confidence, capturedAt };
+    }
     if (!Number.isFinite(capturedAt)) return { stale: true, context: null };
     const now = this.clock();
     if (capturedAt > now + 5 * 60 * 1000 || now - capturedAt > this.maxSensorAgeMs) return { stale: true, context: null };
     const context = this.store.upsertContext({
       recordType: 'fact',
-      recordKey: 'mobile.sensor.battery',
-      value: { sensor: 'battery', level, state: value.state || null, capturedAt },
-      source: { channel: 'mobile', deviceId: deviceId || null, consentScope: consentScope || 'battery' },
+      recordKey: `mobile.sensor.${normalizedSensor}`,
+      value: normalizedValue,
+      source: { channel: 'mobile', deviceId: deviceId || null, consentScope: consentScope || normalizedSensor },
       confidence: 'high',
       confirmed: true,
       validUntil: now + this.maxSensorAgeMs,
