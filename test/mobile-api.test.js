@@ -7,9 +7,11 @@ const { ConversationService } = require('../host/conversation/service');
 const { ProactivityService } = require('../host/proactivity/service');
 const { MobileApi } = require('../host/mobile/api');
 
-function request(port, pathname, { method = 'GET', token = 'mobile-secret', body = null } = {}) {
+let commandSequence = 0;
+function request(port, pathname, { method = 'GET', token = 'mobile-secret', body = null, commandId = null } = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ hostname: '127.0.0.1', port, path: pathname, method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (res) => {
+    const idempotencyKey = commandId || body?.externalId || `test-command-${++commandSequence}`;
+    const req = http.request({ hostname: '127.0.0.1', port, path: pathname, method, headers: { Authorization: `Bearer ${token}`, ...(method === 'POST' ? { 'Idempotency-Key': idempotencyKey } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (res) => {
       let text = ''; res.setEncoding('utf8'); res.on('data', (chunk) => { text += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, body: text ? JSON.parse(text) : null }));
     });
