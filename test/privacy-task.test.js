@@ -16,6 +16,8 @@ assert.match(second.text, /\[email:ent_[a-f0-9]+\]/);
 assert.equal(first.offsets[0].sourceStart, 6);
 assert.equal(vault.rehydrate(first.offsets[0].entityId, 'email'), 'me@example.com');
 assert.throws(() => vault.rehydrate(first.offsets[0].entityId, 'phone'), /mismatched/);
+const nested = new PrivacyGateway({ vault: new EntityVault() }).prepareRemotePayload({ profile: { email: 'nested@example.com', notes: ['Call me at +1 555 555 5555'] } });
+assert.doesNotMatch(JSON.stringify(nested), /nested@example.com|555 555 5555/);
 assert.equal(await gateway.infer({ body: 'me@example.com' }), null);
 const vaultDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-vault-'));
 const vaultFile = path.join(vaultDirectory, 'vault.json');

@@ -164,7 +164,7 @@ class ModelRouter {
         ? (await this.privacyGateway.pseudonymizeWithRecognizer(value, (text) => this.recognizeEntities(text))).text
         : value;
     }
-    const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate']));
+    const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate', 'recordType', 'recordKey', 'value', 'confidence', 'confirmed']));
     const payload = JSON.stringify({ task: this.privacyGateway.prepareRemotePayload(safeTask), context: safeContext });
     this.metrics.lastPrivacyCheck = { at: Date.now(), fields: 1 + safeContext.length, redacted: !/@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(payload), payloadBytes: Buffer.byteLength(payload), boundary: this.mode === 'frontier' ? 'pseudonymized-to-frontier' : 'local-model-only' };
     try {
@@ -189,7 +189,7 @@ class ModelRouter {
     const client = this.mode === 'frontier' ? this.frontierClient : this.localClient;
     if (!client) return { ...fallback, source: 'deterministic', reason: 'model-not-configured' };
     const safeTask = this.privacyGateway.prepareRemotePayload({ taskId: task.taskId, summary: task.summary, counterparty: task.counterparty, dueDate: task.dueDate, evidence: task.evidence?.text });
-    const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate']));
+    const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate', 'recordType', 'recordKey', 'value', 'confidence', 'confirmed']));
     try {
       if (this.mode === 'frontier') this.metrics.frontierCalls += 1; else this.metrics.localCalls += 1;
       const draft = validateDraftReply(await client.complete({

@@ -1240,7 +1240,8 @@ async function prepareProactiveFollowUps(tasks, decisions) {
     const task = tasks.find((item) => item.taskId === decision.taskId);
     if (!task || hostStore.listWorkflows({ taskId: task.taskId, activeOnly: true }).some((workflow) => ['awaiting_approval', 'executing', 'waiting_event', 'verifying'].includes(workflow.state))) continue;
     try {
-      const draft = await modelRouter?.draftReply(task, decision.evidence ? [{ sourceId: task.taskId, summary: task.summary, status: task.status }] : [])
+      const context = hostStore.listContext().filter((record) => record.confirmed || ['preference', 'goal'].includes(record.recordType));
+      const draft = await modelRouter?.draftReply(task, decision.evidence ? [{ sourceId: task.taskId, summary: task.summary, status: task.status }, ...context] : context)
         || { subject: `Re: ${task.summary || 'Follow up'}`, body: `Following up on ${task.summary || 'this request'}.` };
       const { approval } = followUpWorkflow.prepare(task, { subject: draft.subject, body: draft.body, principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], expiresAt: Date.now() + 10 * 60 * 1000 });
       await telegram.sendReplyApproval(approval);

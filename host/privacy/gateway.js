@@ -120,10 +120,17 @@ class PrivacyGateway {
     const safe = {};
     for (const key of allowedFields) {
       if (!(key in payload)) continue;
-      const value = payload[key];
-      safe[key] = typeof value === 'string' ? this.pseudonymize(value).text : value;
+      safe[key] = this._prepareRemoteValue(payload[key]);
     }
     return safe;
+  }
+
+  _prepareRemoteValue(value, depth = 0) {
+    if (depth > 5) return '[nested-value-omitted]';
+    if (typeof value === 'string') return this.pseudonymize(value).text;
+    if (Array.isArray(value)) return value.slice(0, 50).map((item) => this._prepareRemoteValue(item, depth + 1));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).slice(0, 50).map(([key, item]) => [key, this._prepareRemoteValue(item, depth + 1)]));
+    return value;
   }
 
   async infer(payload) {
