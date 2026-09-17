@@ -23,6 +23,11 @@ class TaskService {
     return this.store.observations(adapterId).flatMap((observation) => this.processObservation(observation));
   }
 
+  processObservations(observations = []) {
+    if (!Array.isArray(observations)) throw new Error('Observations must be an array.');
+    return observations.flatMap((observation) => this.processObservation(observation));
+  }
+
   async processObservationAsync(observation) {
     if (observation?.removed) return [];
     const filters = candidateFilters(observation, { existingTaskThreadIds: new Set(this.store.taskThreadIds()) });
@@ -40,6 +45,11 @@ class TaskService {
 
   async processAllAsync(adapterId = null) {
     const observations = this.store.observations(adapterId);
+    return this.processObservationsAsync(observations);
+  }
+
+  async processObservationsAsync(observations = []) {
+    if (!Array.isArray(observations)) throw new Error('Observations must be an array.');
     const results = [];
     for (const observation of observations) results.push(...await this.processObservationAsync(observation));
     return results;

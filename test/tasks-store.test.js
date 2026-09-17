@@ -22,6 +22,7 @@ store.setSuppression('counterparty', 'client@example.com');
 assert.equal(store.isSuppressed('counterparty', 'client@example.com'), true);
 store.saveObservation({ observationId: 'o2', messageId: 'm2', threadId: 't1', subject: 'Friday handoff', body: "I'll send the handoff by Friday.", direction: 'outgoing' }, 'fake');
 assert.equal(service.processAll('fake').length, 3, 'new evidence is tracked without changing the dismissed task');
+assert.equal(service.processObservations([{ observationId: 'removed', removed: true }]).length, 0);
 assert.equal(store.listTasks({ includeDismissed: true }).filter((task) => task.status === 'dismissed').length, 1);
 const exported = store.exportData();
 assert.equal(exported.formatVersion, 1);
