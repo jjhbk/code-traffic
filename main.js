@@ -31,6 +31,7 @@ const { DigestScheduler } = require('./host/scheduling/digest');
 const { AssistantRuntime } = require('./host/runtime/assistant');
 const { BackgroundHost } = require('./host/runtime/background-host');
 const { ProactivityService } = require('./host/proactivity/service');
+const { replanTask } = require('./host/proactivity/replan');
 const { ConversationService } = require('./host/conversation/service');
 const { WorkflowService } = require('./host/workflows/service');
 const { FollowUpWorkflow } = require('./host/workflows/follow-up');
@@ -1446,21 +1447,7 @@ async function runMobilePushDelivery() {
 }
 
 async function runTaskReplan({ taskId, reason = 'state-changed' } = {}) {
-  if (!hostStore || !proactivityService || !taskId) return { skipped: true };
-  const task = hostStore.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
-  if (!task) return { skipped: true, reason: 'task-not-found' };
-  const decisions = proactivityService.evaluateAsync
-    ? await proactivityService.evaluateAsync([task], { context: hostStore.listContext() })
-    : proactivityService.evaluate([task]);
-  const decision = decisions[0];
-  if (!decision || decision.type === 'wait') return { taskId, decision: decision?.type || 'wait', notified: false };
-  const notification = hostStore.enqueueNotification({
-    notificationId: `assistant-replan:${taskId}:${task.updatedAt}:${decision.type}`,
-    dateKey: `assistant-replan:${taskId}:${task.updatedAt}:${decision.type}`,
-    notificationClass: 'assistant-replan',
-    items: [{ taskId, summary: task.summary, reason: `The obligation changed (${reason.replaceAll('-', ' ')}); it now needs a fresh decision.`, decision: { type: decision.type, reason: decision.reason, evidence: decision.evidence || [] } }],
-  });
-  return { taskId, decision: decision.type, notified: Boolean(notification) };
+  return replanTask({ store: hostStore, proactivity: proactivityService, taskId, reason });
 }
 
 async function runScheduledDigest() {
