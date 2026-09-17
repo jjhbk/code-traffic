@@ -1,12 +1,15 @@
 const { matchesGrantConstraints } = require('../store/sqlite-store');
 
 class ProactivityService {
-  constructor({ store, modelRouter = null, clock = () => Date.now(), followUpAfterMs = 48 * 60 * 60 * 1000 } = {}) {
+  constructor({ store, modelRouter = null, clock = () => Date.now(), followUpAfterMs = 48 * 60 * 60 * 1000, modelCooldownMs = 15 * 60 * 1000, modelMaxCalls = 20 } = {}) {
     if (!store) throw new Error('Proactivity service requires a store.');
     this.store = store;
     this.modelRouter = modelRouter;
     this.clock = clock;
     this.followUpAfterMs = followUpAfterMs;
+    this.modelCooldownMs = modelCooldownMs;
+    this.modelMaxCalls = modelMaxCalls;
+    this.modelDecisionCache = new Map();
   }
 
   decide(task, { now = this.clock() } = {}) {
@@ -40,15 +43,24 @@ class ProactivityService {
     const deterministic = this.evaluate(tasks, { now });
     if (!this.modelRouter?.proposeNextStep) return deterministic;
     const refined = [];
+    let modelCalls = 0;
     for (let index = 0; index < deterministic.length; index += 1) {
       const decision = deterministic[index];
       const task = tasks[index];
       if (decision.type !== 'wait' || decision.reason !== 'no-trigger') { refined.push(decision); continue; }
+      const version = `${task.updatedAt || task.createdAt || ''}:${task.status}:${task.dueAt || task.dueDate || ''}:${task.summary || ''}`;
+      const cached = this.modelDecisionCache.get(task.taskId);
+      if (cached && cached.version === version && now - cached.at < this.modelCooldownMs) { refined.push(cached.decision); continue; }
+      if (modelCalls >= this.modelMaxCalls) { refined.push(decision); continue; }
       try {
+        modelCalls += 1;
         const proposal = await this.modelRouter.proposeNextStep(task, context);
-        if (!proposal || proposal.decision === 'wait') { refined.push(decision); continue; }
-        refined.push(this._decision(task, proposal.decision, proposal.reason, decision.evidence, { source: proposal.source || 'model', requiresApproval: proposal.requiresApproval }));
+        if (!proposal || proposal.decision === 'wait') { this.modelDecisionCache.set(task.taskId, { version, at: now, decision }); refined.push(decision); continue; }
+        const refinedDecision = this._decision(task, proposal.decision, proposal.reason, decision.evidence, { source: proposal.source || 'model', requiresApproval: proposal.requiresApproval });
+        this.modelDecisionCache.set(task.taskId, { version, at: now, decision: refinedDecision });
+        refined.push(refinedDecision);
       } catch (_) {
+        this.modelDecisionCache.set(task.taskId, { version, at: now, decision });
         refined.push(decision);
       }
     }

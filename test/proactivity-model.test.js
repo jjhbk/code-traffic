@@ -5,8 +5,12 @@ const { ProactivityService } = require('../host/proactivity/service');
 (async () => {
   const store = new SqliteStore();
   let calls = 0;
+  let clockNow = 100_000;
   const service = new ProactivityService({
     store,
+    clock: () => clockNow,
+    modelCooldownMs: 1_000,
+    modelMaxCalls: 1,
     modelRouter: {
       proposeNextStep: async (task) => {
         calls += 1;
@@ -24,7 +28,13 @@ const { ProactivityService } = require('../host/proactivity/service');
   assert.equal(decisions[0].requiresApproval, true);
   assert.equal(decisions[1].type, 'digest', 'deterministic deadline policy remains authoritative');
   assert.equal(decisions[2].type, 'wait', 'model failure falls back to deterministic waiting');
-  assert.equal(calls, 2, 'model is only called for deterministic no-trigger tasks');
+  assert.equal(calls, 1, 'model budget bounds calls per evaluation');
+  const cached = await service.evaluateAsync([{ taskId: 'follow-up', status: 'active', summary: 'Check in', owner: 'uncertain', blocker: 'uncertain' }]);
+  assert.equal(cached[0].type, 'draft_follow_up');
+  assert.equal(calls, 1, 'unchanged tasks use the model decision cooldown cache');
+  clockNow += 1_001;
+  await service.evaluateAsync([{ taskId: 'follow-up', status: 'active', summary: 'Check in', owner: 'uncertain', blocker: 'uncertain' }]);
+  assert.equal(calls, 2, 'expired cooldown permits a fresh model proposal');
   store.close();
   console.log('proactivity model tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
