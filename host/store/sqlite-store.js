@@ -940,14 +940,18 @@ class SqliteStore {
     const confidences = new Set(['inferred', 'low', 'medium', 'high']);
     if (!types.has(recordType) || !recordKey || value === undefined || !confidences.has(confidence) || typeof confirmed !== 'boolean') throw new Error('Invalid context record.');
     if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('Context source must be an object.');
+    const normalizedKey = String(recordKey);
     const now = this.clock();
-    this.db.prepare(`INSERT INTO context_records(record_id, record_type, record_key, value_json, source_json, confidence, confirmed, valid_until, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(record_type, record_key) DO UPDATE SET value_json = excluded.value_json, source_json = excluded.source_json,
-      confidence = excluded.confidence, confirmed = excluded.confirmed, valid_until = excluded.valid_until, updated_at = excluded.updated_at`)
-      .run(recordId, recordType, String(recordKey), JSON.stringify(value), JSON.stringify(source), confidence, confirmed ? 1 : 0, validUntil, now, now);
-    this.audit('context-upserted', null, null, { recordType, recordKey: String(recordKey), confirmed });
-    return this.getContext(recordType, recordKey);
+    return this.transaction(() => {
+      this.db.prepare(`INSERT INTO context_records(record_id, record_type, record_key, value_json, source_json, confidence, confirmed, valid_until, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(record_type, record_key) DO UPDATE SET value_json = excluded.value_json, source_json = excluded.source_json,
+        confidence = excluded.confidence, confirmed = excluded.confirmed, valid_until = excluded.valid_until, updated_at = excluded.updated_at`)
+        .run(recordId, recordType, normalizedKey, JSON.stringify(value), JSON.stringify(source), confidence, confirmed ? 1 : 0, validUntil, now, now);
+      this._replanContextTasks(recordType, normalizedKey, 'context-updated', now);
+      this.audit('context-upserted', null, null, { recordType, recordKey: normalizedKey, confirmed });
+      return this.getContext(recordType, normalizedKey);
+    });
   }
 
   getContext(recordType, recordKey, now = this.clock()) {
@@ -974,9 +978,30 @@ class SqliteStore {
   }
 
   deleteContext(recordType, recordKey) {
-    const result = this.db.prepare('DELETE FROM context_records WHERE record_type = ? AND record_key = ?').run(recordType, String(recordKey));
-    if (Number(result.changes)) this.audit('context-deleted', null, null, { recordType, recordKey: String(recordKey) });
-    return Number(result.changes) === 1;
+    const normalizedKey = String(recordKey);
+    return this.transaction(() => {
+      const result = this.db.prepare('DELETE FROM context_records WHERE record_type = ? AND record_key = ?').run(recordType, normalizedKey);
+      if (Number(result.changes)) {
+        this._replanContextTasks(recordType, normalizedKey, 'context-deleted', this.clock());
+        this.audit('context-deleted', null, null, { recordType, recordKey: normalizedKey });
+      }
+      return Number(result.changes) === 1;
+    });
+  }
+
+  _replanContextTasks(recordType, recordKey, reason, now = this.clock()) {
+    const needle = String(recordKey).toLowerCase();
+    const affected = this.listTasks({ includeDismissed: true }).filter((task) => {
+      if (['done', 'dismissed'].includes(task.status)) return false;
+      const trigger = task.contextTrigger || task.locationTrigger;
+      if (recordType === 'place' && trigger?.placeKey && String(trigger.placeKey).toLowerCase() === needle) return true;
+      const searchable = JSON.stringify({ summary: task.summary, description: task.description, counterparty: task.counterparty, project: task.project, goal: task.goal, contextTrigger: task.contextTrigger, locationTrigger: task.locationTrigger }).toLowerCase();
+      return searchable.includes(needle);
+    });
+    for (const task of affected) {
+      this._invalidateTaskActions(task.taskId, reason, now);
+      this.enqueueJob({ kind: 'assistant.replan', payload: { taskId: task.taskId, reason }, runAt: now, dedupeKey: `assistant.replan:${task.taskId}:context:${recordType}:${needle}` });
+    }
   }
 
   createWorkflow({ workflowId = crypto.randomUUID(), workflowType, version = 1, taskId = null, payload = {}, state = 'ready', inputVersion = 1, wakeAt = null } = {}) {
