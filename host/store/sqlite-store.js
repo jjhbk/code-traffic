@@ -190,6 +190,14 @@ const MIGRATIONS = [
     FOREIGN KEY(from_task_id) REFERENCES tasks(task_id),
     FOREIGN KEY(to_task_id) REFERENCES tasks(task_id)
   );`,
+  `CREATE TABLE IF NOT EXISTS task_corrections (
+    task_id TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    corrected_at INTEGER NOT NULL,
+    PRIMARY KEY(task_id, field_name),
+    FOREIGN KEY(task_id) REFERENCES tasks(task_id)
+  );`,
   `ALTER TABLE tasks ADD COLUMN obligation_key TEXT;
    CREATE INDEX IF NOT EXISTS tasks_obligation_key ON tasks(obligation_key);`,
   `CREATE TABLE IF NOT EXISTS context_records (
@@ -627,7 +635,9 @@ class SqliteStore {
       : null;
     if (reconciled) {
       const prior = JSON.parse(reconciled.taskJson);
+      const corrected = this.db.prepare('SELECT field_name AS fieldName, value_json AS valueJson FROM task_corrections WHERE task_id = ?').all(reconciled.taskId);
       const next = { ...prior, ...candidate, taskId: reconciled.taskId, obligationKey: candidate.obligationKey };
+      for (const row of corrected) next[row.fieldName] = JSON.parse(row.valueJson);
       this.db.exec('BEGIN');
       try {
         this.db.prepare('UPDATE tasks SET task_json = ?, obligation_key = ?, updated_at = ? WHERE task_id = ?')
@@ -797,7 +807,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
@@ -810,8 +820,13 @@ class SqliteStore {
     try {
       const counts = {};
       for (const [table, sql] of [
+        ['workflow_steps', 'DELETE FROM workflow_steps'],
+        ['workflows', 'DELETE FROM workflows'],
+        ['conversation_references', 'UPDATE conversation_messages SET task_id = NULL, workflow_id = NULL'],
+        ['task_relations', 'DELETE FROM task_relations'],
         ['task_evidence', 'DELETE FROM task_evidence'],
         ['task_history', 'DELETE FROM task_history'],
+        ['task_corrections', 'DELETE FROM task_corrections'],
         ['tasks', 'DELETE FROM tasks'],
         ['observations', "DELETE FROM observations WHERE adapter_id LIKE 'gmail:%'"],
         ['connector_cursors', "DELETE FROM connector_cursors WHERE adapter_id LIKE 'gmail:%'"],
@@ -834,6 +849,9 @@ class SqliteStore {
     const next = { ...JSON.parse(row.taskJson), ...changes };
     const now = this.clock();
     this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?').run(JSON.stringify(next), now, taskId);
+    const correction = this.db.prepare(`INSERT INTO task_corrections(task_id, field_name, value_json, corrected_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(task_id, field_name) DO UPDATE SET value_json = excluded.value_json, corrected_at = excluded.corrected_at`);
+    for (const [field, value] of Object.entries(changes)) correction.run(taskId, field, JSON.stringify(value), now);
     this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'corrected\', ?, ?)')
       .run(taskId, JSON.stringify(changes), now);
     return { ...next, taskId, status: this.db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId).status };
