@@ -96,10 +96,18 @@ class PrivacyGateway {
     return { text: output, offsets };
   }
 
-  async pseudonymizeWithRecognizer(text, recognizer) {
+  async pseudonymizeWithRecognizer(text, recognizer, { failClosed = false } = {}) {
     const input = String(text || '');
     let entities = [];
-    try { entities = await recognizer(input); } catch (_) { entities = []; }
+    try { entities = await recognizer(input); } catch (error) {
+      if (failClosed) {
+        const privacyError = new Error('Privacy recognizer is unavailable; remote inference was blocked.');
+        privacyError.code = 'PRIVACY_RECOGNIZER_UNAVAILABLE';
+        privacyError.cause = error;
+        throw privacyError;
+      }
+      entities = [];
+    }
     const matches = entities.filter((entity) => entity && Number.isInteger(entity.start) && Number.isInteger(entity.end)
       && entity.start >= 0 && entity.end > entity.start && entity.end <= input.length && input.slice(entity.start, entity.end) === entity.value)
       .sort((a, b) => a.start - b.start || a.end - b.end);

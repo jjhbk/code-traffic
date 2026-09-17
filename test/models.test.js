@@ -50,7 +50,7 @@ const router = new ModelRouter({ privacyGateway: new PrivacyGateway({ vault: new
     assert.equal(body.response_format.type, 'json_schema');
     return { ok: true, json: async () => ({ choices: [{ message: { content: '{"items":[]}' } }] }) };
   } });
-  const frontierRouter = new ModelRouter({ privacyGateway: new PrivacyGateway(), localClient: { available: async () => true }, frontierClient: frontier, mode: 'frontier' });
+  const frontierRouter = new ModelRouter({ privacyGateway: new PrivacyGateway(), localClient: { available: async () => true, complete: async ({ system }) => system.includes('named entities') ? { entities: [] } : { items: [] } }, frontierClient: frontier, mode: 'frontier' });
   assert.equal((await frontierRouter.rank(tasks)).source, 'frontier');
   const entities = await router.recognizeEntities('Meet Priya at Acme Labs.');
   assert.deepEqual(entities, []);

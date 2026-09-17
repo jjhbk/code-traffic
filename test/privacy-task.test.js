@@ -32,6 +32,9 @@ assert.match(gateway.pseudonymize('Pay 4111 1111 1111 1111 at https://example.co
 const recognized = await gateway.pseudonymizeWithRecognizer('Meet Priya at Acme Labs.', async () => [{ type: 'person', value: 'Priya', start: 5, end: 10 }, { type: 'organization', value: 'Acme Labs', start: 14, end: 23 }]);
 assert.match(recognized.text, /\[person:ent_[a-f0-9]+\]/);
 assert.match(recognized.text, /\[organization:ent_[a-f0-9]+\]/);
+await assert.rejects(() => gateway.pseudonymizeWithRecognizer('Private context', async () => { throw new Error('recognizer offline'); }, { failClosed: true }), (error) => error.code === 'PRIVACY_RECOGNIZER_UNAVAILABLE');
+const fallback = await gateway.pseudonymizeWithRecognizer('Contact me at fallback@example.com', async () => { throw new Error('recognizer offline'); });
+assert.match(fallback.text, /\[email:ent_[a-f0-9]+\]/);
 fs.rmSync(vaultDirectory, { recursive: true, force: true });
 
 const observation = { observationId: 'obs-1', threadId: 'thread-1', subject: 'Friday handoff', body: "I'll send the handoff by Friday.", direction: 'outgoing' };

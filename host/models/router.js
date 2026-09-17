@@ -137,7 +137,7 @@ class ModelRouter {
       const safe = { ...source };
       for (const key of ['summary', 'counterparty']) {
         if (typeof source[key] === 'string') {
-          safe[key] = (await this.privacyGateway.pseudonymizeWithRecognizer(source[key], (text) => this.recognizeEntities(text))).text;
+          safe[key] = (await this.privacyGateway.pseudonymizeWithRecognizer(source[key], (text) => this.recognizeEntities(text), { failClosed: this.mode === 'frontier' })).text;
           this.metrics.privacyTransforms += 1;
         }
       }
@@ -176,7 +176,7 @@ class ModelRouter {
       if (!details.available) return { obligations: [], source: 'deterministic', reason: details.reason, version: 'structured-1' };
     }
     const safeSource = this.mode === 'frontier'
-      ? (await this.privacyGateway.pseudonymizeWithRecognizer(source, (text) => this.recognizeEntities(text))).text
+      ? (await this.privacyGateway.pseudonymizeWithRecognizer(source, (text) => this.recognizeEntities(text), { failClosed: true })).text
       : source;
     if (this.mode === 'frontier') return { obligations: [], source: 'deterministic', reason: 'frontier-evidence-offsets-unavailable', version: 'structured-1' };
     this.metrics.localCalls += 1;
@@ -202,7 +202,7 @@ class ModelRouter {
     const safeTask = {};
     for (const [key, value] of Object.entries({ taskId: task.taskId, summary: task.summary, owner: task.owner, blocker: task.blocker, counterparty: task.counterparty, dueDate: task.dueDate, confidence: task.confidence })) {
       safeTask[key] = typeof value === 'string'
-        ? (await this.privacyGateway.pseudonymizeWithRecognizer(value, (text) => this.recognizeEntities(text))).text
+        ? (await this.privacyGateway.pseudonymizeWithRecognizer(value, (text) => this.recognizeEntities(text), { failClosed: this.mode === 'frontier' })).text
         : value;
     }
     const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate', 'recordType', 'recordKey', 'value', 'confidence', 'confirmed']));
@@ -230,6 +230,11 @@ class ModelRouter {
     const client = this.mode === 'frontier' ? this.frontierClient : this.localClient;
     if (!client) return { ...fallback, source: 'deterministic', reason: 'model-not-configured' };
     const safeTask = this.privacyGateway.prepareRemotePayload({ taskId: task.taskId, summary: task.summary, counterparty: task.counterparty, dueDate: task.dueDate, evidence: task.evidence?.text });
+    if (this.mode === 'frontier') {
+      for (const key of ['summary', 'counterparty', 'evidence']) {
+        if (typeof task[key] === 'string') safeTask[key] = (await this.privacyGateway.pseudonymizeWithRecognizer(task[key], (text) => this.recognizeEntities(text), { failClosed: true })).text;
+      }
+    }
     const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate', 'recordType', 'recordKey', 'value', 'confidence', 'confirmed']));
     try {
       if (this.mode === 'frontier') this.metrics.frontierCalls += 1; else this.metrics.localCalls += 1;
