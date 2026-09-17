@@ -45,6 +45,7 @@ const { BACKGROUND_PROTOCOL_VERSION } = require('../host/runtime/protocol');
   assert.equal(initial.protocolVersion, BACKGROUND_PROTOCOL_VERSION);
   assert.equal((await host.health()).paused, false);
   assert.equal((await host.pause(true)).paused, true);
+  assert.equal(host.paused, true, 'pause state is retained by the supervisor for restart recovery');
   assert.equal((await host.pause(false)).paused, false);
   const deadline = Date.now() + 3000;
   let current;

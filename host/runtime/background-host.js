@@ -104,7 +104,10 @@ class BackgroundHost {
       return { running: false, busy: false, paused: this.paused, lifecycle: this.restartTimer ? 'recovering' : 'unavailable', lastExitAt: this.lastExitAt, restartCount: this.restartCount, lastError: error.message };
     }
   }
-  pause(paused) { return this.request('pause', { paused: Boolean(paused) }); }
+  pause(paused) {
+    this.paused = Boolean(paused);
+    return this.request('pause', { paused: this.paused });
+  }
   setConnectorAccounts(accounts = {}) {
     this.connectorAccounts = accounts && typeof accounts === 'object' ? accounts : {};
     return this.request('set-connector-accounts', { accounts: this.connectorAccounts });
