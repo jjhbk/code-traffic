@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   listArchivedSessions: () => ipcRenderer.invoke('sessions:archived-list'),
   listTasks: () => ipcRenderer.invoke('tasks:list'),
   getTaskGraph: () => ipcRenderer.invoke('tasks:graph'),
+  getAssistantDecisions: () => ipcRenderer.invoke('assistant:decisions'),
   getActivity: () => ipcRenderer.invoke('activity:list'),
   updateTask: (payload) => ipcRenderer.invoke('tasks:update', payload),
   snoozeTask: (payload) => ipcRenderer.invoke('tasks:snooze', payload),

@@ -532,9 +532,9 @@ class SqliteStore {
 
   listTasks({ includeDismissed = false } = {}) {
     const rows = this.db.prepare(includeDismissed
-      ? 'SELECT task_id AS taskId, task_json AS taskJson, status FROM tasks ORDER BY updated_at DESC'
-      : `SELECT task_id AS taskId, task_json AS taskJson, status FROM tasks WHERE status NOT IN ('dismissed', 'done') ORDER BY updated_at DESC`).all();
-    return rows.map((row) => ({ ...JSON.parse(row.taskJson), taskId: row.taskId, status: row.status }));
+      ? 'SELECT task_id AS taskId, task_json AS taskJson, status, created_at AS createdAt, updated_at AS updatedAt FROM tasks ORDER BY updated_at DESC'
+      : `SELECT task_id AS taskId, task_json AS taskJson, status, created_at AS createdAt, updated_at AS updatedAt FROM tasks WHERE status NOT IN ('dismissed', 'done') ORDER BY updated_at DESC`).all();
+    return rows.map((row) => ({ ...JSON.parse(row.taskJson), taskId: row.taskId, status: row.status, createdAt: row.createdAt, updatedAt: row.updatedAt }));
   }
 
   taskGraph({ includeDismissed = true } = {}) {

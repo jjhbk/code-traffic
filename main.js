@@ -30,6 +30,7 @@ const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
 const { DigestScheduler } = require('./host/scheduling/digest');
 const { AssistantRuntime } = require('./host/runtime/assistant');
+const { ProactivityService } = require('./host/proactivity/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
 const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
@@ -92,6 +93,7 @@ let driveSync;
 let taskService;
 let digestScheduler;
 let assistantRuntime;
+let proactivityService;
 let mailSyncTimer;
 let calendarSyncTimer;
 let driveSyncTimer;
@@ -369,6 +371,7 @@ function wireIpc() {
   ipcMain.handle('model:diagnostics', () => modelRouter?.diagnostics() || { mode: 'off', metrics: {} });
   ipcMain.handle('model:probe', async () => modelRouter?.probe() || { localCall: false, redacted: false });
   ipcMain.handle('tasks:graph', () => hostStore?.taskGraph({ includeDismissed: true }) || { nodes: [], edges: [] });
+  ipcMain.handle('assistant:decisions', () => proactivityService?.evaluate(hostStore?.listTasks() || []) || []);
   ipcMain.handle('activity:list', () => {
     const entries = hostStore?.recentAudit(60) || [];
     const diagnostics = modelRouter?.diagnostics();
@@ -972,6 +975,7 @@ async function start() {
   }
   wireMailSync();
   taskService = hostStore ? new TaskService({ store: hostStore }) : null;
+  proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -1176,9 +1180,12 @@ async function runDriveSync() {
 async function runScheduledDigest() {
   if (!digestScheduler || !hostStore || !telegram?.enabled || !telegram.configured) return null;
   const tasks = hostStore.listTasks();
+  const decisions = proactivityService?.evaluate(tasks) || [];
+  const decisionTypes = new Map(decisions.map((decision) => [decision.taskId, decision.type]));
+  const actionableTasks = tasks.filter((task) => decisionTypes.get(task.taskId) !== 'wait');
   let modelRanking = null;
-  try { modelRanking = await modelRouter?.rank(tasks); } catch (error) { console.error(`[models] ranking unavailable; using deterministic ranking: ${error.message}`); }
-  const digest = digestScheduler.prepareScheduled(tasks, modelRanking);
+  try { modelRanking = await modelRouter?.rank(actionableTasks); } catch (error) { console.error(`[models] ranking unavailable; using deterministic ranking: ${error.message}`); }
+  const digest = digestScheduler.prepareScheduled(actionableTasks, modelRanking);
   if (!digest) return null;
   await deliverPendingDigest();
   return digest;
