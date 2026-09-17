@@ -1165,7 +1165,7 @@ async function start() {
   }
   wireMailSync();
   taskService = hostStore ? new TaskService({ store: hostStore, modelRouter }) : null;
-  proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
+  proactivityService = hostStore ? new ProactivityService({ store: hostStore, modelRouter }) : null;
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
   mobileConversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'mobile', proactivity: proactivityService }) : null;
   mobilePairing = hostStore ? new MobilePairingService({ store: hostStore }) : null;
@@ -1435,7 +1435,9 @@ async function runMobilePushDelivery() {
 async function runScheduledDigest() {
   if (!digestScheduler || !hostStore) return null;
   const tasks = hostStore.listTasks();
-  const decisions = proactivityService?.evaluate(tasks) || [];
+  const decisions = proactivityService?.evaluateAsync
+    ? await proactivityService.evaluateAsync(tasks, { context: hostStore.listContext().slice(0, 12) })
+    : (proactivityService?.evaluate(tasks) || []);
   proactivityService?.enqueueAttentionNotifications(tasks, decisions);
   await executeAutomaticBrowserDecisions(tasks, decisions);
   await prepareProactiveFollowUps(tasks, decisions);

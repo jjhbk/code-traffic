@@ -1,9 +1,10 @@
 const { matchesGrantConstraints } = require('../store/sqlite-store');
 
 class ProactivityService {
-  constructor({ store, clock = () => Date.now(), followUpAfterMs = 48 * 60 * 60 * 1000 } = {}) {
+  constructor({ store, modelRouter = null, clock = () => Date.now(), followUpAfterMs = 48 * 60 * 60 * 1000 } = {}) {
     if (!store) throw new Error('Proactivity service requires a store.');
     this.store = store;
+    this.modelRouter = modelRouter;
     this.clock = clock;
     this.followUpAfterMs = followUpAfterMs;
   }
@@ -33,6 +34,25 @@ class ProactivityService {
 
   evaluate(tasks = [], options = {}) {
     return tasks.map((task) => this.decide(task, options));
+  }
+
+  async evaluateAsync(tasks = [], { now = this.clock(), context = [] } = {}) {
+    const deterministic = this.evaluate(tasks, { now });
+    if (!this.modelRouter?.proposeNextStep) return deterministic;
+    const refined = [];
+    for (let index = 0; index < deterministic.length; index += 1) {
+      const decision = deterministic[index];
+      const task = tasks[index];
+      if (decision.type !== 'wait' || decision.reason !== 'no-trigger') { refined.push(decision); continue; }
+      try {
+        const proposal = await this.modelRouter.proposeNextStep(task, context);
+        if (!proposal || proposal.decision === 'wait') { refined.push(decision); continue; }
+        refined.push(this._decision(task, proposal.decision, proposal.reason, decision.evidence, { source: proposal.source || 'model', requiresApproval: proposal.requiresApproval }));
+      } catch (_) {
+        refined.push(decision);
+      }
+    }
+    return refined;
   }
 
   enqueueAttentionNotifications(tasks = [], decisions = this.evaluate(tasks)) {
