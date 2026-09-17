@@ -3,7 +3,7 @@
 html, body { background: var(--canvas); color: var(--ink); cursor: default; }
 html.software-cursor-enabled, html.software-cursor-enabled * { cursor: none !important; }
 #software-cursor { position: fixed; z-index: 200; width: 18px; height: 24px; pointer-events: none; opacity: 0; transform: translate(-2px, -2px); background: #f2ffff; clip-path: polygon(0 0, 100% 66%, 61% 70%, 81% 100%, 65% 100%, 45% 73%, 18% 100%); filter: drop-shadow(0 0 0 #071016) drop-shadow(1px 1px 0 #071016) drop-shadow(-1px -1px 0 #071016); transition: opacity .08s ease; }
-html.software-cursor-enabled #software-cursor { opacity: 0; }
+html.software-cursor-enabled #software-cursor { opacity: 1; }
 body { min-width: 360px; }
 [hidden] { display: none !important; }
 button, input, select, textarea { font: inherit; }
