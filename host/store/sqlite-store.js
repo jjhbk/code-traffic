@@ -1222,6 +1222,7 @@ class SqliteStore {
           .run(reconciled.taskId, JSON.stringify({ observationId: candidate.observationId, extractorVersion: candidate.extractorVersion }), now);
         this.db.exec('COMMIT');
       } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+      this._enqueueTaskProactive(reconciled.taskId, version, now);
       return { ...next, status: reconciled.status, preserved: false, reconciled: true };
     }
     const taskId = candidate.candidateId;
@@ -1235,7 +1236,18 @@ class SqliteStore {
         .run(taskId, JSON.stringify({ extractorVersion: candidate.extractorVersion }), now);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    this._enqueueTaskProactive(taskId, now, now);
     return { ...candidate, taskId, status: 'active', preserved: false };
+  }
+
+  _enqueueTaskProactive(taskId, taskVersion, runAt = this.clock()) {
+    if (!taskId || !Number.isFinite(Number(taskVersion))) return null;
+    return this.enqueueJob({
+      kind: 'assistant.proactive-actions',
+      payload: { taskId, taskVersion: Number(taskVersion), reason: 'task-updated' },
+      runAt,
+      dedupeKey: `assistant.proactive-actions:${taskId}:${Number(taskVersion)}`,
+    });
   }
 
   listTasks({ includeDismissed = false } = {}) {
@@ -1512,6 +1524,7 @@ class SqliteStore {
         .run(taskId, JSON.stringify(changes), now);
       this._invalidateTaskActions(taskId, 'task-corrected', now);
       this.enqueueJob({ kind: 'assistant.replan', payload: { taskId, reason: 'task-corrected' }, runAt: now, dedupeKey: `assistant.replan:${taskId}:${now}` });
+      this._enqueueTaskProactive(taskId, version, now);
       return { ...next, taskId, status: this.db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId).status };
     });
   }

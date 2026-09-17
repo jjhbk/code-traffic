@@ -18,7 +18,6 @@ const { WorkflowService } = require('../host/workflows/service');
   store.enqueueJob({ kind: 'assistant.replan', payload: { taskId: 'background-replan-task', reason: 'source-removed' }, runAt: Date.now(), dedupeKey: 'background-replan-fixture' });
   store.enqueueJob({ kind: 'tasks.reconcile', payload: { adapterId: 'background-fixture' }, runAt: Date.now(), dedupeKey: 'background-reconcile-fixture' });
   store.enqueueJob({ kind: 'assistant.digest.plan', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest-plan-fixture' });
-  store.enqueueJob({ kind: 'assistant.proactive-actions', payload: {}, runAt: Date.now(), dedupeKey: 'background-proactive-actions' });
   store.enqueueJob({ kind: 'assistant.sync.gmail', payload: {}, runAt: Date.now(), dedupeKey: 'background-gmail-sync' });
   store.close();
 

@@ -26,7 +26,7 @@ assert.equal(store.getApproval(approval.request_id).status, 'cancelled', 'contex
 store.upsertContext({ recordType: 'place', recordKey: 'home', value: { label: 'Home', latitude: 3, longitude: 4, radiusMeters: 100 }, confirmed: true, confidence: 'high' });
 assert.equal(store.exportData().data.jobs.filter((job) => job.kind === 'assistant.replan').length, 1, 'active context replans are deduplicated');
 
-const claimed = store.claimJobs({ workerId: 'context-test-worker', now: 10_000 });
+const claimed = store.claimJobs({ workerId: 'context-test-worker', now: 10_000, kinds: ['assistant.replan'] });
 assert.equal(claimed.length, 1);
 store.completeJob(firstJob.job_id, claimed[0].leaseToken, { status: 'completed' });
 // The completed job is no longer active, so forgetting the place can enqueue a fresh replan.
