@@ -62,7 +62,7 @@ class AssistantRuntime {
   setPaused(paused) { this.paused = Boolean(paused); return this.health(); }
 
   health() {
-    return { running: Boolean(this.timer), busy: this.running, paused: this.paused, startedAt: this.startedAt, intervalMs: this.intervalMs, lastTickAt: this.lastTickAt, lastTickDurationMs: this.lastTickDurationMs, lastTickJobs: this.lastTickJobs, lastError: this.lastError };
+    return { running: Boolean(this.timer), busy: this.running, paused: this.paused, startedAt: this.startedAt, intervalMs: this.intervalMs, lastTickAt: this.lastTickAt, lastTickDurationMs: this.lastTickDurationMs, lastTickJobs: this.lastTickJobs, lastError: this.lastError, jobs: this.store.jobHealth(this.clock()) };
   }
 }
 

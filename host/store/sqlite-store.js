@@ -628,6 +628,15 @@ class SqliteStore {
     return row ? { ...row, payload: JSON.parse(row.payloadJson) } : null;
   }
 
+  jobHealth(now = this.clock()) {
+    if (!Number.isFinite(now)) throw new Error('A job health timestamp is required.');
+    const counts = this.db.prepare('SELECT status, COUNT(*) AS count FROM jobs GROUP BY status').all();
+    const byStatus = Object.fromEntries(counts.map((row) => [row.status, Number(row.count)]));
+    const queued = this.db.prepare("SELECT MIN(run_at) AS nextRunAt, SUM(CASE WHEN run_at <= ? THEN 1 ELSE 0 END) AS overdue FROM jobs WHERE status = 'queued'").get(now);
+    const expiredRunning = this.db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE status = 'running' AND lease_until < ?").get(now);
+    return { queued: byStatus.queued || 0, running: byStatus.running || 0, completed: byStatus.completed || 0, failed: byStatus.failed || 0, overdue: Number(queued.overdue || 0), expiredRunning: Number(expiredRunning.count || 0), nextRunAt: queued.nextRunAt ?? null };
+  }
+
   ingestEvent({ eventId, adapterId, producerEpoch = null, sequence = null, type, payload }) {
     if (!eventId || !adapterId || !type || !payload || typeof payload !== 'object') throw new Error('Invalid event.');
     const existing = this.db.prepare('SELECT event_id AS eventId, accepted_at AS acceptedAt FROM events WHERE event_id = ?').get(eventId);
