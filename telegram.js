@@ -246,6 +246,7 @@ class TelegramControl {
   }
 
   async poll() {
+    await this.recoverAssistantUpdates();
     try {
       if (this.configured && !this.hasPersistedOffset) {
         const queued = await this.request('getUpdates', { offset: -1, timeout: 0, allowed_updates: ['message', 'callback_query'] });
@@ -283,10 +284,22 @@ class TelegramControl {
 
   async processUpdate(update) {
     const updateId = update?.update_id;
-    if (this.callbackStore?.claimTelegramUpdate && !this.callbackStore.claimTelegramUpdate(updateId)) return { duplicate: true };
+    if (this.callbackStore?.claimTelegramUpdate && !this.callbackStore.claimTelegramUpdate(updateId, update)) return { duplicate: true };
     await this.handleUpdate(update);
     this.callbackStore?.completeTelegramUpdate?.(updateId);
     return { duplicate: false };
+  }
+
+  async recoverAssistantUpdates() {
+    const updates = this.callbackStore?.listRecoverableTelegramAssistantUpdates?.() || [];
+    for (const record of updates) {
+      if (parseCommand(record.update?.message?.text)?.name !== 'assistant') {
+        this.callbackStore?.completeTelegramUpdate?.(record.updateId);
+        continue;
+      }
+      await this.handleUpdate(record.update);
+      this.callbackStore?.completeTelegramUpdate?.(record.updateId);
+    }
   }
 
   async handleUpdate(update) {

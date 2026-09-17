@@ -324,6 +324,7 @@ const MIGRATIONS = [
     received_at INTEGER NOT NULL,
     completed_at INTEGER
   );`,
+  `ALTER TABLE telegram_updates ADD COLUMN payload_json TEXT;`,
   `CREATE TABLE IF NOT EXISTS mobile_pairing_codes (
     code_id TEXT PRIMARY KEY,
     code_hash TEXT NOT NULL UNIQUE,
@@ -458,10 +459,17 @@ class SqliteStore {
     return Number(result.changes) > 0;
   }
 
-  claimTelegramUpdate(updateId) {
+  claimTelegramUpdate(updateId, payload = null) {
     if (!Number.isInteger(Number(updateId)) || Number(updateId) < 0) return false;
-    const result = this.db.prepare("INSERT INTO telegram_updates(update_id, status, received_at, completed_at) VALUES (?, 'processing', ?, NULL) ON CONFLICT(update_id) DO NOTHING").run(Number(updateId), this.clock());
+    const result = this.db.prepare("INSERT INTO telegram_updates(update_id, payload_json, status, received_at, completed_at) VALUES (?, ?, 'processing', ?, NULL) ON CONFLICT(update_id) DO NOTHING").run(Number(updateId), payload ? JSON.stringify(payload) : null, this.clock());
     return Number(result.changes) > 0;
+  }
+
+  listRecoverableTelegramAssistantUpdates({ maxAgeMs = 24 * 60 * 60 * 1000, limit = 50 } = {}) {
+    const cutoff = this.clock() - Math.max(1, Number(maxAgeMs) || 1);
+    return this.db.prepare("SELECT update_id AS updateId, payload_json AS payloadJson, received_at AS receivedAt FROM telegram_updates WHERE status = 'processing' AND payload_json IS NOT NULL AND received_at >= ? ORDER BY received_at, update_id LIMIT ?")
+      .all(cutoff, Math.min(100, Math.max(1, Number(limit) || 50)))
+      .map((row) => ({ updateId: row.updateId, receivedAt: row.receivedAt, update: JSON.parse(row.payloadJson) }));
   }
 
   completeTelegramUpdate(updateId) {
