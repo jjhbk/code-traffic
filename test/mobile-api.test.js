@@ -77,6 +77,10 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(duplicateLocation.body.accepted.duplicate, true);
   const battery = await request(port, '/api/v1/mobile/context/sensor', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'battery-1', sensor: 'battery', value: { level: 0.35, state: 'unplugged' }, consent: true } });
   assert.equal(battery.status, 200); assert.equal(battery.body.sensorContext.context.recordKey, 'mobile.sensor.battery');
+  assert.equal(store.exportData().data.events.some((event) => event.event_id === 'battery-1'), true);
+  const deletedBattery = await request(port, '/api/v1/mobile/context/fact/mobile.sensor.battery/delete', { method: 'POST', commandId: 'delete-battery-1', body: {} });
+  assert.equal(deletedBattery.status, 200); assert.equal(deletedBattery.body.deleted, true);
+  assert.equal(store.exportData().data.events.some((event) => event.event_id === 'battery-1'), false, 'forgetting a sensor removes its raw event');
   const place = await request(port, '/api/v1/mobile/context/place', { method: 'POST', body: { placeKey: 'home', label: 'Home', latitude: 1, longitude: 2, radiusMeters: 150, consent: true } });
   assert.equal(place.status, 200); assert.equal(place.body.place.recordType, 'place');
   const triggerTask = store.saveTaskCandidate({ candidateId: 'mobile-trigger-task', observationId: 'mobile-trigger-observation', summary: 'Pick up the return', evidence: { start: 0, end: 1, text: 'Pick up the return' }, extractorVersion: 'test' });

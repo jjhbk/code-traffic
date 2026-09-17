@@ -1088,6 +1088,14 @@ class SqliteStore {
     return this.transaction(() => {
       const result = this.db.prepare('DELETE FROM context_records WHERE record_type = ? AND record_key = ?').run(recordType, normalizedKey);
       if (Number(result.changes)) {
+        if (recordType === 'fact' && normalizedKey.startsWith('mobile.sensor.')) {
+          const sensor = normalizedKey.slice('mobile.sensor.'.length);
+          this.db.prepare(`DELETE FROM events
+            WHERE adapter_id LIKE 'mobile:%'
+              AND event_type = 'observation'
+              AND json_extract(payload_json, '$.contextType') = 'sensor'
+              AND json_extract(payload_json, '$.sensor') = ?`).run(sensor);
+        }
         this._replanContextTasks(recordType, normalizedKey, 'context-deleted', this.clock());
         this.audit('context-deleted', null, null, { recordType, recordKey: normalizedKey });
       }
