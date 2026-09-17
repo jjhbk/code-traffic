@@ -12,6 +12,7 @@ class ProactivityService {
     if (!task || !task.taskId) throw new Error('A task is required.');
     if (['done', 'dismissed'].includes(task.status)) return this._decision(task, 'wait', 'task-closed', []);
     if (task.status === 'snoozed' && Number(task.snoozedUntil || 0) > now) return this._decision(task, 'wait', 'task-snoozed', []);
+    if (task.sourceUnavailable === true) return this._decision(task, 'wait', 'source-unavailable', task.evidence?.text ? [task.evidence.text] : []);
     if (task.counterparty && this.store.isSuppressed('counterparty', task.counterparty, now)) return this._decision(task, 'wait', 'counterparty-suppressed', []);
     const blockers = this._blockingTasks(task);
     if (blockers.length) return this._decision(task, 'wait', 'blocked-by-dependency', blockers.map((item) => `Waiting on “${item.summary || item.taskId}”.`), { blockingTaskIds: blockers.map((item) => item.taskId) });

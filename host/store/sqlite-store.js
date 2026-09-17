@@ -864,6 +864,20 @@ class SqliteStore {
       if (referenced) {
         const observation = JSON.parse(row.observationJson);
         update.run(JSON.stringify({ ...observation, removed: true, removedAt: now }), now, row.observationId);
+        const taskRows = this.db.prepare('SELECT DISTINCT task_id AS taskId FROM task_evidence WHERE observation_id = ?').all(row.observationId);
+        for (const taskRow of taskRows) {
+          const liveEvidence = this.db.prepare(`SELECT 1 FROM task_evidence te JOIN observations o ON o.observation_id = te.observation_id
+            WHERE te.task_id = ? AND COALESCE(json_extract(o.observation_json, '$.removed'), 0) != 1 LIMIT 1`).get(taskRow.taskId);
+          if (liveEvidence) continue;
+          const task = this.db.prepare('SELECT task_json AS taskJson FROM tasks WHERE task_id = ?').get(taskRow.taskId);
+          if (!task) continue;
+          const taskJson = JSON.parse(task.taskJson);
+          if (taskJson.sourceUnavailable === true) continue;
+          this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?')
+            .run(JSON.stringify({ ...taskJson, sourceUnavailable: true, sourceUnavailableAt: now }), now, taskRow.taskId);
+          this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'source-removed\', ?, ?)')
+            .run(taskRow.taskId, JSON.stringify({ observationId: row.observationId, adapterId, messageId: String(messageId) }), now);
+        }
       } else {
         remove.run(row.observationId);
       }
@@ -1036,7 +1050,7 @@ class SqliteStore {
     if (reconciled) {
       const prior = JSON.parse(reconciled.taskJson);
       const corrected = this.db.prepare('SELECT field_name AS fieldName, value_json AS valueJson FROM task_corrections WHERE task_id = ?').all(reconciled.taskId);
-      const next = { ...prior, ...candidate, taskId: reconciled.taskId, obligationKey: candidate.obligationKey };
+      const next = { ...prior, ...candidate, sourceUnavailable: false, taskId: reconciled.taskId, obligationKey: candidate.obligationKey };
       for (const row of corrected) next[row.fieldName] = JSON.parse(row.valueJson);
       this.db.exec('BEGIN');
       try {
@@ -1103,7 +1117,7 @@ class SqliteStore {
     const evidenceRows = this.db.prepare(`SELECT te.task_id AS taskId, te.observation_id AS observationId,
       te.evidence_text AS evidenceText, o.observation_json AS observationJson
       FROM task_evidence te JOIN observations o ON o.observation_id = te.observation_id`).all();
-    const nodes = tasks.map((task) => ({ id: `task:${task.taskId}`, type: 'task', label: task.summary || 'Untitled task', status: task.status, owner: task.owner || null, dueDate: task.dueDate || null, dueAt: task.dueAt || null, timeZone: task.timeZone || null }));
+    const nodes = tasks.map((task) => ({ id: `task:${task.taskId}`, type: 'task', label: task.summary || 'Untitled task', status: task.status, owner: task.owner || null, dueDate: task.dueDate || null, dueAt: task.dueAt || null, timeZone: task.timeZone || null, sourceUnavailable: task.sourceUnavailable === true }));
     const edges = [];
     const seenObservations = new Set();
     for (const row of evidenceRows) {
