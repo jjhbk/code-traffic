@@ -28,9 +28,18 @@ class ActionRegistry {
     if (capability.startsWith('browser.')) {
       this.validateBrowserAction(action);
     } else if (capability === 'gmail.send') {
-      if (!action.destination || !action.content?.subject || !action.content?.body || !action.threadId) throw new Error('A Gmail send action requires a destination, subject, body, and thread.');
+      if (!/^\S+@\S+\.\S+$/.test(String(action.destination || '')) || !action.threadId || typeof action.threadId !== 'string'
+        || typeof action.content?.subject !== 'string' || !action.content.subject.trim()
+        || typeof action.content?.body !== 'string' || !action.content.body.trim()
+        || Object.keys(action.content || {}).some((field) => !['subject', 'body'].includes(field))) {
+        throw new Error('A Gmail send action requires a valid destination, subject, body, and thread.');
+      }
+      for (const field of ['inReplyTo', 'references']) if (action[field] != null && typeof action[field] !== 'string') throw new Error(`A Gmail ${field} must be text.`);
     } else if (capability === 'calendar.update') {
-      if (!action.eventId || !action.changes || typeof action.changes !== 'object' || Array.isArray(action.changes)) throw new Error('A Calendar update action requires an event and changes.');
+      const allowedFields = new Set(['summary', 'description', 'location', 'start', 'end']);
+      if (!action.eventId || typeof action.eventId !== 'string' || !action.changes || typeof action.changes !== 'object' || Array.isArray(action.changes) || !Object.keys(action.changes).length
+        || Object.keys(action.changes).some((field) => !allowedFields.has(field))) throw new Error('A Calendar update action requires an event and supported changes.');
+      if (action.etag != null && typeof action.etag !== 'string') throw new Error('A Calendar event etag must be text.');
     }
     if (action.effects && action.effects !== definition.effects) throw new Error('Action effect class does not match its registered capability.');
     return definition;
