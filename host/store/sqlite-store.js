@@ -1004,6 +1004,7 @@ class SqliteStore {
               .run(JSON.stringify({ ...taskJson, sourceUnavailable: true, sourceUnavailableAt: now }), version, taskRow.taskId);
             this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'source-removed\', ?, ?)')
               .run(taskRow.taskId, JSON.stringify({ observationId: row.observationId, adapterId, messageId: String(messageId) }), now);
+            this._enqueueTaskProactive(taskRow.taskId, version, now);
           }
           this._invalidateTaskActions(taskRow.taskId, 'source-removed', now);
           this.enqueueJob({ kind: 'assistant.replan', payload: { taskId: taskRow.taskId, reason: 'source-removed' }, runAt: now, dedupeKey: `assistant.replan:${taskRow.taskId}:${now}` });
