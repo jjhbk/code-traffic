@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const { classifyMessage, normalizeMessage } = require('../host/mail/normalize');
 const { GMAIL_SCOPE, GMAIL_SEND_SCOPE, GOOGLE_CALENDAR_READ_SCOPE, GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_DRIVE_READ_SCOPE, GoogleOAuth, GmailProvider, GoogleCalendarProvider, GoogleDriveProvider } = require('../host/mail/google');
 
@@ -75,6 +76,32 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   assert.match(calls[2].options.body, /threadId/);
   const reconciled = await provider.reconcileReply({ to: 'a@example.com', subject: 'Re: Hello', body: 'Thanks', threadId: 't1' });
   assert.deepEqual(reconciled, { found: true, messageId: 'sent-1', threadId: 't1' });
+  const sandboxRequests = [];
+  const sandbox = http.createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    sandboxRequests.push({ method: request.method, url: request.url, authorization: request.headers.authorization, body });
+    response.setHeader('Content-Type', 'application/json');
+    if (request.url === '/gmail/v1/users/me/messages/send') {
+      response.end(JSON.stringify({ id: 'sandbox-sent', threadId: 'sandbox-thread' }));
+      return;
+    }
+    if (request.url === '/gmail/v1/users/me/threads/sandbox-thread?format=full') {
+      response.end(JSON.stringify({ messages: [{ id: 'sandbox-sent', threadId: 'sandbox-thread', internalDate: String(Date.now()), payload: { headers: [{ name: 'X-Signal-Box-Attempt', value: 'sandbox-attempt' }, { name: 'To', value: 'a@example.com' }, { name: 'Subject', value: 'Re: Sandbox' }], body: { data: Buffer.from('Sandbox body').toString('base64url') } } }] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { message: 'sandbox route not found' } }));
+  });
+  await new Promise((resolve) => sandbox.listen(0, '127.0.0.1', resolve));
+  const sandboxAddress = sandbox.address();
+  const sandboxProvider = new GmailProvider({ accessToken: 'sandbox-token', apiBase: `http://127.0.0.1:${sandboxAddress.port}/gmail/v1/users/me` });
+  const sandboxSent = await sandboxProvider.sendReply({ to: 'a@example.com', subject: 'Re: Sandbox', body: 'Sandbox body', threadId: 'sandbox-thread', signalBoxAttemptId: 'sandbox-attempt' });
+  assert.equal(sandboxSent.id, 'sandbox-sent');
+  assert.deepEqual(await sandboxProvider.reconcileReply({ to: 'a@example.com', subject: 'Re: Sandbox', body: 'Sandbox body', threadId: 'sandbox-thread', signalBoxAttemptId: 'sandbox-attempt' }), { found: true, messageId: 'sandbox-sent', threadId: 'sandbox-thread' });
+  assert.equal(sandboxRequests.every((item) => item.authorization === 'Bearer sandbox-token'), true, 'sandbox provider requests carry the configured credential');
+  assert.deepEqual(sandboxRequests.map((item) => item.url), ['/gmail/v1/users/me/messages/send', '/gmail/v1/users/me/threads/sandbox-thread?format=full']);
+  await new Promise((resolve) => sandbox.close(resolve));
   const preciseProvider = new GmailProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => url.includes('/threads/') ? ({ messages: [
     { id: 'old-similar', threadId: 't1', internalDate: '1999999999000', payload: { headers: [{ name: 'To', value: 'a@example.com' }, { name: 'Subject', value: 'Re: Hello' }], body: { data: 'VGhhbmtz' } } },
     { id: 'exact-attempt', threadId: 't1', internalDate: '2000000001000', payload: { headers: [{ name: 'X-Signal-Box-Attempt', value: 'attempt-1' }, { name: 'To', value: 'different@example.com' }], body: { data: 'VW5yZWxhdGVk' } } },

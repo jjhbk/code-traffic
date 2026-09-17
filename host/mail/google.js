@@ -89,12 +89,13 @@ class GoogleOAuth {
 }
 
 class GoogleCalendarProvider {
-  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch, apiBase = 'https://www.googleapis.com/calendar/v3/calendars/primary' } = {}) {
     if (!accessToken && !refreshToken) throw new Error('A Google Calendar access or refresh token is required.');
     this.accessToken = accessToken;
     this.refreshToken = refreshToken;
     this.oauth = oauth;
     this.fetch = fetchImpl;
+    this.apiBase = String(apiBase).replace(/\/$/, '');
   }
 
   async sync({ cursor = null, boundedWindow = 100 } = {}) {
@@ -168,10 +169,10 @@ class GoogleCalendarProvider {
       if (!this.oauth || !this.refreshToken) throw new Error('Google Calendar access token is unavailable.');
       const tokens = await this.oauth.refresh(this.refreshToken); this.accessToken = tokens.access_token;
     }
-    let response = await this.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+    let response = await this.fetch(`${this.apiBase}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
     if (response.status === 401 && this.oauth && this.refreshToken) {
       const tokens = await this.oauth.refresh(this.refreshToken); this.accessToken = tokens.access_token;
-      response = await this.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+      response = await this.fetch(`${this.apiBase}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
     }
     let body = {};
     try { body = await response.json(); } catch (_) { body = {}; }
@@ -181,9 +182,9 @@ class GoogleCalendarProvider {
 }
 
 class GoogleDriveProvider {
-  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch, apiBase = 'https://www.googleapis.com/drive/v3' } = {}) {
     if (!accessToken && !refreshToken) throw new Error('A Google Drive access or refresh token is required.');
-    this.accessToken = accessToken; this.refreshToken = refreshToken; this.oauth = oauth; this.fetch = fetchImpl;
+    this.accessToken = accessToken; this.refreshToken = refreshToken; this.oauth = oauth; this.fetch = fetchImpl; this.apiBase = String(apiBase).replace(/\/$/, '');
   }
 
   async sync({ cursor = null, boundedWindow = 100 } = {}) {
@@ -236,8 +237,8 @@ class GoogleDriveProvider {
 
   async request(pathname, options = {}) {
     if (!this.accessToken) { if (!this.oauth || !this.refreshToken) throw new Error('Google Drive access token is unavailable.'); this.accessToken = (await this.oauth.refresh(this.refreshToken)).access_token; }
-    let response = await this.fetch(`https://www.googleapis.com/drive/v3${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
-    if (response.status === 401 && this.oauth && this.refreshToken) { this.accessToken = (await this.oauth.refresh(this.refreshToken)).access_token; response = await this.fetch(`https://www.googleapis.com/drive/v3${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } }); }
+    let response = await this.fetch(`${this.apiBase}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+    if (response.status === 401 && this.oauth && this.refreshToken) { this.accessToken = (await this.oauth.refresh(this.refreshToken)).access_token; response = await this.fetch(`${this.apiBase}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } }); }
     const body = await response.json();
     if (!response.ok) { const error = new Error(`Google Drive API request failed: ${body.error?.message || response.status}`); error.status = response.status; throw error; }
     return body;
@@ -245,12 +246,13 @@ class GoogleDriveProvider {
 }
 
 class GmailProvider {
-  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ accessToken, refreshToken = null, oauth = null, fetchImpl = globalThis.fetch, apiBase = API_ROOT } = {}) {
     if (!accessToken && !refreshToken) throw new Error('A Gmail access or refresh token is required.');
     this.accessToken = accessToken;
     this.refreshToken = refreshToken;
     this.oauth = oauth;
     this.fetch = fetchImpl;
+    this.apiBase = String(apiBase).replace(/\/$/, '');
   }
 
   async sync({ cursor = null, boundedWindow = 100 } = {}) {
@@ -358,11 +360,11 @@ class GmailProvider {
       const tokens = await this.oauth.refresh(this.refreshToken);
       this.accessToken = tokens.access_token;
     }
-    let response = await this.fetch(`${API_ROOT}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+    let response = await this.fetch(`${this.apiBase}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
     if (response.status === 401 && this.oauth && this.refreshToken) {
       const tokens = await this.oauth.refresh(this.refreshToken);
       this.accessToken = tokens.access_token;
-      response = await this.fetch(`${API_ROOT}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
+      response = await this.fetch(`${this.apiBase}${pathname}`, { ...options, headers: { Authorization: `Bearer ${this.accessToken}`, ...(options.headers || {}) } });
     }
     const body = await response.json();
     if (!response.ok) {
