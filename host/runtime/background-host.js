@@ -20,10 +20,13 @@ class BackgroundHost {
   start() {
     if (this.child) return this.ready;
     this.ready = new Promise((resolve, reject) => {
+      let readySettled = false;
+      const resolveReady = (health) => { if (!readySettled) { readySettled = true; resolve(health); } };
+      const rejectReady = (error) => { if (!readySettled) { readySettled = true; reject(error); } };
       const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0' } });
       this.child = child;
       child.on('message', (message) => {
-        if (message.type === 'ready') resolve(message.health);
+        if (message.type === 'ready') resolveReady(message.health);
         if (message.type === 'job') {
           if (!this.onJob) { child.send({ type: 'job-response', id: message.id, token: this.token, error: 'No background job adapter is configured.' }); return; }
           Promise.resolve(this.onJob(message.kind, message.payload)).then((result) => child.send({ type: 'job-response', id: message.id, token: this.token, result })).catch((error) => child.send({ type: 'job-response', id: message.id, token: this.token, error: error.message }));
@@ -35,10 +38,11 @@ class BackgroundHost {
         this.pending.delete(message.id);
         if (message.error) pending.reject(new Error(message.error)); else pending.resolve(message.result);
       });
-      child.once('error', (error) => { if (!this.child) reject(error); this._failPending(error); });
+      child.once('error', (error) => { rejectReady(error); this._failPending(error); });
       child.once('exit', (code, signal) => {
         this.child = null;
         const error = new Error(`Background host exited${signal ? ` with ${signal}` : ` with code ${code}`}.`);
+        rejectReady(error);
         this._failPending(error);
       });
     });
