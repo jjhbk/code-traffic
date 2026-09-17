@@ -1420,7 +1420,7 @@ async function runMobilePushDelivery() {
 }
 
 async function runScheduledDigest() {
-  if (!digestScheduler || !hostStore || !telegram?.enabled || !telegram.configured) return null;
+  if (!digestScheduler || !hostStore) return null;
   const tasks = hostStore.listTasks();
   const decisions = proactivityService?.evaluate(tasks) || [];
   await executeAutomaticBrowserDecisions(tasks, decisions);
@@ -1432,7 +1432,7 @@ async function runScheduledDigest() {
   try { modelRanking = await modelRouter?.rank(actionableTasks); } catch (error) { console.error(`[models] ranking unavailable; using deterministic ranking: ${error.message}`); }
   const digest = digestScheduler.prepareScheduled(actionableTasks, modelRanking);
   if (!digest) return null;
-  await deliverPendingDigest();
+  if (telegram?.enabled && telegram.configured) await deliverPendingDigest();
   return digest;
 }
 
