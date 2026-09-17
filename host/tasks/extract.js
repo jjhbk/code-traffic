@@ -11,9 +11,15 @@ function candidatesFromObservation(observation, { filters = null, extractorVersi
   const eligibleUpdate = Boolean(filters?.existingTaskUpdate);
   if ((!commitment && !eligibleUpdate) || (filters && !filters.eligible)) return [];
   const clauses = splitObligationClauses(text);
-  const candidates = clauses.map((clause, index) => candidateForClause(observation, clause, {
-    eligibleUpdate, extractorVersion, index, fallbackText: text, clauseCount: clauses.length, timeZone, now,
-  })).filter(Boolean);
+  let searchFrom = 0;
+  const candidates = clauses.map((clause, index) => {
+    const evidenceStart = text.indexOf(clause, searchFrom);
+    if (evidenceStart >= 0) searchFrom = evidenceStart + clause.length;
+    return candidateForClause(observation, clause, {
+      eligibleUpdate, extractorVersion, index, fallbackText: text, clauseCount: clauses.length,
+      evidenceStart: evidenceStart >= 0 ? evidenceStart : 0, timeZone, now,
+    });
+  }).filter(Boolean);
   return candidates.length ? candidates : [candidateForClause(observation, text, { eligibleUpdate, extractorVersion, index: 0, fallbackText: text, clauseCount: 1 })].filter(Boolean);
 }
 
@@ -55,7 +61,7 @@ function splitObligationClauses(text) {
     .filter((clause) => clause.length >= 8 && /\b(i['’]?ll|i will|we['’]?ll|we will|will|please|could you|would you|can you|need you to)\b/i.test(clause));
 }
 
-function candidateForClause(observation, clause, { eligibleUpdate, extractorVersion, index, fallbackText, clauseCount, timeZone = observation?.timeZone || 'UTC', now = Date.now() }) {
+function candidateForClause(observation, clause, { eligibleUpdate, extractorVersion, index, fallbackText, clauseCount, evidenceStart = 0, timeZone = observation?.timeZone || 'UTC', now = Date.now() }) {
   const text = String(clause || '').trim();
   const dueMatch = /\b(by|before|due)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(text);
   const evidenceText = text || fallbackText;
@@ -74,7 +80,7 @@ function candidateForClause(observation, clause, { eligibleUpdate, extractorVers
     dueAt: resolveDueAt(dueMatch?.[2], observation.timestamp, timeZone, now),
     timeZone,
     confidence: eligibleUpdate && !dueMatch ? 'low' : (dueMatch ? 'medium' : 'low'),
-    evidence: { start: 0, end: evidenceText.length, text: evidenceText },
+    evidence: { start: evidenceStart, end: evidenceStart + evidenceText.length, text: evidenceText },
     extractorVersion,
     obligationKey: `ob_${crypto.createHash('sha256').update(stableParts.join('|')).digest('hex').slice(0, 24)}`,
   };
