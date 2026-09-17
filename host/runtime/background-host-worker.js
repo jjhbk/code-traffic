@@ -11,6 +11,7 @@ const { ApprovalService } = require('../approvals/service');
 const { RemoteProvider } = require('../mail/remote-provider');
 const { MailSync } = require('../mail/sync');
 const { DigestScheduler } = require('../scheduling/digest');
+const { BACKGROUND_PROTOCOL_VERSION } = require('./protocol');
 
 const token = process.env.SIGNAL_BOX_BACKGROUND_TOKEN || '';
 const databasePath = process.argv[2];
@@ -78,6 +79,8 @@ for (const [kind, intervalMs] of [['assistant.proactive-actions', 30 * 1000], ['
 function reply(id, result, error = null) {
   send({ type: 'response', id, result, error: error ? error.message : null });
 }
+
+function health() { return { protocolVersion: BACKGROUND_PROTOCOL_VERSION, ...runtime.health() }; }
 
 function planBackgroundDigest() {
   const tasks = store.listTasks();
@@ -175,7 +178,7 @@ listen((message) => {
     if (message.method === 'set-connector-accounts') {
       connectorAccounts = message.accounts && typeof message.accounts === 'object' ? message.accounts : {};
       reply(message.id, { updated: true });
-    } else if (message.method === 'health') reply(message.id, runtime.health());
+    } else if (message.method === 'health') reply(message.id, health());
     else if (message.method === 'pause') reply(message.id, runtime.setPaused(message.paused));
     else if (message.method === 'shutdown') {
       runtime.stop(); store.close(); reply(message.id, { stopped: true });
@@ -186,4 +189,4 @@ listen((message) => {
 
 if (parentPort) parentPort.on('close', () => { runtime.stop(); store.close(); process.exit(0); });
 else process.on('disconnect', () => { runtime.stop(); store.close(); process.exit(0); });
-send({ type: 'ready', health: runtime.health() });
+send({ type: 'ready', health: health() });

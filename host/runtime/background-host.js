@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const path = require('path');
 const { fork } = require('child_process');
+const { BACKGROUND_PROTOCOL_VERSION } = require('./protocol');
 
 class BackgroundHost {
   constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false, supervise = true, restartDelayMs = 250, digestSettings = {}, connectorAccounts = {} } = {}) {
@@ -33,7 +34,17 @@ class BackgroundHost {
     this.ready = new Promise((resolve, reject) => {
       let readySettled = false;
       let startupFailed = false;
-      const resolveReady = (health) => { if (!readySettled) { readySettled = true; this.lifecycle = 'running'; resolve({ ...health, lifecycle: this.lifecycle, lastExitAt: this.lastExitAt, restartCount: this.restartCount }); } };
+      const resolveReady = (health) => {
+        if (Number(health?.protocolVersion) !== BACKGROUND_PROTOCOL_VERSION) {
+          startupFailed = true;
+          rejectReady(new Error(`Background host protocol ${health?.protocolVersion || 'unknown'} is incompatible with version ${BACKGROUND_PROTOCOL_VERSION}.`));
+          if (this.child === child) this.child = null;
+          this.lifecycle = 'unavailable';
+          child.kill?.();
+          return;
+        }
+        if (!readySettled) { readySettled = true; this.lifecycle = 'running'; resolve({ ...health, lifecycle: this.lifecycle, lastExitAt: this.lastExitAt, restartCount: this.restartCount }); }
+      };
       const rejectReady = (error) => { if (!readySettled) { readySettled = true; reject(error); } };
       const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0', SIGNAL_BOX_DIGEST_SETTINGS: JSON.stringify(this.digestSettings), SIGNAL_BOX_CONNECTOR_ACCOUNTS: JSON.stringify(this.connectorAccounts) } });
       this.child = child;

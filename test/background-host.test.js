@@ -6,6 +6,7 @@ const { EventEmitter } = require('events');
 const { SqliteStore } = require('../host/store/sqlite-store');
 const { BackgroundHost } = require('../host/runtime/background-host');
 const { WorkflowService } = require('../host/workflows/service');
+const { BACKGROUND_PROTOCOL_VERSION } = require('../host/runtime/protocol');
 
 (async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-box-background-'));
@@ -41,6 +42,7 @@ const { WorkflowService } = require('../host/workflows/service');
   } });
   const initial = await host.start();
   assert.equal(initial.running, true);
+  assert.equal(initial.protocolVersion, BACKGROUND_PROTOCOL_VERSION);
   assert.equal((await host.health()).paused, false);
   assert.equal((await host.pause(true)).paused, true);
   assert.equal((await host.pause(false)).paused, false);
@@ -83,11 +85,11 @@ const { WorkflowService } = require('../host/workflows/service');
   const retryChild = new EventEmitter();
   retryChild.connected = true;
   retryChild.send = (message) => {
-    if (message.method === 'health') retryChild.emit('message', { type: 'response', id: message.id, result: { running: true } });
+    if (message.method === 'health') retryChild.emit('message', { type: 'response', id: message.id, result: { running: true, protocolVersion: BACKGROUND_PROTOCOL_VERSION } });
     if (message.method === 'shutdown') setImmediate(() => { retryChild.emit('message', { type: 'response', id: message.id, result: { stopped: true } }); retryChild.emit('exit', 0, null); });
   };
   retryChild.disconnect = () => { retryChild.connected = false; };
-  failedHost.forkImpl = () => { setImmediate(() => retryChild.emit('message', { type: 'ready', health: { running: true } })); return retryChild; };
+  failedHost.forkImpl = () => { setImmediate(() => retryChild.emit('message', { type: 'ready', health: { running: true, protocolVersion: BACKGROUND_PROTOCOL_VERSION } })); return retryChild; };
   await failedHost.start();
   assert.equal((await failedHost.health()).running, true, 'a failed background spawn can be retried');
   await failedHost.stop();
@@ -95,8 +97,8 @@ const { WorkflowService } = require('../host/workflows/service');
   const supervised = new BackgroundHost({ databasePath, restartDelayMs: 10, forkImpl: () => {
     const child = new EventEmitter(); child.connected = true; child.send = (message) => {
       if (message.method === 'shutdown') setImmediate(() => { child.emit('message', { type: 'response', id: message.id, result: { stopped: true } }); child.emit('exit', 0, null); });
-      else if (message.method === 'health') child.emit('message', { type: 'response', id: message.id, result: { running: true } });
-    }; child.disconnect = () => { child.connected = false; }; supervisedChildren.push(child); setImmediate(() => child.emit('message', { type: 'ready', health: { running: true } })); return child;
+      else if (message.method === 'health') child.emit('message', { type: 'response', id: message.id, result: { running: true, protocolVersion: BACKGROUND_PROTOCOL_VERSION } });
+    }; child.disconnect = () => { child.connected = false; }; supervisedChildren.push(child); setImmediate(() => child.emit('message', { type: 'ready', health: { running: true, protocolVersion: BACKGROUND_PROTOCOL_VERSION } })); return child;
   } });
   await supervised.start();
   supervisedChildren[0].emit('exit', 1, null);
