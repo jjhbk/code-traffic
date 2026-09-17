@@ -17,6 +17,8 @@ app.whenReady().then(async () => {
   assert.equal(await run("document.getElementById('assistant-view').hidden"), false);
   assert.equal(await run("document.getElementById('board').hidden"), true);
   assert.equal(await run("document.getElementById('assistant-decisions').textContent.includes('Review the launch brief')"), true);
+  assert.equal(await run("getComputedStyle(document.body).cursor"), 'default');
+  assert.notEqual(await run("getComputedStyle(document.getElementById('assistant-input')).caretColor"), 'rgba(0, 0, 0, 0)', 'Assistant input caret must remain visible');
   assert.equal(await run("new Set([...document.querySelectorAll('[id]')].map(el => el.id)).size === document.querySelectorAll('[id]').length"), true, 'Unique control IDs');
   fs.writeFileSync(path.join(output, 'desktop.png'), (await win.webContents.capturePage()).toPNG());
   await run("document.querySelector('[data-prompt]').click(); document.getElementById('assistant-form').requestSubmit(); new Promise(resolve => setTimeout(resolve, 100))");
