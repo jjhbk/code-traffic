@@ -19,6 +19,10 @@ class BrowserActionService {
     const decision = this.store.getDecision(requestId);
     if (!decision || decision.optionId !== 'allow') throw new Error('Browser action was not approved.');
     const action = request.action;
+    if (action.taskId && action.taskVersion != null) {
+      const currentTask = this.store.listTasks({ includeDismissed: true }).find((task) => task.taskId === action.taskId);
+      if (!currentTask || currentTask.status !== 'active' || Number(currentTask.updatedAt) !== Number(action.taskVersion)) throw new Error('This browser action is stale because the task changed.');
+    }
     const attempt = this.approvals.claimExecution({ requestId, details: { capability: action.capability, recipeId: action.recipeId, surface } });
     this.approvals.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: decision.decisionId, surface } });
     try {

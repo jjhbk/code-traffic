@@ -1299,15 +1299,31 @@ class SqliteStore {
   correctTask(taskId, changes) {
     const row = this.db.prepare('SELECT task_json AS taskJson FROM tasks WHERE task_id = ?').get(taskId);
     if (!row || !changes || typeof changes !== 'object') throw new Error('Task correction is invalid.');
-    const next = { ...JSON.parse(row.taskJson), ...changes };
-    const now = this.clock();
-    this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?').run(JSON.stringify(next), now, taskId);
-    const correction = this.db.prepare(`INSERT INTO task_corrections(task_id, field_name, value_json, corrected_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(task_id, field_name) DO UPDATE SET value_json = excluded.value_json, corrected_at = excluded.corrected_at`);
-    for (const [field, value] of Object.entries(changes)) correction.run(taskId, field, JSON.stringify(value), now);
-    this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'corrected\', ?, ?)')
-      .run(taskId, JSON.stringify(changes), now);
-    return { ...next, taskId, status: this.db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId).status };
+    return this.transaction(() => {
+      const next = { ...JSON.parse(row.taskJson), ...changes };
+      const now = this.clock();
+      this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?').run(JSON.stringify(next), now, taskId);
+      const correction = this.db.prepare(`INSERT INTO task_corrections(task_id, field_name, value_json, corrected_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(task_id, field_name) DO UPDATE SET value_json = excluded.value_json, corrected_at = excluded.corrected_at`);
+      for (const [field, value] of Object.entries(changes)) correction.run(taskId, field, JSON.stringify(value), now);
+      this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'corrected\', ?, ?)')
+        .run(taskId, JSON.stringify(changes), now);
+      const approvals = this.db.prepare("SELECT request_id AS requestId, action_json AS actionJson, action_digest AS actionDigest FROM approval_requests WHERE status = 'pending'").all();
+      for (const approval of approvals) {
+        const action = JSON.parse(approval.actionJson);
+        if (action.taskId !== taskId) continue;
+        this.db.prepare("UPDATE approval_requests SET status = 'cancelled', resolved_at = ? WHERE request_id = ? AND status = 'pending'").run(now, approval.requestId);
+        this.audit('approval-cancelled', approval.requestId, approval.actionDigest, { reason: 'task-corrected', taskId });
+      }
+      const workflows = this.db.prepare("SELECT workflow_id AS workflowId, payload_json AS payloadJson FROM workflows WHERE task_id = ? AND state = 'awaiting_approval'").all(taskId);
+      for (const workflow of workflows) {
+        const payload = JSON.parse(workflow.payloadJson);
+        this.db.prepare("UPDATE workflows SET state = 'needs_attention', payload_json = ?, updated_at = ? WHERE workflow_id = ? AND state = 'awaiting_approval'")
+          .run(JSON.stringify({ ...payload, invalidationReason: 'task-corrected', invalidatedAt: now }), now, workflow.workflowId);
+        this.audit('workflow-invalidated', null, null, { workflowId: workflow.workflowId, taskId, reason: 'task-corrected' });
+      }
+      return { ...next, taskId, status: this.db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId).status };
+    });
   }
 
   reserveDigest({ dateKey, budgetDateKey = dateKey, items, cap, notificationClass = 'digest' }) {

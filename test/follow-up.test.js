@@ -17,8 +17,11 @@ assert.equal(result.workflow.payload.requestId, result.approval.request_id || re
 store.saveTaskCandidate({ candidateId: 'task-approval-stale', observationId: 'obs-approval-stale', summary: 'Approval stale', counterparty: 'alex@example.com', threadId: 'thread-approval-stale', evidence: { start: 0, end: 1, text: 'Review' }, extractorVersion: 'test' });
 const pendingFollowUp = followUp.prepare({ taskId: 'task-approval-stale', status: 'active', summary: 'Approval stale', counterparty: 'alex@example.com', threadId: 'thread-approval-stale' }, { body: 'Please review.' });
 const staleRequestId = pendingFollowUp.workflow.payload.requestId;
+store.correctTask('task-approval-stale', { summary: 'Corrected approval obligation' });
+assert.equal(store.getApproval(staleRequestId).status, 'cancelled', 'task corrections cancel pending approvals');
+assert.equal(store.getWorkflow(pendingFollowUp.workflow.workflowId).state, 'needs_attention', 'task corrections stop awaiting-approval workflows');
 const invalidated = followUp.observeReplies([{ observationId: 'newer-than-draft', threadId: 'thread-approval-stale', direction: 'incoming', timestamp: Date.now() + 1, body: 'Already handled.' }]);
-assert.equal(invalidated[0].state, 'needs_attention');
+assert.equal(invalidated.length, 0, 'already-invalidated workflows are not reprocessed');
 assert.equal(store.getApproval(staleRequestId).status, 'cancelled');
 store.updateWorkflow(result.workflow.workflowId, { state: 'waiting_event', payload: { ...result.workflow.payload, threadId: 'thread-1', sentAt: Date.parse('2026-09-17T10:00:00Z') } });
 const verifying = followUp.observeReplies([
