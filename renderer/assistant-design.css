@@ -1,12 +1,12 @@
 /* Signal Box: a calm, connected workspace. */
 :root { --canvas: #101313; --surface: #181c1c; --raised: #202525; --line: #303737; --ink: #edf1e9; --muted: #9ba7a3; --mint: #bdedc8; --green: #bdedc8; --amber: #edc38b; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: var(--ink); background: var(--canvas); }
-html, body { background: var(--canvas); color: var(--ink); cursor: url('signal-box-cursor.svg') 4 3, default; }
+html, body { background: var(--canvas); color: var(--ink); cursor: default; }
 body { min-width: 360px; }
 [hidden] { display: none !important; }
 button, input, select, textarea { font: inherit; }
 input, textarea { cursor: text; caret-color: var(--mint); }
 select, input[type='checkbox'], input[type='radio'], input[type='submit'], input[type='button'] { cursor: pointer; }
-button, select, summary { cursor: url('signal-box-cursor.svg') 4 3, pointer; transition: background .16s, border-color .16s; }
+button { cursor: pointer; transition: background .16s, border-color .16s; }
 button:disabled { opacity: .5; cursor: wait; }
 button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--mint); outline-offset: 4px; }
 .skip-link { position: fixed; top: -80px; left: 240px; z-index: 100; padding: 12px 18px; background: var(--mint); color: #14251a; border-radius: 6px; }
