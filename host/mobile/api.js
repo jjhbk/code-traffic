@@ -39,6 +39,7 @@ class MobileApi {
       if (method === 'GET' && resource === 'notifications') return this.notifications(device, query);
       if (method === 'GET' && resource === 'approvals') return { approvals: this.store.listPendingApprovals({ principal: 'signal-box-user', surface: 'mobile', now: this.clock() }) };
       if (method === 'GET' && resource === 'connections') return { connections: await this.getConnections() };
+      if (method === 'POST' && resource === 'devices' && parts[4] === 'push-token' && parts[5] === 'revoke') return this.revokePushToken(device);
       if (method === 'POST' && resource === 'devices' && parts[4] === 'push-token') return this.registerPushToken(body, device);
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
@@ -109,6 +110,11 @@ class MobileApi {
     const deviceId = device?.deviceId || body.deviceId || 'legacy-mobile';
     if (!deviceId || (device && body.deviceId && body.deviceId !== device.deviceId)) throw this._error(403, 'Push token device identity does not match the authenticated device.');
     try { return { registration: this.store.registerMobilePushToken({ deviceId, pushToken: body.pushToken, platform: body.platform || 'expo' }) }; }
+    catch (error) { throw this._error(400, error.message); }
+  }
+
+  revokePushToken(device = null) {
+    try { return { registration: this.store.revokeMobilePushToken(device?.deviceId || 'legacy-mobile') }; }
     catch (error) { throw this._error(400, error.message); }
   }
 

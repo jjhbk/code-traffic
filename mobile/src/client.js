@@ -68,6 +68,7 @@ class MobileCoreClient {
   async deleteContext(recordType, recordKey) { return this.command(`/api/v1/mobile/context/${encodeURIComponent(recordType)}/${encodeURIComponent(recordKey)}/delete`, {}); }
   async acknowledgeNotification(notificationId) { return this.command(`/api/v1/mobile/notifications/${encodeURIComponent(notificationId)}/ack`, {}); }
   async registerPushToken(pushToken, platform = 'expo') { return this.command('/api/v1/mobile/devices/push-token', { pushToken, platform }); }
+  async revokePushToken() { return this.command('/api/v1/mobile/devices/push-token/revoke', {}); }
 
   async command(path, body, commandId = id()) {
     try { return await this.request(path, { method: 'POST', body, idempotencyKey: commandId }); }

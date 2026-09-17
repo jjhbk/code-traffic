@@ -36,6 +36,8 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(health.status, 200); assert.equal(health.body.protocolVersion, '1'); assert.equal(health.body.core.host, 'fixture');
   const pushRegistration = await request(port, '/api/v1/mobile/devices/push-token', { method: 'POST', body: { pushToken: 'ExponentPushToken[fixture]', platform: 'expo' } });
   assert.equal(pushRegistration.status, 200); assert.equal(store.listMobilePushTokens()[0].pushToken, 'ExponentPushToken[fixture]');
+  const pushRevoked = await request(port, '/api/v1/mobile/devices/push-token/revoke', { method: 'POST', commandId: 'revoke-push-1', body: {} });
+  assert.equal(pushRevoked.status, 200); assert.equal(pushRevoked.body.registration.revoked, true); assert.equal(store.listMobilePushTokens().length, 0);
   const today = await request(port, '/api/v1/mobile/today');
   assert.equal(today.status, 200); assert.ok(Array.isArray(today.body.tasks)); assert.ok(Array.isArray(today.body.workflows));
 
