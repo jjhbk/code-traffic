@@ -3,6 +3,20 @@ const { normalizeIngestEvent } = require('../events/event-contract');
 const PROTOCOL_VERSION = '1';
 const MOBILE_CONVERSATION_ID = 'mobile:default';
 
+function decodeNotificationCursor(value) {
+  if (!value) return { createdAt: 0, notificationId: '' };
+  if (/^\d+$/.test(String(value))) return { createdAt: Number(value), notificationId: '' };
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value), 'base64url').toString('utf8'));
+    if (!Number.isFinite(Number(parsed.createdAt)) || typeof parsed.notificationId !== 'string') throw new Error('invalid cursor');
+    return { createdAt: Number(parsed.createdAt), notificationId: parsed.notificationId };
+  } catch (_) { throw Object.assign(new Error('Invalid notification cursor.'), { status: 400 }); }
+}
+
+function encodeNotificationCursor(cursor) {
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
 class MobileApi {
   constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, getStatus = null, getConnections = null, clock = () => Date.now() } = {}) {
     if (!store || !conversation || !proactivity) throw new Error('Mobile API requires store, conversation, and proactivity services.');
@@ -79,8 +93,9 @@ class MobileApi {
 
   notifications(device = null, query = {}) {
     const deviceId = device?.deviceId || 'legacy-mobile';
-    const notifications = this.store.listMobileNotifications({ deviceId, afterCreatedAt: Number(query.after || 0), limit: Number(query.limit || 50) });
-    const nextCursor = notifications.length ? notifications[notifications.length - 1].createdAt : Number(query.after || 0);
+    const cursor = decodeNotificationCursor(query.after);
+    const notifications = this.store.listMobileNotifications({ deviceId, afterCreatedAt: cursor.createdAt, afterNotificationId: cursor.notificationId, limit: Number(query.limit || 50) });
+    const nextCursor = encodeNotificationCursor(notifications.length ? { createdAt: notifications[notifications.length - 1].createdAt, notificationId: notifications[notifications.length - 1].notificationId } : cursor);
     return { notifications, nextCursor };
   }
 

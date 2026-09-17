@@ -68,6 +68,14 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   const notifications = await request(port, '/api/v1/mobile/notifications');
   assert.equal(notifications.status, 200); assert.ok(Array.isArray(notifications.body.notifications));
   store.enqueueNotification({ notificationId: 'mobile-notification-1', dateKey: 'mobile-1', notificationClass: 'location', items: [{ summary: 'Check pickup', reason: 'Arrived home' }] });
+  store.enqueueNotification({ notificationId: 'cursor-a', dateKey: 'cursor-a', notificationClass: 'location', items: [{ summary: 'First same-timestamp signal' }] });
+  store.enqueueNotification({ notificationId: 'cursor-b', dateKey: 'cursor-b', notificationClass: 'location', items: [{ summary: 'Second same-timestamp signal' }] });
+  store.db.prepare('UPDATE notification_outbox SET created_at = 777 WHERE notification_id IN (?, ?)').run('cursor-a', 'cursor-b');
+  const cursorStart = Buffer.from(JSON.stringify({ createdAt: 777, notificationId: '' })).toString('base64url');
+  const firstCursorPage = await request(port, `/api/v1/mobile/notifications?after=${encodeURIComponent(cursorStart)}&limit=1`);
+  assert.equal(firstCursorPage.body.notifications[0].notificationId, 'cursor-a');
+  const secondCursorPage = await request(port, `/api/v1/mobile/notifications?after=${encodeURIComponent(firstCursorPage.body.nextCursor)}&limit=50`);
+  assert.equal(secondCursorPage.body.notifications.some((item) => item.notificationId === 'cursor-b'), true);
   const newNotifications = await request(port, '/api/v1/mobile/notifications?after=0');
   assert.equal(newNotifications.body.notifications.some((item) => item.notificationId === 'mobile-notification-1' && !item.acknowledged), true);
   const acknowledged = await request(port, '/api/v1/mobile/notifications/mobile-notification-1/ack', { method: 'POST', body: {} });

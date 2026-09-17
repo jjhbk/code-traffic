@@ -459,14 +459,14 @@ class SqliteStore {
     return row.map((item) => ({ ...item, items: JSON.parse(item.payloadJson) }));
   }
 
-  listMobileNotifications({ deviceId, afterCreatedAt = 0, limit = 50 } = {}) {
+  listMobileNotifications({ deviceId, afterCreatedAt = 0, afterNotificationId = '', limit = 50 } = {}) {
     if (!deviceId) throw new Error('A mobile device is required.');
     const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
     return this.db.prepare(`SELECT n.notification_id AS notificationId, n.date_key AS dateKey, n.notification_class AS notificationClass,
       n.payload_json AS payloadJson, n.status, n.created_at AS createdAt,
       CASE WHEN r.notification_id IS NULL THEN 0 ELSE 1 END AS acknowledged
       FROM notification_outbox n LEFT JOIN mobile_notification_receipts r ON r.notification_id = n.notification_id AND r.device_id = ?
-      WHERE n.created_at > ? ORDER BY n.created_at, n.notification_id LIMIT ?`).all(deviceId, Number(afterCreatedAt) || 0, safeLimit)
+      WHERE (n.created_at > ? OR (n.created_at = ? AND n.notification_id > ?)) ORDER BY n.created_at, n.notification_id LIMIT ?`).all(deviceId, Number(afterCreatedAt) || 0, Number(afterCreatedAt) || 0, String(afterNotificationId || ''), safeLimit)
       .map((item) => ({ ...item, acknowledged: Boolean(item.acknowledged), items: JSON.parse(item.payloadJson) }));
   }
 
