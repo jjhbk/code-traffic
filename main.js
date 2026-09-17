@@ -1308,6 +1308,7 @@ async function runScheduledDigest() {
   if (!digestScheduler || !hostStore || !telegram?.enabled || !telegram.configured) return null;
   const tasks = hostStore.listTasks();
   const decisions = proactivityService?.evaluate(tasks) || [];
+  await executeAutomaticBrowserDecisions(tasks, decisions);
   await prepareProactiveFollowUps(tasks, decisions);
   const decisionTypes = new Map(decisions.map((decision) => [decision.taskId, decision.type]));
   const actionableTasks = tasks.filter((task) => decisionTypes.get(task.taskId) !== 'wait');
@@ -1317,6 +1318,32 @@ async function runScheduledDigest() {
   if (!digest) return null;
   await deliverPendingDigest();
   return digest;
+}
+
+async function executeAutomaticBrowserDecisions(tasks, decisions) {
+  if (!planningService || !hostStore || !approvalService || !browserBridge) return [];
+  const recipes = { [uberCabBooking.id]: uberCabBooking, [uberCabQuote.id]: uberCabQuote };
+  const executed = [];
+  for (const decision of decisions.filter((item) => item.type === 'execute_browser')) {
+    const recipe = recipes[decision.recipeId];
+    const task = tasks.find((item) => item.taskId === decision.taskId);
+    if (!recipe || !task) continue;
+    const sessionId = appSettings.browserSessionId;
+    if (!sessionId || !browserBridge.status(sessionId).connected) {
+      console.error(`[assistant] automatic browser action waiting for browser session: ${recipe.id}`);
+      continue;
+    }
+    try {
+      const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId, origin: recipe.origin });
+      const executor = new BrowserRecipeExecutor({ browser: adapter });
+      const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
+      const workflow = await planningService.executeDecision({ decision, recipe, inputs: decision.inputs || {}, grantId: decision.grantId, taskId: task.taskId, executor });
+      executed.push({ taskId: task.taskId, workflowId: workflow.workflowId });
+    } catch (error) {
+      console.error(`[assistant] automatic browser action failed for ${task.taskId}: ${error.message}`);
+    }
+  }
+  return executed;
 }
 
 async function prepareProactiveFollowUps(tasks, decisions) {

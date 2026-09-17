@@ -1,3 +1,5 @@
+const { matchesGrantConstraints } = require('../store/sqlite-store');
+
 class ProactivityService {
   constructor({ store, clock = () => Date.now(), followUpAfterMs = 48 * 60 * 60 * 1000 } = {}) {
     if (!store) throw new Error('Proactivity service requires a store.');
@@ -13,6 +15,8 @@ class ProactivityService {
     if (task.counterparty && this.store.isSuppressed('counterparty', task.counterparty, now)) return this._decision(task, 'wait', 'counterparty-suppressed', []);
     const blockers = this._blockingTasks(task);
     if (blockers.length) return this._decision(task, 'wait', 'blocked-by-dependency', blockers.map((item) => `Waiting on “${item.summary || item.taskId}”.`), { blockingTaskIds: blockers.map((item) => item.taskId) });
+    const automatic = this._automaticDecision(task, now);
+    if (automatic) return automatic;
     const evidence = task.evidence?.text ? [task.evidence.text] : [];
     if (task.confidence === 'low' && !task.dueDate) return this._decision(task, 'clarify', 'low-confidence-obligation', evidence);
     if (task.dueDate === 'today' || task.dueDate === 'tomorrow') return this._decision(task, 'digest', `due-${task.dueDate}`, evidence);
@@ -36,6 +40,27 @@ class ProactivityService {
       return [];
     });
     return [...new Set(blockerIds)].map((taskId) => tasks.get(taskId)).filter((item) => item && !['done', 'dismissed'].includes(item.status));
+  }
+
+  _automaticDecision(task, now) {
+    const automation = task.automation;
+    if (!automation || automation.type !== 'browser' || !automation.recipeId || !automation.capability) return null;
+    const active = this.store.listWorkflows({ taskId: task.taskId, activeOnly: true });
+    if (active.some((workflow) => workflow.workflowType === 'browser-action')) return this._decision(task, 'wait', 'automation-in-progress', []);
+    const priorRuns = this.store.listAutonomousRuns().filter((run) => run.action?.taskId === task.taskId && run.status === 'confirmed').sort((a, b) => b.createdAt - a.createdAt);
+    if (priorRuns.length && automation.repeat !== true) return this._decision(task, 'wait', 'automation-completed', []);
+    if (priorRuns.length && Number(automation.cooldownMs) > 0 && now - priorRuns[0].createdAt < Number(automation.cooldownMs)) return this._decision(task, 'wait', 'automation-cooldown', []);
+    const action = { capability: automation.capability, recipeId: automation.recipeId, origin: automation.origin || null, inputs: automation.inputs || {} };
+    const grant = this.store.listStandingGrants({ principal: 'signal-box-user', includeInactive: false }).find((candidate) => candidate.status === 'active'
+      && candidate.capability === action.capability
+      && now < candidate.expiresAt
+      && (candidate.maxUses === null || candidate.usedCount < candidate.maxUses)
+      && (candidate.lastUsedAt === null || now - candidate.lastUsedAt >= candidate.cooldownMs)
+      && matchesGrantConstraints(action, candidate.constraints));
+    if (!grant) return this._decision(task, 'wait', 'automatic-action-not-authorized', []);
+    return this._decision(task, 'execute_browser', 'standing-permission-matched', task.evidence?.text ? [task.evidence.text] : [], {
+      capability: action.capability, requiresApproval: false, grantId: grant.grantId, recipeId: action.recipeId, inputs: action.inputs,
+    });
   }
 
   _decision(task, type, reason, evidence, details = {}) {

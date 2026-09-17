@@ -13,7 +13,7 @@ class PlanningService {
     this.workflows.transition(workflow.workflowId, 'executing', { recipeId: recipe.id, grantId });
     this.workflows.setStep(workflow.workflowId, { stepId: 'execute', stepIndex: 1, state: 'running', details: { recipeId: recipe.id } });
     try {
-      const result = await this.browserActions.executeWithStandingGrant(recipe, inputs, { grantId, principal, surface, executor: executor || undefined });
+      const result = await this.browserActions.executeWithStandingGrant(recipe, inputs, { grantId, principal, surface, taskId, executor: executor || undefined });
       this.storeWorkflow(workflow.workflowId, 'completed', { ...workflow.payload, outcome: 'confirmed', runId: result.runId, receipt: result.receipt }, { runId: result.runId });
       this.workflows.setStep(workflow.workflowId, { stepId: 'execute', stepIndex: 1, state: 'completed', details: { runId: result.runId, receipt: result.receipt } });
       return this.workflows.store.getWorkflow(workflow.workflowId);

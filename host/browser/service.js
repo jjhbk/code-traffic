@@ -34,10 +34,10 @@ class BrowserActionService {
     }
   }
 
-  async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', executor = this.executor } = {}) {
+  async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', taskId = null, executor = this.executor } = {}) {
     if (!grantId || !executor) throw new Error('A standing grant and browser executor are required.');
     const checked = validateRecipe(recipe);
-    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects };
+    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects, taskId };
     this.approvals.authorizeStanding(action, { grantId, principal, surface });
     const actionDigest = digest(action);
     const run = this.store.createAutonomousRun({ grantId, action, actionDigest, details: { capability: action.capability, recipeId: action.recipeId, surface } });
