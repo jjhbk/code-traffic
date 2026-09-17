@@ -192,6 +192,9 @@ class GoogleDriveProvider {
     const changes = decodeSyncCursor(cursor, 'drive-changes');
     const legacyPageToken = cursor && !String(cursor).startsWith('sb1.') ? cursor : null;
     if (bootstrap || legacyPageToken || !cursor) {
+      // Establish the change boundary before enumerating bootstrap pages so
+      // changes made during enumeration are replayed after bootstrap.
+      const bootstrapStartToken = bootstrap?.startPageToken || (!cursor ? await this.startPageToken() : null);
       const query = new URLSearchParams({ q: 'trashed = false', pageSize: String(limit), orderBy: 'modifiedTime desc', fields: 'nextPageToken,files(id,name,mimeType,description,modifiedTime,webViewLink,owners(emailAddress))' });
       const pageToken = bootstrap?.pageToken || legacyPageToken;
       if (pageToken) query.set('pageToken', pageToken);
@@ -201,8 +204,8 @@ class GoogleDriveProvider {
         throw error;
       }
       const messages = (result.files || []).slice(0, limit).map((file) => this.normalizeFile(file));
-      if (result.nextPageToken) return { messages, nextCursor: encodeSyncCursor({ kind: 'drive-bootstrap', pageToken: result.nextPageToken }) };
-      const startPageToken = await this.startPageToken();
+      if (result.nextPageToken) return { messages, nextCursor: encodeSyncCursor({ kind: 'drive-bootstrap', pageToken: result.nextPageToken, ...(bootstrapStartToken ? { startPageToken: bootstrapStartToken } : {}) }) };
+      const startPageToken = bootstrapStartToken || await this.startPageToken();
       return { messages, nextCursor: encodeSyncCursor({ kind: 'drive-changes', pageToken: startPageToken }) };
     }
     if (!changes) throw Object.assign(new Error('Google Drive sync cursor is invalid.'), { code: 'CURSOR_EXPIRED' });

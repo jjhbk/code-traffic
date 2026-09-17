@@ -110,15 +110,20 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   assert.match(calendarCalls[1].options.body, /New title/);
   await assert.rejects(() => editableCalendar.updateEvent('event-1', { summary: 'Conflict' }, { etag: 'stale' }), (error) => error.code === 'PRECONDITION_FAILED');
   let driveCalls = 0;
+  let driveFileCalls = 0;
+  const driveCallKinds = [];
   const drive = new GoogleDriveProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => {
     driveCalls += 1;
-    if (url.includes('/changes/startPageToken')) return { startPageToken: 'drive-start' };
-    if (driveCalls === 1) return { nextPageToken: 'drive-2', files: [{ id: 'file-1', name: 'Brief', mimeType: 'text/plain', modifiedTime: '2026-09-18T15:00:00Z', webViewLink: 'https://drive.google.com/file/file-1' }] };
+    if (url.includes('/changes/startPageToken')) { driveCallKinds.push('checkpoint'); return { startPageToken: 'drive-start' }; }
+    driveCallKinds.push('files');
+    driveFileCalls += 1;
+    if (driveFileCalls === 1) return { nextPageToken: 'drive-2', files: [{ id: 'file-1', name: 'Brief', mimeType: 'text/plain', modifiedTime: '2026-09-18T15:00:00Z', webViewLink: 'https://drive.google.com/file/file-1' }] };
     return { files: [{ id: 'file-2', name: 'Second', mimeType: 'text/plain', modifiedTime: '2026-09-18T15:30:00Z' }] };
   } }) });
   const driveResult = await drive.sync({ boundedWindow: 10 });
   assert.match(driveResult.nextCursor, /^sb1\./);
   assert.equal(driveResult.messages[0].subject, 'Brief');
+  assert.deepEqual(driveCallKinds, ['checkpoint', 'files'], 'Drive bootstrap checkpoints before enumerating files');
   const driveBootstrapResult = await drive.sync({ cursor: driveResult.nextCursor, boundedWindow: 10 });
   assert.equal(driveBootstrapResult.messages[0].subject, 'Second');
   const driveChanges = new GoogleDriveProvider({ accessToken: 'access', fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => ({ newStartPageToken: 'drive-next', changes: [{ fileId: 'file-1', removed: true }, { fileId: 'file-2', file: { id: 'file-2', name: 'Updated', mimeType: 'text/plain', modifiedTime: '2026-09-18T16:00:00Z' } }] }) }) });

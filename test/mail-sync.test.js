@@ -39,6 +39,17 @@ const sync = new MailSync({ store, provider, clock: () => 1770000000000 });
   assert.equal(blockedResult.skipped, true);
   assert.equal(blockedCalls, 0, 'a second process must not call the provider while the connector lease is held');
   assert.equal(store.releaseConnectorLease('gmail:me', heldLease.leaseToken), true);
+  const interruptedStore = new SqliteStore({ clock: () => 1770000000000 });
+  let interruptedCalls = 0;
+  const interruptedSync = new MailSync({ store: interruptedStore, provider: { async sync({ cursor }) {
+    interruptedCalls += 1;
+    assert.equal(cursor, null);
+    throw new Error('provider interrupted during bootstrap');
+  } }, clock: () => 1770000000000 });
+  await assert.rejects(() => interruptedSync.run({ adapterId: 'drive:me@example.com', accountAddress: 'me@example.com' }), /provider interrupted/);
+  assert.equal(interruptedCalls, 1);
+  assert.equal(interruptedStore.getConnectorCursor('drive:me@example.com'), null, 'an interrupted provider run does not advance its checkpoint');
+  interruptedStore.close();
   let concurrentCalls = 0;
   let releaseConcurrent;
   const concurrentProvider = {
