@@ -17,6 +17,7 @@
     "check:packaging": "node scripts/check-packaging.js",
     "check:signing": "node scripts/check-signing.js",
     "check:browser-extension": "node scripts/check-browser-extension.js",
+    "check:assistant-ui": "node scripts/run-assistant-ui-check.js",
     "check:packaged-resources": "node scripts/check-packaged-resources.js",
     "postinstall": "electron-rebuild -f -w node-pty || true",
     "package": "electron-forge package",
