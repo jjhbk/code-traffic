@@ -32,6 +32,7 @@ class ConversationService {
     if (duplicate || inbound.direction !== 'inbound') return { duplicate: true, response: null, decisions: [], history: this.history(conversation.conversationId) };
     const tasks = this.store.listTasks({ includeDismissed: true });
     const command = content.match(/^\s*(dismiss|snooze)\s+([a-f0-9-]{8,})(?:\s+(\d+))?\s*$/i);
+    const workflowCommand = content.match(/^\s*cancel\s+(?:workflow|work)\s+([a-f0-9-]{8,})\s*$/i);
     const memoryCommand = content.match(/^\s*(?:remember|save preference)\s+([^:]{2,80})\s*:\s*(.{1,500})\s*$/i);
     let response;
     let reference = {};
@@ -40,6 +41,15 @@ class ConversationService {
       const value = memoryCommand[2].trim();
       this.store.upsertContext({ recordType: 'preference', recordKey, value, source: { channel: this.channel, conversationId: conversation.conversationId }, confidence: 'high', confirmed: true });
       response = `I’ll remember your preference for “${recordKey}”.`;
+    } else if (workflowCommand) {
+      const workflow = this.store.getWorkflow(workflowCommand[1]);
+      if (!workflow) response = `I couldn't find workflow ${workflowCommand[1]}.`;
+      else if (['completed', 'cancelled'].includes(workflow.state)) response = `Workflow “${workflow.workflowType}” is already ${workflow.state}.`;
+      else {
+        const cancelled = this.store.updateWorkflow(workflow.workflowId, { state: 'cancelled', details: { reason: 'conversation-user-cancelled', channel: this.channel } });
+        response = `Cancelled workflow “${cancelled.workflowType}”.`;
+        reference = { workflowId: cancelled.workflowId };
+      }
     } else if (command) {
       const task = tasks.find((item) => item.taskId === command[2]);
       if (!task) response = `I couldn't find task ${command[2]}.`;

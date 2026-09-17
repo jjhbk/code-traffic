@@ -30,5 +30,10 @@ assistant.handle({ conversationId: 'desktop:test', text: 'remember response styl
 assert.equal(store.getContext('preference', 'response style').value, 'concise and direct');
 assistant.handle({ conversationId: 'desktop:test', text: `snooze ${candidate.taskId} 2`, externalId: 'desktop-message-2' });
 assert.equal(store.listTasks().find((task) => task.taskId === candidate.taskId).status, 'snoozed');
+const workflow = store.createWorkflow({ workflowType: 'conversation-control', taskId: candidate.taskId, state: 'waiting_event', payload: { source: 'test' } });
+const cancelled = assistant.handle({ conversationId: 'desktop:test', text: `cancel workflow ${workflow.workflowId}`, externalId: 'desktop-message-3' });
+assert.match(cancelled.response, /Cancelled workflow/);
+assert.equal(cancelled.workflowId, workflow.workflowId);
+assert.equal(store.getWorkflow(workflow.workflowId).state, 'cancelled');
 store.close();
 console.log('conversation tests passed');
