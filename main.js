@@ -32,6 +32,8 @@ const { DigestScheduler } = require('./host/scheduling/digest');
 const { AssistantRuntime } = require('./host/runtime/assistant');
 const { ProactivityService } = require('./host/proactivity/service');
 const { ConversationService } = require('./host/conversation/service');
+const { WorkflowService } = require('./host/workflows/service');
+const { FollowUpWorkflow } = require('./host/workflows/follow-up');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
 const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
@@ -96,6 +98,7 @@ let digestScheduler;
 let assistantRuntime;
 let proactivityService;
 let conversationService;
+let followUpWorkflow;
 let mailSyncTimer;
 let calendarSyncTimer;
 let driveSyncTimer;
@@ -510,13 +513,8 @@ function wireIpc() {
     if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
     const task = hostStore.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
     if (!task) throw new Error('Task not found.');
-    const action = createReplyProposal({
-      to: task.counterparty,
-      subject: subject || (String(task.summary || '').startsWith('Re:') ? task.summary : `Re: ${task.summary || 'Follow up'}`),
-      body,
-      threadId: task.threadId,
-    });
-    const approval = approvalService.request(action, { principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], expiresAt: Date.now() + 10 * 60 * 1000 });
+    if (!followUpWorkflow) throw new Error('Follow-up workflows are unavailable.');
+    const { approval } = followUpWorkflow.prepare(task, { subject, body, principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], expiresAt: Date.now() + 10 * 60 * 1000 });
     try { await telegram?.sendReplyApproval(approval); } catch (error) { console.error(`[telegram] reply approval notification failed: ${error.message}`); }
     return approval;
   });
@@ -980,6 +978,7 @@ async function start() {
   taskService = hostStore ? new TaskService({ store: hostStore }) : null;
   proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop' }) : null;
+  if (hostStore && approvalService) followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows: new WorkflowService({ store: hostStore }) });
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
