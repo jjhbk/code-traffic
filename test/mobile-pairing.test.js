@@ -29,6 +29,12 @@ function request(port, pathname, { token, method = 'GET', body = null, commandId
   assert.equal((await request(port, '/api/v1/mobile/health', { token: paired.body.token })).status, 200);
   const push = await request(port, '/api/v1/mobile/devices/push-token', { token: paired.body.token, method: 'POST', commandId: 'paired-push-1', body: { pushToken: 'ExponentPushToken[paired]', platform: 'expo' } });
   assert.equal(push.status, 200); assert.equal(store.listMobilePushTokens()[0].deviceId, paired.body.device.deviceId);
+  const replayedPush = await request(port, '/api/v1/mobile/devices/push-token', { token: paired.body.token, method: 'POST', commandId: 'paired-push-1', body: { pushToken: 'ExponentPushToken[changed]', platform: 'expo' } });
+  assert.equal(replayedPush.status, 200); assert.equal(replayedPush.body.replayed, true);
+  const secondCode = pairing.startPairing();
+  const second = await request(port, '/api/v1/mobile/pair', { token: 'bootstrap-secret', method: 'POST', commandId: 'pair-test-command-3', body: { code: secondCode.code, deviceName: 'Second phone' } });
+  const secondPush = await request(port, '/api/v1/mobile/devices/push-token', { token: second.body.token, method: 'POST', commandId: 'paired-push-1', body: { pushToken: 'ExponentPushToken[second]', platform: 'expo' } });
+  assert.equal(secondPush.status, 200); assert.equal(secondPush.body.replayed, false); assert.equal(store.listMobilePushTokens().length, 2);
   const crossDevicePush = await request(port, '/api/v1/mobile/devices/push-token', { token: paired.body.token, method: 'POST', commandId: 'paired-push-2', body: { deviceId: 'other-device', pushToken: 'ExponentPushToken[other]', platform: 'expo' } });
   assert.equal(crossDevicePush.status, 403);
   assert.equal((await request(port, '/api/v1/mobile/pair', { token: 'bootstrap-secret', method: 'POST', body: { code: issued.code, deviceName: 'Second phone' }, commandId: 'pair-test-command-2' })).status, 400);

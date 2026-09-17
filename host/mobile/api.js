@@ -65,10 +65,11 @@ class MobileApi {
     if (method !== 'POST') return operation();
     const commandId = String(headers['idempotency-key'] || body.externalId || '').trim();
     if (!commandId || commandId.length > 200) throw this._error(400, 'An idempotency key is required for mobile commands.');
-    const cached = this.store.getMobileCommand(commandId);
+    const scopedCommandId = `${device?.deviceId || 'legacy-mobile'}:${commandId}`;
+    const cached = this.store.getMobileCommand(scopedCommandId);
     if (cached) return { ...cached.result, replayed: true, ...(Object.prototype.hasOwnProperty.call(cached.result, 'duplicate') ? { duplicate: true } : {}) };
     const result = await operation();
-    this.store.saveMobileCommand(commandId, `${method} ${path}`, result);
+    this.store.saveMobileCommand(scopedCommandId, `${method} ${path}`, result);
     return { ...result, replayed: false };
   }
 
