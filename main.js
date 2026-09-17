@@ -442,7 +442,12 @@ function wireIpc() {
   ipcMain.handle('model:diagnostics', () => modelRouter?.diagnostics() || { mode: 'off', metrics: {} });
   ipcMain.handle('model:probe', async () => modelRouter?.probe() || { localCall: false, redacted: false });
   ipcMain.handle('tasks:graph', (_event, options = {}) => hostStore?.taskGraph({ includeDismissed: true, taskId: options.taskId || null, depth: options.depth, limit: options.limit }) || { nodes: [], edges: [] });
-  ipcMain.handle('assistant:decisions', () => proactivityService?.evaluate(hostStore?.listTasks() || []) || []);
+  ipcMain.handle('assistant:decisions', async () => {
+    const tasks = hostStore?.listTasks() || [];
+    return proactivityService?.evaluateAsync
+      ? proactivityService.evaluateAsync(tasks, { context: hostStore?.listContext().slice(0, 12) || [] })
+      : (proactivityService?.evaluate(tasks) || []);
+  });
   ipcMain.handle('assistant:conversation', () => conversationService?.history('desktop:signal-box') || []);
   ipcMain.handle('assistant:send', (_event, { text = '' } = {}) => {
     if (!conversationService) throw new Error('Assistant conversation is unavailable.');

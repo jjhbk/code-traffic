@@ -105,9 +105,12 @@ class MobileApi {
 
   authenticate(token) { return this.pairing?.authenticate(token) || null; }
 
-  today(device = null, query = {}) {
+  async today(device = null, query = {}) {
     const tasks = this.store.listTasks();
-    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions: this.proactivity.evaluate(tasks), workflows: this.store.listWorkflows({ activeOnly: true }), notifications: this.notifications(device, query).notifications };
+    const decisions = this.proactivity.evaluateAsync
+      ? await this.proactivity.evaluateAsync(tasks, { context: this.store.listContext().slice(0, 12) })
+      : this.proactivity.evaluate(tasks);
+    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions, workflows: this.store.listWorkflows({ activeOnly: true }), notifications: this.notifications(device, query).notifications };
   }
 
   notifications(device = null, query = {}) {
