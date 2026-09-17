@@ -10,6 +10,7 @@ class TaskService {
   }
 
   processObservation(observation) {
+    if (observation?.removed) return [];
     const filters = candidateFilters(observation, { existingTaskThreadIds: new Set(this.store.taskThreadIds()) });
     const candidates = candidatesFromObservation(observation, { filters, extractorVersion: this.extractorVersion });
     if (!candidates.length) return [];
@@ -21,6 +22,7 @@ class TaskService {
   }
 
   async processObservationAsync(observation) {
+    if (observation?.removed) return [];
     const filters = candidateFilters(observation, { existingTaskThreadIds: new Set(this.store.taskThreadIds()) });
     if (this.modelRouter?.extractObligations) {
       try {
