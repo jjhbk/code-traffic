@@ -15,6 +15,10 @@ class WorkflowService {
     return this.store.updateWorkflow(workflowId, { state, details });
   }
 
+  cancel(workflowId, reason = 'user-cancelled') {
+    return this.transition(workflowId, 'cancelled', { reason });
+  }
+
   setStep(workflowId, step) { return this.store.upsertWorkflowStep(workflowId, step); }
 
   resume(workflowId) {

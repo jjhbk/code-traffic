@@ -398,6 +398,10 @@ function wireIpc() {
   });
   ipcMain.handle('assistant:status', () => assistantRuntime?.health() || { running: false, busy: false });
   ipcMain.handle('assistant:workflows', () => hostStore?.listWorkflows({ activeOnly: true }) || []);
+  ipcMain.handle('assistant:cancel-workflow', (_event, { workflowId } = {}) => {
+    if (!workflowId || !hostStore) throw new Error('Assistant workflow storage is unavailable.');
+    return new WorkflowService({ store: hostStore }).cancel(workflowId);
+  });
   ipcMain.handle('assistant:context', () => hostStore?.listContext() || []);
   ipcMain.handle('activity:list', () => {
     const entries = hostStore?.recentAudit(60) || [];

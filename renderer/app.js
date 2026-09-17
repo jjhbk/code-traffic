@@ -519,7 +519,9 @@ async function loadAssistantConversation() {
         const title = document.createElement('strong'); title.textContent = `${workflow.workflowType} · ${workflow.state}`;
         const detail = document.createElement('span'); detail.textContent = workflow.taskId ? `Task ${workflow.taskId}` : `Workflow ${workflow.workflowId}`;
         const wake = document.createElement('small'); wake.textContent = workflow.wakeAt ? `Next check: ${new Date(workflow.wakeAt).toLocaleString()}` : 'No next check scheduled.';
-        card.append(title, detail, wake); workflowsTarget.append(card);
+        const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel workflow';
+        cancel.addEventListener('click', async () => { cancel.disabled = true; try { await window.signalBox.cancelAssistantWorkflow({ workflowId: workflow.workflowId }); await loadAssistantConversation(); } catch (caught) { cancel.disabled = false; showError(caught.message || 'Could not cancel workflow.'); } });
+        card.append(title, detail, wake, cancel); workflowsTarget.append(card);
       }
     }
     if (!messages.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No assistant messages yet.'; target.append(empty); return; }

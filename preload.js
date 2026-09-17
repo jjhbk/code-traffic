@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   sendAssistantMessage: (payload) => ipcRenderer.invoke('assistant:send', payload),
   getAssistantStatus: () => ipcRenderer.invoke('assistant:status'),
   getAssistantWorkflows: () => ipcRenderer.invoke('assistant:workflows'),
+  cancelAssistantWorkflow: (payload) => ipcRenderer.invoke('assistant:cancel-workflow', payload),
   getAssistantContext: () => ipcRenderer.invoke('assistant:context'),
   getActivity: () => ipcRenderer.invoke('activity:list'),
   updateTask: (payload) => ipcRenderer.invoke('tasks:update', payload),
