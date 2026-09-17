@@ -21,6 +21,8 @@ class ApprovalService {
 
   execution(attempt) { return this.store.recordExecutionAttempt(attempt); }
 
+  claimExecution(attempt) { return this.store.claimExecutionAttempt(attempt); }
+
   receipt(receipt) { return this.store.recordReceipt(receipt); }
 }
 

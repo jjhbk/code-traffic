@@ -432,6 +432,25 @@ class SqliteStore {
     return { attemptId, requestId, status };
   }
 
+  claimExecutionAttempt({ attemptId = crypto.randomUUID(), requestId, details = {} } = {}) {
+    if (!requestId) throw new Error('Approval request is required.');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const request = this.db.prepare('SELECT request_id FROM approval_requests WHERE request_id = ?').get(requestId);
+      if (!request) throw new Error('Approval request not found.');
+      if (this.db.prepare('SELECT attempt_id FROM execution_attempts WHERE request_id = ? LIMIT 1').get(requestId)) throw new Error('Approval has already been consumed.');
+      const now = this.clock();
+      this.db.prepare(`INSERT INTO execution_attempts(attempt_id, request_id, status, details_json, created_at, updated_at)
+        VALUES (?, ?, 'prepared', ?, ?, ?)`).run(attemptId, requestId, JSON.stringify(details), now, now);
+      this.audit('execution-prepared', requestId, null, { attemptId, ...details });
+      this.db.exec('COMMIT');
+      return this.getExecutionAttempt(attemptId);
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch (_) { /* Preserve the original claim error. */ }
+      throw error;
+    }
+  }
+
   getExecutionAttempt(attemptId) {
     const row = this.db.prepare('SELECT attempt_id AS attemptId, request_id AS requestId, status, details_json AS detailsJson, created_at AS createdAt, updated_at AS updatedAt FROM execution_attempts WHERE attempt_id = ?').get(attemptId);
     return row ? { ...row, details: JSON.parse(row.detailsJson) } : null;
