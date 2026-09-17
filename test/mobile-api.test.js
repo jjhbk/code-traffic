@@ -61,6 +61,8 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(location.status, 200); assert.equal(location.body.accepted.accepted, true);
   const duplicateLocation = await request(port, '/api/v1/mobile/context/location', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'location-1', latitude: 1, longitude: 2, accuracy: 5, consent: true } });
   assert.equal(duplicateLocation.body.accepted.duplicate, true);
+  const battery = await request(port, '/api/v1/mobile/context/sensor', { method: 'POST', body: { deviceId: 'phone-1', eventId: 'battery-1', sensor: 'battery', value: { level: 0.35, state: 'unplugged' }, consent: true } });
+  assert.equal(battery.status, 200); assert.equal(battery.body.sensorContext.context.recordKey, 'mobile.sensor.battery');
   const place = await request(port, '/api/v1/mobile/context/place', { method: 'POST', body: { placeKey: 'home', label: 'Home', latitude: 1, longitude: 2, radiusMeters: 150, consent: true } });
   assert.equal(place.status, 200); assert.equal(place.body.place.recordType, 'place');
   store.upsertContext({ recordType: 'preference', recordKey: 'response-style', value: 'concise', source: { channel: 'test' }, confidence: 'high', confirmed: true });

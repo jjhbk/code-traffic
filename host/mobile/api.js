@@ -180,9 +180,14 @@ class MobileApi {
 
   ingestSensor(body = {}) {
     if (body.consent !== true) throw this._error(403, 'Sensor context requires explicit consent.');
-    const sensor = String(body.sensor || '').trim();
+    const sensor = String(body.sensor || '').trim().toLowerCase();
     if (!sensor || !body.value || typeof body.value !== 'object' || Array.isArray(body.value)) throw this._error(400, 'Sensor context requires a sensor name and structured value.');
-    return this.ingestContextEvent({ ...body, payload: { sensor, value: body.value, capturedAt: Number(body.capturedAt || this.clock()), consentScope: String(body.consentScope || sensor) } }, 'sensor');
+    const capturedAt = Number(body.capturedAt || this.clock());
+    const result = this.ingestContextEvent({ ...body, payload: { sensor, value: body.value, capturedAt, consentScope: String(body.consentScope || sensor) } }, 'sensor');
+    const sensorContext = result.accepted.accepted
+      ? this.context?.processSensor({ sensor, value: body.value, capturedAt, deviceId: body.deviceId || null, consentScope: body.consentScope || sensor }) || { stale: true, context: null }
+      : { stale: false, duplicate: true, context: null };
+    return { ...result, sensorContext };
   }
 
   ingestContextEvent(body, kind) {

@@ -9,9 +9,9 @@ function distanceMeters(a, b) {
 }
 
 class MobileContextService {
-  constructor({ store, clock = () => Date.now(), maxLocationAgeMs = 15 * 60 * 1000 } = {}) {
+  constructor({ store, clock = () => Date.now(), maxLocationAgeMs = 15 * 60 * 1000, maxSensorAgeMs = 60 * 60 * 1000 } = {}) {
     if (!store) throw new Error('Mobile context service requires a store.');
-    this.store = store; this.clock = clock; this.maxLocationAgeMs = maxLocationAgeMs;
+    this.store = store; this.clock = clock; this.maxLocationAgeMs = maxLocationAgeMs; this.maxSensorAgeMs = maxSensorAgeMs;
   }
 
   savePlace({ placeKey, label, latitude, longitude, radiusMeters = 150, consent = false } = {}) {
@@ -42,6 +42,25 @@ class MobileContextService {
       }
     }
     return { stale: false, triggers };
+  }
+
+  processSensor({ sensor, value, capturedAt = this.clock(), deviceId = null, consentScope = null } = {}) {
+    if (String(sensor || '').toLowerCase() !== 'battery' || !value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Only structured battery context is currently supported.');
+    const level = Number(value.level);
+    if (!Number.isFinite(level) || level < 0 || level > 1) throw new Error('Battery context requires a level between 0 and 1.');
+    if (!Number.isFinite(capturedAt)) return { stale: true, context: null };
+    const now = this.clock();
+    if (capturedAt > now + 5 * 60 * 1000 || now - capturedAt > this.maxSensorAgeMs) return { stale: true, context: null };
+    const context = this.store.upsertContext({
+      recordType: 'fact',
+      recordKey: 'mobile.sensor.battery',
+      value: { sensor: 'battery', level, state: value.state || null, capturedAt },
+      source: { channel: 'mobile', deviceId: deviceId || null, consentScope: consentScope || 'battery' },
+      confidence: 'high',
+      confirmed: true,
+      validUntil: now + this.maxSensorAgeMs,
+    });
+    return { stale: false, context };
   }
 
   validCoordinate(latitude, longitude) { return Number.isFinite(Number(latitude)) && Number(latitude) >= -90 && Number(latitude) <= 90 && Number.isFinite(Number(longitude)) && Number(longitude) >= -180 && Number(longitude) <= 180; }
