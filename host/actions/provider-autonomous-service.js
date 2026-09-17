@@ -18,10 +18,8 @@ class ProviderAutonomousActionService {
       throw new Error('An autonomous provider action is already in progress for this task.');
     }
     const authorized = { ...checked, autonomous: false };
-    this.approvals.authorizeStanding(authorized, { grantId, principal, surface });
     const actionDigest = digest(checked);
-    const run = this.store.createAutonomousRun({ grantId, action: checked, actionDigest, details: { capability: checked.capability, surface } });
-    this.store.updateAutonomousRun(run.runId, 'authorized', { details: { principal, surface } });
+    const run = this.approvals.createAuthorizedAutonomousRun(authorized, { grantId, actionDigest, principal, surface, details: { capability: checked.capability, principal, surface } });
     try {
       this.store.updateAutonomousRun(run.runId, 'dispatched', { details: { surface } });
       const result = await this._dispatch(checked, run.runId);

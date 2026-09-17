@@ -900,6 +900,29 @@ class SqliteStore {
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
   }
 
+  createAuthorizedAutonomousRun({ runId = crypto.randomUUID(), grantId, action, actionDigest, principal, surface, policyVersion = null, details = {} } = {}) {
+    if (!runId || !grantId || !action || !actionDigest || !principal || !surface) throw new Error('Authorized autonomous run is incomplete.');
+    const now = this.clock();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const grant = this.getStandingGrant(grantId);
+      if (!grant || grant.status !== 'active') throw new Error('Standing grant is not active.');
+      if (grant.principal !== principal || grant.surface !== surface || grant.capability !== action.capability) throw new Error('Standing grant does not match this action.');
+      if (policyVersion && grant.policyVersion !== policyVersion) throw new Error('Standing grant uses an outdated policy.');
+      if (now >= grant.expiresAt) throw new Error('Standing grant has expired.');
+      if (grant.maxUses !== null && grant.usedCount >= grant.maxUses) throw new Error('Standing grant usage limit reached.');
+      if (grant.lastUsedAt !== null && now - grant.lastUsedAt < grant.cooldownMs) throw new Error('Standing grant cooldown is active.');
+      if (!matchesGrantConstraints(action, grant.constraints)) throw new Error('Action is outside standing grant constraints.');
+      this.db.prepare('UPDATE standing_grants SET used_count = used_count + 1, last_used_at = ?, updated_at = ? WHERE grant_id = ? AND status = \'active\'').run(now, now, grantId);
+      this.audit('standing-grant-consumed', null, null, { grantId, capability: action.capability, surface });
+      this.db.prepare(`INSERT INTO autonomous_runs(run_id, grant_id, action_json, action_digest, status, details_json, receipt_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'authorized', ?, NULL, ?, ?)`).run(runId, grantId, JSON.stringify(action), actionDigest, JSON.stringify(details), now, now);
+      this.audit('autonomous-run-authorized', null, actionDigest, { runId, grantId, ...details });
+      this.db.exec('COMMIT');
+      return this.getAutonomousRun(runId);
+    } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
+  }
+
   createAutonomousRun({ runId = crypto.randomUUID(), grantId, action, actionDigest, status = 'prepared', details = {} } = {}) {
     if (!runId || !grantId || !action || !actionDigest || !['prepared', 'authorized', 'dispatched', 'confirmed', 'failed', 'unknown'].includes(status)) throw new Error('Invalid autonomous run.');
     const now = this.clock();

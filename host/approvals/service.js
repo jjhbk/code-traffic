@@ -27,6 +27,12 @@ class ApprovalService {
     return this.store.consumeStandingGrant(grantId, action, { principal, surface, policyVersion: this.policyVersion, now: this.clock() });
   }
 
+  createAuthorizedAutonomousRun(action, { grantId, actionDigest, principal, surface = 'desktop', runId, details = {} } = {}) {
+    this.registry?.validateAction(action);
+    this.policy.evaluate({ ...action, autonomous: false }, { surfaces: [surface] });
+    return this.store.createAuthorizedAutonomousRun({ runId, grantId, action, actionDigest, principal, surface, policyVersion: this.policyVersion, details });
+  }
+
   decide(requestId, optionId, { principal, surface } = {}) {
     if (!principal || !surface) throw new Error('Approval identity is required.');
     return this.store.decide({ requestId, optionId, principal, surface });

@@ -35,6 +35,10 @@ const { ProviderAutonomousActionService } = require('../host/actions/provider-au
   assert.equal(providerRun.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(providerRun.runId).status, 'confirmed');
   assert.equal(sent, 1);
+  const atomicGrant = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { recipeId: recipe.id }, expiresAt: Date.now() + 60_000, maxUses: 1 });
+  store.createAutonomousRun({ runId: 'atomic-run-id', grantId: atomicGrant.grantId, action: { capability: 'browser.read', recipeId: recipe.id }, actionDigest: 'existing-run', status: 'prepared' });
+  await assert.rejects(async () => approvals.createAuthorizedAutonomousRun({ capability: 'browser.read', recipeId: recipe.id }, { grantId: atomicGrant.grantId, actionDigest: 'duplicate-run', principal: 'signal-box-user', surface: 'desktop', runId: 'atomic-run-id' }), (error) => error?.code === 'ERR_SQLITE_ERROR');
+  assert.equal(store.getStandingGrant(atomicGrant.grantId).usedCount, 0, 'grant usage rolls back when durable run creation fails');
   const providerTask = store.saveTaskCandidate({ candidateId: 'provider-freshness-task', observationId: 'provider-freshness-observation', summary: 'Send fresh update', evidence: { start: 0, end: 1, text: 'Send fresh update' }, extractorVersion: 'test' });
   const providerTaskVersion = store.listTasks({ includeDismissed: true }).find((task) => task.taskId === providerTask.taskId).updatedAt;
   const freshnessGrant = approvals.createStandingGrant({ capability: 'gmail.send' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { threadId: 'thread-provider' }, expiresAt: Date.now() + 60_000 });
@@ -43,7 +47,7 @@ const { ProviderAutonomousActionService } = require('../host/actions/provider-au
   assert.equal(result.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(result.runId).status, 'confirmed');
   assert.equal(executions, 1);
-  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 3);
+  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 4);
   assert.equal(store.listAutonomousRuns({ grantId: grant.grantId }).length, 1);
   await assert.rejects(() => service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId }), /usage limit/);
   const revoked = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: {}, expiresAt: Date.now() + 60_000 });

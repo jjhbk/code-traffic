@@ -46,10 +46,8 @@ class BrowserActionService {
       const currentTask = this.store.listTasks({ includeDismissed: true }).find((task) => task.taskId === taskId);
       if (!currentTask || currentTask.status !== 'active' || Number(currentTask.updatedAt) !== Number(taskVersion)) throw new Error('This browser action is stale because the task changed.');
     }
-    this.approvals.authorizeStanding(action, { grantId, principal, surface });
     const actionDigest = digest(action);
-    const run = this.store.createAutonomousRun({ grantId, action, actionDigest, details: { capability: action.capability, recipeId: action.recipeId, surface } });
-    this.store.updateAutonomousRun(run.runId, 'authorized', { details: { principal, surface } });
+    const run = this.approvals.createAuthorizedAutonomousRun(action, { grantId, actionDigest, principal, surface, details: { capability: action.capability, recipeId: action.recipeId, principal, surface } });
     try {
       this.store.updateAutonomousRun(run.runId, 'dispatched', { details: { surface } });
       const receipt = await executor.run(checked, inputs, { approve: async () => true });
