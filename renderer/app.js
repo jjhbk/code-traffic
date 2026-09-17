@@ -611,6 +611,21 @@ async function loadAssistantPermissions() {
 document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));
 document.getElementById('assistant-refresh').addEventListener('click', loadAssistantConversation);
 document.getElementById('permissions-refresh')?.addEventListener('click', loadAssistantPermissions);
+document.getElementById('mobile-pairing-generate')?.addEventListener('click', async () => {
+  const button = document.getElementById('mobile-pairing-generate'); const output = document.getElementById('mobile-pairing-output');
+  if (!window.signalBox.getMobilePairing) return;
+  button.disabled = true;
+  try {
+    const pairing = await window.signalBox.getMobilePairing(); output.hidden = false; output.replaceChildren();
+    const heading = document.createElement('span'); heading.textContent = 'One-time code';
+    const code = document.createElement('strong'); code.textContent = pairing.pairingCode || 'Unavailable';
+    const url = document.createElement('span'); url.textContent = `Core URL: ${pairing.hostUrl}`;
+    const token = document.createElement('span'); token.textContent = `Bootstrap token: ${pairing.bootstrapToken || 'Unavailable'}`;
+    const expiry = document.createElement('small'); expiry.textContent = pairing.pairingExpiresAt ? `Expires ${new Date(pairing.pairingExpiresAt).toLocaleTimeString()}. Generate a new code after it expires.` : 'Pairing code unavailable.';
+    output.append(heading, code, url, token, expiry);
+  } catch (caught) { showError(caught.message || 'Could not generate a mobile pairing code.'); }
+  finally { button.disabled = false; }
+});
 document.getElementById('permission-form')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const recipeId = document.getElementById('permission-recipe').value.trim();

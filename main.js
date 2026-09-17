@@ -36,6 +36,7 @@ const { WorkflowService } = require('./host/workflows/service');
 const { FollowUpWorkflow } = require('./host/workflows/follow-up');
 const { AvailabilityWorkflow } = require('./host/workflows/availability');
 const { MobileApi, PROTOCOL_VERSION } = require('./host/mobile/api');
+const { MobilePairingService } = require('./host/mobile/pairing');
 const { PlanningService } = require('./host/planning/service');
 const { EntityVault, PrivacyGateway } = require('./host/privacy/gateway');
 const { OllamaClient } = require('./host/models/clients');
@@ -108,6 +109,7 @@ let planningService;
 let availabilityWorkflow;
 let mobileConversationService;
 let mobileApi;
+let mobilePairing;
 let trayRef;
 let mailSyncTimer;
 let calendarSyncTimer;
@@ -340,7 +342,8 @@ function wireIpc() {
   ipcMain.handle('mobile:get-pairing', () => {
     const pairing = ensureMobileToken();
     const port = Number.isInteger(boardPort) && boardPort > 0 && boardPort < 65536 ? boardPort : 4747;
-    return { protocolVersion: PROTOCOL_VERSION, token: pairing.token, hostUrl: `http://127.0.0.1:${port}`, transport: 'local-loopback', note: 'Remote phone connectivity is not enabled by default.' };
+    const code = mobilePairing?.startPairing();
+    return { protocolVersion: PROTOCOL_VERSION, bootstrapToken: pairing.token, pairingCode: code?.code || null, pairingExpiresAt: code?.expiresAt || null, hostUrl: `http://127.0.0.1:${port}`, transport: 'local-loopback', note: 'Remote phone connectivity is not enabled by default.' };
   });
   ipcMain.handle('browser:get-status', () => browserBridge?.status(appSettings.browserSessionId || '') || { sessionId: appSettings.browserSessionId || '', connected: false, lastSeenAt: null, pending: 0 });
   ipcMain.handle('clipboard:read', () => clipboard.readText());
@@ -1117,11 +1120,13 @@ async function start() {
   proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
   mobileConversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'mobile', proactivity: proactivityService }) : null;
+  mobilePairing = hostStore ? new MobilePairingService({ store: hostStore }) : null;
   mobileApi = hostStore && mobileConversationService && proactivityService ? new MobileApi({
     store: hostStore,
     conversation: mobileConversationService,
     proactivity: proactivityService,
     approvals: approvalService,
+    pairing: mobilePairing,
     getStatus: async () => ({ ...(assistantRuntime?.health() || { running: false, paused: false }), background: backgroundHost ? await backgroundHost.health() : null }),
   }) : null;
   board.mobileApi = mobileApi;

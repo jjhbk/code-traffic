@@ -307,6 +307,21 @@ const MIGRATIONS = [
     result_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS mobile_pairing_codes (
+    code_id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS mobile_devices (
+    device_id TEXT PRIMARY KEY,
+    device_name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER,
+    revoked_at INTEGER
+  );`,
 ];
 
 class SqliteStore {
@@ -347,6 +362,52 @@ class SqliteStore {
     this.db.prepare('INSERT INTO mobile_commands(command_id, operation, result_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(command_id) DO NOTHING')
       .run(commandId, operation, JSON.stringify(result), this.clock());
     return this.getMobileCommand(commandId);
+  }
+
+  createMobilePairingCode({ codeId = crypto.randomUUID(), codeHash, expiresAt } = {}) {
+    if (!codeId || !codeHash || !Number.isFinite(expiresAt) || expiresAt <= this.clock()) throw new Error('Invalid mobile pairing code.');
+    const now = this.clock();
+    this.db.prepare('INSERT INTO mobile_pairing_codes(code_id, code_hash, expires_at, used_at, created_at) VALUES (?, ?, ?, NULL, ?)').run(codeId, codeHash, expiresAt, now);
+    return { codeId, expiresAt };
+  }
+
+  consumeMobilePairingCode({ codeHash, deviceId, deviceName, tokenHash } = {}) {
+    if (!codeHash || !deviceId || !deviceName || !tokenHash) throw new Error('Invalid mobile pairing request.');
+    const now = this.clock();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const pairing = this.db.prepare('SELECT code_id AS codeId, expires_at AS expiresAt, used_at AS usedAt FROM mobile_pairing_codes WHERE code_hash = ?').get(codeHash);
+      if (!pairing || pairing.usedAt !== null || now >= pairing.expiresAt) throw new Error('Mobile pairing code is invalid or expired.');
+      this.db.prepare('UPDATE mobile_pairing_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL').run(now, codeHash);
+      this.db.prepare('INSERT INTO mobile_devices(device_id, device_name, token_hash, created_at, last_seen_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)')
+        .run(deviceId, String(deviceName).slice(0, 120), tokenHash, now, now);
+      this.db.exec('COMMIT');
+      return this.getMobileDevice(deviceId);
+    } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
+  }
+
+  getMobileDevice(deviceId) {
+    const row = this.db.prepare('SELECT device_id AS deviceId, device_name AS deviceName, created_at AS createdAt, last_seen_at AS lastSeenAt, revoked_at AS revokedAt FROM mobile_devices WHERE device_id = ?').get(deviceId);
+    return row || null;
+  }
+
+  authenticateMobileDevice(tokenHash) {
+    if (!tokenHash) return null;
+    const row = this.db.prepare('SELECT device_id AS deviceId, device_name AS deviceName, created_at AS createdAt, last_seen_at AS lastSeenAt, revoked_at AS revokedAt FROM mobile_devices WHERE token_hash = ? AND revoked_at IS NULL').get(tokenHash);
+    if (!row) return null;
+    this.db.prepare('UPDATE mobile_devices SET last_seen_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(this.clock(), row.deviceId);
+    return { ...row, lastSeenAt: this.clock() };
+  }
+
+  revokeMobileDevice(deviceId) {
+    const result = this.db.prepare('UPDATE mobile_devices SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(this.clock(), deviceId);
+    if (!Number(result.changes)) throw new Error('Mobile device not found or already revoked.');
+    this.audit('mobile-device-revoked', null, null, { deviceId });
+    return this.getMobileDevice(deviceId);
+  }
+
+  listMobileDevices() {
+    return this.db.prepare('SELECT device_id AS deviceId, device_name AS deviceName, created_at AS createdAt, last_seen_at AS lastSeenAt, revoked_at AS revokedAt FROM mobile_devices ORDER BY created_at DESC').all();
   }
 
   enqueueJob({ jobId = crypto.randomUUID(), kind, payload = {}, runAt = this.clock(), maxAttempts = 5, dedupeKey = null } = {}) {

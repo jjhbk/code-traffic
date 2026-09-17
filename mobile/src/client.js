@@ -40,6 +40,7 @@ class MobileCoreClient {
   workflows() { return this.request('/api/v1/mobile/workflows'); }
   context() { return this.request('/api/v1/mobile/context'); }
   permissions() { return this.request('/api/v1/mobile/permissions'); }
+  pairDevice(code, deviceName = 'Signal Box mobile') { return this.request('/api/v1/mobile/pair', { method: 'POST', body: { code, deviceName }, idempotencyKey: `pair:${code}` }); }
 
   async sendMessage(text, { conversationId = 'mobile:default', externalId = id() } = {}) {
     return this.command('/api/v1/mobile/conversation/messages', { conversationId, text, externalId }, externalId);

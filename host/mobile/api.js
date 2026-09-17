@@ -4,21 +4,22 @@ const PROTOCOL_VERSION = '1';
 const MOBILE_CONVERSATION_ID = 'mobile:default';
 
 class MobileApi {
-  constructor({ store, conversation, proactivity, approvals = null, getStatus = null, clock = () => Date.now() } = {}) {
+  constructor({ store, conversation, proactivity, approvals = null, pairing = null, getStatus = null, clock = () => Date.now() } = {}) {
     if (!store || !conversation || !proactivity) throw new Error('Mobile API requires store, conversation, and proactivity services.');
     this.store = store;
     this.conversation = conversation;
     this.proactivity = proactivity;
-    this.approvals = approvals;
+    this.approvals = approvals; this.pairing = pairing;
     this.getStatus = getStatus || (() => ({ running: true }));
     this.clock = clock;
   }
 
-  async handle({ method, path, query = {}, body = {}, headers = {} } = {}) {
+  async handle({ method, path, query = {}, body = {}, headers = {}, device = null } = {}) {
     const operation = async () => {
       const parts = String(path || '').split('/').filter(Boolean);
       if (parts[0] !== 'api' || parts[1] !== 'v1' || parts[2] !== 'mobile') throw this._error(404, 'Mobile endpoint not found.');
       const resource = parts[3] || '';
+      if (method === 'POST' && resource === 'pair') return this.pair(body);
       if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
       if (method === 'GET' && resource === 'today') return this.today();
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
@@ -30,7 +31,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
       if (method === 'POST' && resource === 'permissions') return { permission: this.createPermission(body) };
       if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'status') return { task: this.updateTask(parts[4], body) };
-      if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation(body);
+      if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation({ ...body, deviceId: body.deviceId || device?.deviceId });
       if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body);
       throw this._error(404, 'Mobile endpoint not found.');
     };
@@ -43,6 +44,14 @@ class MobileApi {
     this.store.saveMobileCommand(commandId, `${method} ${path}`, result);
     return { ...result, replayed: false };
   }
+
+  pair(body = {}) {
+    if (!this.pairing) throw this._error(503, 'Mobile pairing is unavailable.');
+    try { return this.pairing.pair({ code: body.code, deviceName: body.deviceName }); }
+    catch (error) { throw this._error(400, error.message); }
+  }
+
+  authenticate(token) { return this.pairing?.authenticate(token) || null; }
 
   today() {
     const tasks = this.store.listTasks();

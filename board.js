@@ -420,11 +420,16 @@ class Board extends EventEmitter {
       catch (_) { sendJson(response, 400, { error: 'Invalid request URL.' }); return; }
       if (url.pathname.startsWith('/api/v1/mobile')) {
         const supplied = request.headers.authorization?.replace(/^Bearer\s+/i, '') || request.headers['x-signal-box-mobile-token'];
-        if (!this.mobileAuthToken || supplied !== this.mobileAuthToken) { sendJson(response, 401, { error: 'Mobile authentication required.' }); return; }
         if (!this.mobileApi) { sendJson(response, 503, { error: 'Mobile API is unavailable.' }); return; }
+        const pairingRoute = url.pathname === '/api/v1/mobile/pair';
+        const device = pairingRoute ? null : this.mobileApi.authenticate?.(supplied);
+        const authenticated = pairingRoute
+          ? supplied === this.mobileAuthToken
+          : (device || (!this.mobileApi.pairing && supplied === this.mobileAuthToken));
+        if (!authenticated) { sendJson(response, 401, { error: 'Mobile authentication required.' }); return; }
         try {
           const body = request.method === 'GET' ? {} : await readJsonBody(request, 512 * 1024);
-          const result = await this.mobileApi.handle({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body, headers: request.headers });
+          const result = await this.mobileApi.handle({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body, headers: request.headers, device });
           sendJson(response, 200, result);
         } catch (error) { sendJson(response, error.status || (error.message === 'Request body exceeds limit.' ? 413 : 400), { error: error.message }); }
         return;
