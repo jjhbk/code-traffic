@@ -27,6 +27,10 @@ function request(port, pathname, { token, method = 'GET', body = null, commandId
   assert.equal(paired.status, 200); assert.equal(paired.body.device.deviceName, 'Test phone'); assert.ok(paired.body.token);
   assert.equal((await request(port, '/api/v1/mobile/health', { token: 'bootstrap-secret' })).status, 401);
   assert.equal((await request(port, '/api/v1/mobile/health', { token: paired.body.token })).status, 200);
+  const push = await request(port, '/api/v1/mobile/devices/push-token', { token: paired.body.token, method: 'POST', commandId: 'paired-push-1', body: { pushToken: 'ExponentPushToken[paired]', platform: 'expo' } });
+  assert.equal(push.status, 200); assert.equal(store.listMobilePushTokens()[0].deviceId, paired.body.device.deviceId);
+  const crossDevicePush = await request(port, '/api/v1/mobile/devices/push-token', { token: paired.body.token, method: 'POST', commandId: 'paired-push-2', body: { deviceId: 'other-device', pushToken: 'ExponentPushToken[other]', platform: 'expo' } });
+  assert.equal(crossDevicePush.status, 403);
   assert.equal((await request(port, '/api/v1/mobile/pair', { token: 'bootstrap-secret', method: 'POST', body: { code: issued.code, deviceName: 'Second phone' }, commandId: 'pair-test-command-2' })).status, 400);
   pairing.revoke(paired.body.device.deviceId);
   assert.equal((await request(port, '/api/v1/mobile/health', { token: paired.body.token })).status, 401);
