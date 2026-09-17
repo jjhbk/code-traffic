@@ -32,6 +32,7 @@ class BackgroundHost {
     this.lifecycle = 'starting';
     this.ready = new Promise((resolve, reject) => {
       let readySettled = false;
+      let startupFailed = false;
       const resolveReady = (health) => { if (!readySettled) { readySettled = true; this.lifecycle = 'running'; resolve({ ...health, lifecycle: this.lifecycle, lastExitAt: this.lastExitAt, restartCount: this.restartCount }); } };
       const rejectReady = (error) => { if (!readySettled) { readySettled = true; reject(error); } };
       const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0', SIGNAL_BOX_DIGEST_SETTINGS: JSON.stringify(this.digestSettings), SIGNAL_BOX_CONNECTOR_ACCOUNTS: JSON.stringify(this.connectorAccounts) } });
@@ -49,14 +50,25 @@ class BackgroundHost {
         this.pending.delete(message.id);
         if (message.error) pending.reject(new Error(message.error)); else pending.resolve(message.result);
       });
-      child.once('error', (error) => { rejectReady(error); this._failPending(error); });
+      child.once('error', (error) => {
+        startupFailed = !readySettled;
+        rejectReady(error);
+        this._failPending(error);
+        // A failed spawn is not guaranteed to be followed by an exit event.
+        // Clear the reference here so a caller can retry and supervision does
+        // not leave the host permanently stuck in its starting state.
+        if (this.child === child) this.child = null;
+        if (this.stopping) this.lifecycle = 'stopped';
+        else if (readySettled && !startupFailed) this._scheduleRestart();
+        else this.lifecycle = 'unavailable';
+      });
       child.once('exit', (code, signal) => {
         this.child = null;
         this.lastExitAt = Date.now();
         const error = new Error(`Background host exited${signal ? ` with ${signal}` : ` with code ${code}`}.`);
         if (!readySettled) rejectReady(error);
         this._failPending(error);
-        if (readySettled && this.supervise && !this.stopping) this._scheduleRestart();
+        if (readySettled && !startupFailed && this.supervise && !this.stopping) this._scheduleRestart();
         else if (this.stopping) this.lifecycle = 'stopped';
       });
     });

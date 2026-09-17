@@ -79,6 +79,18 @@ const { WorkflowService } = require('../host/workflows/service');
   const startup = failedHost.start();
   failedChild.emit('error', new Error('spawn failed'));
   await assert.rejects(startup, /spawn failed/);
+  assert.equal((await failedHost.health()).lifecycle, 'unavailable');
+  const retryChild = new EventEmitter();
+  retryChild.connected = true;
+  retryChild.send = (message) => {
+    if (message.method === 'health') retryChild.emit('message', { type: 'response', id: message.id, result: { running: true } });
+    if (message.method === 'shutdown') setImmediate(() => { retryChild.emit('message', { type: 'response', id: message.id, result: { stopped: true } }); retryChild.emit('exit', 0, null); });
+  };
+  retryChild.disconnect = () => { retryChild.connected = false; };
+  failedHost.forkImpl = () => { setImmediate(() => retryChild.emit('message', { type: 'ready', health: { running: true } })); return retryChild; };
+  await failedHost.start();
+  assert.equal((await failedHost.health()).running, true, 'a failed background spawn can be retried');
+  await failedHost.stop();
   const supervisedChildren = [];
   const supervised = new BackgroundHost({ databasePath, restartDelayMs: 10, forkImpl: () => {
     const child = new EventEmitter(); child.connected = true; child.send = (message) => {
