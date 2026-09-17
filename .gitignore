@@ -8,6 +8,10 @@ release/
 .cache/
 build/
 
+# Expo prebuild output is generated locally/EAS from app.json
+mobile/android/
+mobile/ios/
+
 # Runtime/session data and local logs
 *.log
 sessions.json
@@ -18,6 +22,7 @@ sessions.json
 !.env.example
 .vscode/
 .idea/
+.expo/
 
 # OS metadata
 .DS_Store
