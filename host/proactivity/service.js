@@ -159,6 +159,7 @@ class ProactivityService {
       if (!['gmail.send', 'calendar.update'].includes(action.capability)) return this._decision(task, 'wait', 'unsupported-provider-automation', []);
       const priorRuns = this.store.listAutonomousRuns().filter((run) => run.action?.taskId === task.taskId).sort((a, b) => b.createdAt - a.createdAt);
       if (priorRuns.some((run) => run.status === 'unknown')) return this._decision(task, 'suggest_resolution', 'automation-outcome-unknown', []);
+      if (priorRuns.some((run) => ['authorized', 'dispatched'].includes(run.status))) return this._decision(task, 'wait', 'automation-in-progress', []);
       if (priorRuns.some((run) => run.status === 'confirmed' && automation.repeat !== true)) return this._decision(task, 'wait', 'automation-completed', []);
       const grant = this._standingGrant(action, now);
       if (!grant) return this._decision(task, 'wait', 'automatic-action-not-authorized', []);

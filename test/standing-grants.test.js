@@ -41,6 +41,13 @@ const { ProviderAutonomousActionService } = require('../host/actions/provider-au
   const uncertainRun = store.listAutonomousRuns({ grantId: uncertainGrant.grantId })[0];
   assert.equal(uncertainRun.status, 'unknown');
   assert.ok(store.exportData().data.jobs.some((job) => job.kind === 'assistant.reconcile-provider-run' && JSON.parse(job.payload_json).runId === uncertainRun.runId), 'unknown provider outcomes schedule durable reconciliation');
+  const recoveredGrant = approvals.createStandingGrant({ capability: 'gmail.send' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { threadId: 'thread-recovered' }, expiresAt: Date.now() + 60_000 });
+  const recoveredAction = { capability: 'gmail.send', destination: 'alex@example.com', threadId: 'thread-recovered', content: { subject: 'Re: Handoff', body: 'Recovered.' } };
+  const recovered = approvals.createAuthorizedAutonomousRun(recoveredAction, { grantId: recoveredGrant.grantId, actionDigest: 'recovered-digest', principal: 'signal-box-user', surface: 'desktop', recoveryKind: 'assistant.reconcile-provider-run' });
+  const recoveryJob = store.exportData().data.jobs.find((job) => job.kind === 'assistant.reconcile-provider-run' && JSON.parse(job.payload_json).runId === recovered.runId);
+  assert.ok(recoveryJob, 'authorization transaction persists a provider recovery job');
+  const recoveredProvider = new ProviderAutonomousActionService({ store, approvals, providers: { gmail: () => ({ reconcileReply: async () => ({ found: true, messageId: 'recovered-message', threadId: 'thread-recovered' }) }) } });
+  assert.equal((await recoveredProvider.reconcileUnknownRun(recovered.runId)).status, 'confirmed', 'restart recovery verifies an authorized provider run before retrying');
   const atomicGrant = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { recipeId: recipe.id }, expiresAt: Date.now() + 60_000, maxUses: 1 });
   store.createAutonomousRun({ runId: 'atomic-run-id', grantId: atomicGrant.grantId, action: { capability: 'browser.read', recipeId: recipe.id }, actionDigest: 'existing-run', status: 'prepared' });
   await assert.rejects(async () => approvals.createAuthorizedAutonomousRun({ capability: 'browser.read', recipeId: recipe.id }, { grantId: atomicGrant.grantId, actionDigest: 'duplicate-run', principal: 'signal-box-user', surface: 'desktop', runId: 'atomic-run-id' }), (error) => error?.code === 'ERR_SQLITE_ERROR');
@@ -53,7 +60,7 @@ const { ProviderAutonomousActionService } = require('../host/actions/provider-au
   assert.equal(result.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(result.runId).status, 'confirmed');
   assert.equal(executions, 1);
-  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 5);
+  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 6);
   assert.equal(store.listAutonomousRuns({ grantId: grant.grantId }).length, 1);
   await assert.rejects(() => service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId }), /usage limit/);
   const revoked = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: {}, expiresAt: Date.now() + 60_000 });

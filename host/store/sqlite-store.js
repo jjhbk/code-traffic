@@ -900,7 +900,7 @@ class SqliteStore {
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
   }
 
-  createAuthorizedAutonomousRun({ runId = crypto.randomUUID(), grantId, action, actionDigest, principal, surface, policyVersion = null, details = {} } = {}) {
+  createAuthorizedAutonomousRun({ runId = crypto.randomUUID(), grantId, action, actionDigest, principal, surface, policyVersion = null, details = {}, recoveryKind = null, recoveryDelayMs = 5 * 60 * 1000 } = {}) {
     if (!runId || !grantId || !action || !actionDigest || !principal || !surface) throw new Error('Authorized autonomous run is incomplete.');
     const now = this.clock();
     this.db.exec('BEGIN IMMEDIATE');
@@ -918,6 +918,12 @@ class SqliteStore {
       this.db.prepare(`INSERT INTO autonomous_runs(run_id, grant_id, action_json, action_digest, status, details_json, receipt_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'authorized', ?, NULL, ?, ?)`).run(runId, grantId, JSON.stringify(action), actionDigest, JSON.stringify(details), now, now);
       this.audit('autonomous-run-authorized', null, actionDigest, { runId, grantId, ...details });
+      if (recoveryKind) this.enqueueJob({
+        kind: recoveryKind,
+        payload: { runId },
+        runAt: now + Math.max(1_000, Number(recoveryDelayMs) || 5 * 60 * 1000),
+        dedupeKey: `${recoveryKind}:${runId}:recovery`,
+      });
       this.db.exec('COMMIT');
       return this.getAutonomousRun(runId);
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
@@ -935,7 +941,7 @@ class SqliteStore {
   updateAutonomousRun(runId, status, { details = {}, receipt = null } = {}) {
     const run = this.getAutonomousRun(runId);
     if (!run) throw new Error('Autonomous run not found.');
-    const transitions = { prepared: new Set(['authorized', 'failed']), authorized: new Set(['dispatched', 'failed']), dispatched: new Set(['confirmed', 'failed', 'unknown']), unknown: new Set(['confirmed', 'failed']), confirmed: new Set(), failed: new Set() };
+    const transitions = { prepared: new Set(['authorized', 'failed']), authorized: new Set(['dispatched', 'failed', 'unknown']), dispatched: new Set(['confirmed', 'failed', 'unknown']), unknown: new Set(['confirmed', 'failed']), confirmed: new Set(), failed: new Set() };
     if (run.status !== status && !transitions[run.status]?.has(status)) throw new Error(`Invalid autonomous run transition: ${run.status} to ${status}.`);
     this.db.prepare('UPDATE autonomous_runs SET status = ?, details_json = ?, receipt_json = COALESCE(?, receipt_json), updated_at = ? WHERE run_id = ?').run(status, JSON.stringify(details), receipt ? JSON.stringify(receipt) : null, this.clock(), runId);
     this.audit(`autonomous-run-${status}`, null, run.actionDigest, { runId, ...details });

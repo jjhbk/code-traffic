@@ -19,7 +19,7 @@ class ProviderAutonomousActionService {
     }
     const authorized = { ...checked, autonomous: false };
     const actionDigest = digest(checked);
-    const run = this.approvals.createAuthorizedAutonomousRun(authorized, { grantId, actionDigest, principal, surface, details: { capability: checked.capability, principal, surface } });
+    const run = this.approvals.createAuthorizedAutonomousRun(authorized, { grantId, actionDigest, principal, surface, recoveryKind: 'assistant.reconcile-provider-run', details: { capability: checked.capability, principal, surface } });
     try {
       this.store.updateAutonomousRun(run.runId, 'dispatched', { details: { surface } });
       const result = await this._dispatch(checked, run.runId);
@@ -36,8 +36,12 @@ class ProviderAutonomousActionService {
   }
 
   async reconcileUnknownRun(runId, { principal = 'signal-box-user', surface = 'desktop' } = {}) {
-    const run = this.store.getAutonomousRun(runId);
-    if (!run || run.status !== 'unknown') throw new Error('Only an unknown provider run can be reconciled.');
+    let run = this.store.getAutonomousRun(runId);
+    if (!run) throw new Error('Provider run was not found.');
+    if (['authorized', 'dispatched'].includes(run.status)) {
+      run = this.store.updateAutonomousRun(runId, 'unknown', { details: { ...run.details, recoveredAfterRestart: true, recoveredAt: this.clock() } });
+    }
+    if (run.status !== 'unknown') return { status: run.status, runId, reconciled: false };
     const grant = this.store.getStandingGrant(run.grantId);
     if (!grant || grant.principal !== principal || grant.surface !== surface) throw new Error('The autonomous run is not owned by this user and surface.');
     const action = this._validate(run.action);

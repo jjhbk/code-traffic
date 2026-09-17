@@ -27,10 +27,10 @@ class ApprovalService {
     return this.store.consumeStandingGrant(grantId, action, { principal, surface, policyVersion: this.policyVersion, now: this.clock() });
   }
 
-  createAuthorizedAutonomousRun(action, { grantId, actionDigest, principal, surface = 'desktop', runId, details = {} } = {}) {
+  createAuthorizedAutonomousRun(action, { grantId, actionDigest, principal, surface = 'desktop', runId, details = {}, recoveryKind = null, recoveryDelayMs = undefined } = {}) {
     this.registry?.validateAction(action);
     this.policy.evaluate({ ...action, autonomous: false }, { surfaces: [surface] });
-    return this.store.createAuthorizedAutonomousRun({ runId, grantId, action, actionDigest, principal, surface, policyVersion: this.policyVersion, details });
+    return this.store.createAuthorizedAutonomousRun({ runId, grantId, action, actionDigest, principal, surface, policyVersion: this.policyVersion, details, recoveryKind, recoveryDelayMs });
   }
 
   decide(requestId, optionId, { principal, surface } = {}) {
