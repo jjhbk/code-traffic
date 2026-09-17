@@ -94,6 +94,27 @@ const { BACKGROUND_PROTOCOL_VERSION } = require('../host/runtime/protocol');
   await failedHost.start();
   assert.equal((await failedHost.health()).running, true, 'a failed background spawn can be retried');
   await failedHost.stop();
+  const pausedChildren = [];
+  const pausedHost = new BackgroundHost({ databasePath, restartDelayMs: 10, forkImpl: (_workerPath, _args, options) => {
+    const child = new EventEmitter(); child.connected = true;
+    child.send = (message) => {
+      if (message.method === 'pause') setImmediate(() => child.emit('message', { type: 'response', id: message.id, result: { running: true, paused: message.paused, protocolVersion: BACKGROUND_PROTOCOL_VERSION } }));
+      else if (message.method === 'health') setImmediate(() => child.emit('message', { type: 'response', id: message.id, result: { running: true, paused: options.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1', protocolVersion: BACKGROUND_PROTOCOL_VERSION } }));
+      else if (message.method === 'shutdown') setImmediate(() => { child.emit('message', { type: 'response', id: message.id, result: { stopped: true } }); child.emit('exit', 0, null); });
+    };
+    child.disconnect = () => { child.connected = false; };
+    pausedChildren.push({ child, paused: options.env.SIGNAL_BOX_BACKGROUND_PAUSED });
+    setImmediate(() => child.emit('message', { type: 'ready', health: { running: true, paused: options.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1', protocolVersion: BACKGROUND_PROTOCOL_VERSION } }));
+    return child;
+  } });
+  await pausedHost.start();
+  await pausedHost.pause(true);
+  pausedChildren[0].child.emit('exit', 1, null);
+  const pausedRestartDeadline = Date.now() + 1000;
+  while (pausedChildren.length < 2 && Date.now() < pausedRestartDeadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(pausedChildren.length, 2, 'paused host is supervised after a worker crash');
+  assert.equal(pausedChildren[1].paused, '1', 'restarted worker inherits the paused state');
+  await pausedHost.stop();
   const supervisedChildren = [];
   const supervised = new BackgroundHost({ databasePath, restartDelayMs: 10, forkImpl: () => {
     const child = new EventEmitter(); child.connected = true; child.send = (message) => {
