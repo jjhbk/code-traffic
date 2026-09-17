@@ -478,7 +478,15 @@ function wireIpc() {
     if (!conversationService) throw new Error('Assistant conversation is unavailable.');
     return conversationService.handle({ conversationId: 'desktop:signal-box', text, externalId: `desktop:${crypto.randomUUID()}` });
   });
-  ipcMain.handle('assistant:status', async () => ({ ...(assistantRuntime?.health() || { running: false, busy: false, paused: false }), background: backgroundHost ? await backgroundHost.health() : null }));
+  ipcMain.handle('assistant:status', async () => {
+    const runtime = assistantRuntime?.health() || { running: false, busy: false, paused: false };
+    const background = backgroundHost ? await backgroundHost.health() : null;
+    return {
+      ...runtime,
+      running: Boolean(runtime.running || background?.running || background?.lifecycle === 'running'),
+      background,
+    };
+  });
   ipcMain.handle('assistant:pause', async (_event, { paused } = {}) => {
     if (!assistantRuntime) throw new Error('Assistant runtime is unavailable.');
     appSettings = { ...appSettings, assistantPaused: Boolean(paused) };
