@@ -1,4 +1,5 @@
 const OUTBOX_KEY = 'signal-box.mobile.outbox.v1';
+const NOTIFICATION_CURSOR_KEY = 'signal-box.mobile.notifications.cursor.v1';
 
 function id() {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
@@ -43,6 +44,13 @@ class MobileCoreClient {
   approvals() { return this.request('/api/v1/mobile/approvals'); }
   connections() { return this.request('/api/v1/mobile/connections'); }
   notifications(after = '') { return this.request(`/api/v1/mobile/notifications?after=${encodeURIComponent(after)}`); }
+  async syncNotifications() {
+    let cursor = '';
+    if (this.storage) cursor = (await this.storage.getItem(NOTIFICATION_CURSOR_KEY)) || '';
+    const result = await this.notifications(cursor);
+    if (this.storage && result.nextCursor) await this.storage.setItem(NOTIFICATION_CURSOR_KEY, result.nextCursor);
+    return result;
+  }
   pairDevice(code, deviceName = 'Signal Box mobile') { return this.request('/api/v1/mobile/pair', { method: 'POST', body: { code, deviceName }, idempotencyKey: `pair:${code}` }); }
 
   async sendMessage(text, { conversationId = 'mobile:default', externalId = id() } = {}) {
@@ -88,4 +96,4 @@ class MobileCoreClient {
   async writeOutbox(items) { if (this.storage) await this.storage.setItem(OUTBOX_KEY, JSON.stringify(items.slice(-100))); }
 }
 
-module.exports = { MobileCoreClient, MobileApiError, OUTBOX_KEY };
+module.exports = { MobileCoreClient, MobileApiError, OUTBOX_KEY, NOTIFICATION_CURSOR_KEY };

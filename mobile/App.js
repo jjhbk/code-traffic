@@ -18,7 +18,7 @@ export default function App() {
 
   const refresh = async (activeClient = client) => {
     if (!activeClient) return; setLoading(true); setError('');
-    try { const [health, snapshot, chat, activeWorkflows, grants, pendingApprovals, context, sourceStatus] = await Promise.all([activeClient.health(), activeClient.today(), activeClient.conversation(), activeClient.workflows(), activeClient.permissions(), activeClient.approvals(), activeClient.context(), activeClient.connections()]); setHostOnline(Boolean(health.core?.running || health.core?.background?.running)); setToday(snapshot); setHistory(chat.messages || []); setWorkflows(activeWorkflows.workflows || []); setPermissions(grants.permissions || []); setApprovals(pendingApprovals.approvals || []); setContextRecords(context.context || []); setConnections(sourceStatus.connections || []); await activeClient.flushOutbox(); }
+    try { const [health, snapshot, chat, activeWorkflows, grants, pendingApprovals, context, sourceStatus] = await Promise.all([activeClient.health(), activeClient.today(), activeClient.conversation(), activeClient.workflows(), activeClient.permissions(), activeClient.approvals(), activeClient.context(), activeClient.connections(), activeClient.syncNotifications()]); setHostOnline(Boolean(health.core?.running || health.core?.background?.running)); setToday(snapshot); setHistory(chat.messages || []); setWorkflows(activeWorkflows.workflows || []); setPermissions(grants.permissions || []); setApprovals(pendingApprovals.approvals || []); setContextRecords(context.context || []); setConnections(sourceStatus.connections || []); await activeClient.flushOutbox(); }
     catch (caught) { setHostOnline(false); setError(caught.message); }
     finally { setLoading(false); }
   };
