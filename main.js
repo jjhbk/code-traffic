@@ -1118,6 +1118,10 @@ async function start() {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
             if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
             if (kind === 'assistant.replan') return runTaskReplan(payload);
+            if (kind === 'assistant.reconcile-provider-run') {
+              if (!providerAutonomousActionService) throw new Error('Provider autonomous execution is unavailable.');
+              return providerAutonomousActionService.reconcileUnknownRun(payload.runId);
+            }
             if (kind === 'assistant.proactive-actions') return runProactiveActions(payload);
             if (kind === 'connector.gmail.fetch' && googleProviderProcess) return googleProviderProcess.request(kind, payload);
             if (kind === 'connector.calendar.fetch' && googleProviderProcess) return googleProviderProcess.request(kind, payload);
@@ -1289,6 +1293,10 @@ async function start() {
     });
     assistantRuntime.register('tasks.reconcile', async ({ adapterId }) => taskService?.processAllAsync(adapterId));
     assistantRuntime.register('assistant.replan', async (payload) => runTaskReplan(payload));
+    assistantRuntime.register('assistant.reconcile-provider-run', async ({ runId }) => {
+      if (!providerAutonomousActionService) throw new Error('Provider autonomous execution is unavailable.');
+      return providerAutonomousActionService.reconcileUnknownRun(runId);
+    });
     assistantRuntime.register('browser.availability.check', async (payload) => runBrowserAvailabilityCheck(payload));
     assistantRuntime.register('meeting.prep', async (payload) => runMeetingPrep(payload));
     assistantRuntime.register('assistant.digest', async () => {

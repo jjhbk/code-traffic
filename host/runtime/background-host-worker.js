@@ -41,7 +41,7 @@ function callParent(kind, payload) {
     send({ type: 'job', id, token, kind, payload });
   });
 }
-const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'tasks.reconcile', 'assistant.replan', 'assistant.proactive-actions', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest.plan', 'assistant.mobile-push'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
+const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'tasks.reconcile', 'assistant.replan', 'assistant.proactive-actions', 'assistant.reconcile-provider-run', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest.plan', 'assistant.mobile-push'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
 runtime.register('workflow.resume', async (payload) => workflows.resume(payload.workflowId));
 runtime.register('browser.availability.check', async (payload) => {
   delegate('browser.availability.check', payload);
@@ -64,6 +64,9 @@ for (const [kind, providerKey, intervalMs] of [['assistant.sync.gmail', 'gmail',
   });
 }
 runtime.register('assistant.replan', async (payload) => replanTask({ store, proactivity, taskId: payload.taskId, reason: payload.reason }));
+runtime.register('assistant.reconcile-provider-run', async (payload) => {
+  return delegate('assistant.reconcile-provider-run', payload);
+});
 runtime.register('assistant.digest.plan', runIndependent('assistant.digest.plan', () => planBackgroundDigest(), 30 * 1000));
 runtime.register('assistant.mobile-push', runIndependent('assistant.mobile-push', () => mobilePushService.deliverPending(), 30 * 1000));
 runtime.start();

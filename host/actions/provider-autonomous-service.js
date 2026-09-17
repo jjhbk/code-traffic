@@ -29,6 +29,7 @@ class ProviderAutonomousActionService {
     } catch (error) {
       const status = isUnknown(error) ? 'unknown' : 'failed';
       this.store.updateAutonomousRun(run.runId, status, { details: { surface, error: error.message } });
+      if (status === 'unknown') this._scheduleReconciliation(run.runId);
       error.runId = run.runId;
       throw error;
     }
@@ -57,7 +58,10 @@ class ProviderAutonomousActionService {
       const event = await provider.getEvent(action.eventId);
       result = { found: changesMatch(event, action.changes), eventId: action.eventId, etag: event.etag || null };
     }
-    if (!result.found) return { status: 'unknown', runId, reconciled: false };
+    if (!result.found) {
+      this._scheduleReconciliation(runId);
+      return { status: 'unknown', runId, reconciled: false };
+    }
     const receipt = receiptFor(action, result, runId, run.grantId, run.actionDigest, { reconciled: true });
     return this.store.updateAutonomousRun(runId, 'confirmed', { details: { ...run.details, reconciledAt: this.clock(), surface }, receipt });
   }
@@ -78,6 +82,17 @@ class ProviderAutonomousActionService {
     if (!action.taskId || action.taskVersion == null) return;
     const current = this.store.listTasks({ includeDismissed: true }).find((task) => task.taskId === action.taskId);
     if (!current || current.status !== 'active' || Number(current.updatedAt) !== Number(action.taskVersion)) throw new Error('This provider action is stale because the task changed.');
+  }
+
+  _scheduleReconciliation(runId, delayMs = 60 * 1000) {
+    if (!runId || typeof this.store.enqueueJob !== 'function') return null;
+    const runAt = this.clock() + Math.max(1_000, Number(delayMs) || 60 * 1000);
+    return this.store.enqueueJob({
+      kind: 'assistant.reconcile-provider-run',
+      payload: { runId },
+      runAt,
+      dedupeKey: `assistant.reconcile-provider-run:${runId}:${Math.floor(runAt / (60 * 1000))}`,
+    });
   }
 
   async _dispatch(action, runId) {
