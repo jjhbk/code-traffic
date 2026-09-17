@@ -27,6 +27,14 @@ assert.throws(() => store.completeJob(first.jobId, 'wrong', { status: 'completed
   assert.equal(failed[0].jobId, retry.jobId);
   assert.equal(store.getJob(retry.jobId).status, 'failed');
   assert.ok(store.exportData().data.jobs.length >= 2);
+  const slowStore = new SqliteStore();
+  const slowJob = slowStore.enqueueJob({ kind: 'slow', payload: {}, maxAttempts: 1 });
+  const slowRunner = new JobRunner({ store: slowStore, workerId: 'slow-runner', leaseMs: 30 });
+  slowRunner.register('slow', async () => new Promise((resolve) => setTimeout(resolve, 80)));
+  const slowResult = await slowRunner.runOnce();
+  assert.equal(slowResult[0].status, 'completed');
+  assert.equal(slowStore.getJob(slowJob.jobId).status, 'completed');
+  slowStore.close();
   store.close();
   console.log('job tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
