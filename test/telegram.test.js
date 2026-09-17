@@ -20,6 +20,7 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   const ensured = [];
   const queuedPrompts = [];
   const assistantMessages = [];
+  const feedback = [];
   const control = new TelegramControl({
     token: 'test-token',
     chatId: '42',
@@ -42,6 +43,7 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
     interruptTerminal: () => true,
     sendPrompt: async (session, prompt) => queuedPrompts.push({ tile: session.tile, prompt }),
     assistantMessage: async (text, externalId) => assistantMessages.push({ text, externalId }),
+    recordDigestFeedback: (notificationId, useful) => feedback.push({ notificationId, useful }),
     submitDelayMs: 0,
     fetchImpl: async (_url, options) => {
       sent.push(JSON.parse(options.body));
@@ -109,6 +111,10 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   await control.handleUpdate({ message: { chat: { id: 42 }, text: '/tail' } });
   assert.match(sent.at(-1).text, /Input:\nrun the tests/);
   assert.match(sent.at(-1).text, /Output:\nTests passed\./);
+
+  const durableFeedbackToken = control.digestFeedbackToken('digest-1', true);
+  await control.handleUpdate({ callback_query: { id: 'feedback-1', data: durableFeedbackToken, message: { chat: { id: 42 } } } });
+  assert.deepStrictEqual(feedback, [{ notificationId: 'digest-1', useful: true }]);
 
   control.notifyState(sessions[0], 'done');
   await new Promise((resolve) => setImmediate(resolve));

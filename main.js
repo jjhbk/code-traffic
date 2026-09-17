@@ -1248,6 +1248,7 @@ async function start() {
     listTasks: () => hostStore?.listTasks() || [],
     updateTask: (taskId, status) => hostStore?.setTaskStatus(taskId, status),
     recordDigestFeedback: (notificationId, useful) => hostStore?.recordNotificationFeedback(notificationId, useful, { channel: 'telegram' }),
+    getNotification: (notificationId) => hostStore?.listNotifications(200).find((notification) => notification.notificationId === notificationId) || null,
     assistantMessage: async (text, externalId = null) => {
       if (!conversationService) throw new Error('Durable conversation storage is unavailable.');
       const result = conversationService.handle({ conversationId: `telegram:${appSettings.telegramChatId}`, text, externalId });
@@ -1534,8 +1535,8 @@ async function deliverPendingDigest() {
   try {
     const feedback = {
       inline_keyboard: [[
-        { text: 'Useful', callback_data: telegram.addAction({ type: 'digest-feedback', notificationId: notification.notificationId, useful: true }) },
-        { text: 'Not useful', callback_data: telegram.addAction({ type: 'digest-feedback', notificationId: notification.notificationId, useful: false }) },
+        { text: 'Useful', callback_data: telegram.digestFeedbackToken(notification.notificationId, true) },
+        { text: 'Not useful', callback_data: telegram.digestFeedbackToken(notification.notificationId, false) },
       ]],
     };
     await telegram.send(`Today\n\n${lines.join('\n')}`, { reply_markup: feedback });

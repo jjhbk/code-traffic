@@ -31,13 +31,14 @@ function telegramErrorText(error) {
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, assistantMessage = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, getNotification = null, assistantMessage = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
     this.listTasks = listTasks;
     this.updateTask = updateTask;
     this.recordDigestFeedback = recordDigestFeedback;
+    this.getNotification = getNotification;
     this.assistantMessage = assistantMessage;
     this.getHistory = getHistory;
     this.ensureSession = ensureSession;
@@ -156,6 +157,11 @@ class TelegramControl {
     this.actions.set(token, action);
     while (this.actions.size > 200) this.actions.delete(this.actions.keys().next().value);
     return token;
+  }
+
+  digestFeedbackToken(notificationId, useful) {
+    if (!notificationId || typeof useful !== 'boolean') throw new Error('Digest feedback requires a notification and boolean value.');
+    return `digest-feedback:${String(notificationId)}:${useful ? '1' : '0'}`;
   }
 
   sessionKeyboard(sessions = this.listSessions()) {
@@ -331,6 +337,18 @@ class TelegramControl {
       return;
     }
 
+    const durableFeedback = /^digest-feedback:([^:]+):([01])$/.exec(String(query.data || ''));
+    if (durableFeedback) {
+      try {
+        const notificationId = durableFeedback[1];
+        if (this.getNotification && !this.getNotification(notificationId)) throw new Error('This digest notification is no longer available.');
+        this.recordDigestFeedback?.(notificationId, durableFeedback[2] === '1');
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: 'Thanks for the feedback.' });
+      } catch (error) {
+        await this.request('answerCallbackQuery', { callback_query_id: query.id, text: error.message.slice(0, 200), show_alert: true });
+      }
+      return;
+    }
     const action = this.actions.get(query.data);
     if (!action) {
       await this.request('answerCallbackQuery', {
