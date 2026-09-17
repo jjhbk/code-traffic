@@ -543,7 +543,11 @@ async function loadAssistantConversation() {
   notificationsTarget.replaceChildren();
   target.replaceChildren();
   try {
-    const status = await window.signalBox.getAssistantStatus();
+    const status = await Promise.race([
+      window.signalBox.getAssistantStatus(),
+      new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+    ]);
+    if (!status) throw new Error('Assistant status did not respond within 2.5 seconds.');
     const pauseButton = document.getElementById('assistant-pause');
     pauseButton.textContent = status.paused ? 'Resume' : 'Pause';
     pauseButton.dataset.paused = status.paused ? 'true' : 'false';
@@ -599,7 +603,15 @@ async function loadAssistantConversation() {
       const body = document.createElement('p'); body.textContent = message.content;
       card.append(meta, body); target.append(card);
     }
-  } catch (caught) { document.getElementById('assistant-health').textContent = 'Assistant unavailable'; document.getElementById('assistant-health').dataset.state = 'unavailable'; showError(caught.message || 'Assistant conversation unavailable.'); }
+  } catch (caught) {
+    const health = document.getElementById('assistant-health');
+    health.textContent = 'Assistant unavailable';
+    health.dataset.state = 'unavailable';
+    showError(caught.message || 'Assistant conversation unavailable.');
+    window.setTimeout(() => {
+      if (health.dataset.state === 'unavailable' && !document.getElementById('assistant-view').hidden) loadAssistantConversation();
+    }, 3000);
+  }
 }
 async function loadAssistantPermissions() {
   const target = document.getElementById('assistant-permissions-list');
