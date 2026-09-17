@@ -1,6 +1,8 @@
 const { SqliteStore } = require('../store/sqlite-store');
 const { AssistantRuntime } = require('./assistant');
 const { MobilePushService } = require('../mobile/push');
+const { ProactivityService } = require('../proactivity/service');
+const { replanTask } = require('../proactivity/replan');
 
 const token = process.env.SIGNAL_BOX_BACKGROUND_TOKEN || '';
 const databasePath = process.argv[2];
@@ -11,6 +13,7 @@ if (!databasePath || !token || (typeof process.send !== 'function' && !parentPor
 
 const store = new SqliteStore({ filename: databasePath });
 const mobilePushService = new MobilePushService({ store });
+const proactivity = new ProactivityService({ store });
 const parentCalls = new Map();
 let parentSequence = 0;
 function callParent(kind, payload) {
@@ -33,14 +36,12 @@ runtime.register('meeting.prep', async (payload) => {
 runtime.register('tasks.reconcile', async (payload) => {
   delegate('tasks.reconcile', payload);
 });
-runtime.register('assistant.replan', async (payload) => {
-  delegate('assistant.replan', payload);
-});
 for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
   runtime.register(kind, async (payload) => {
     delegate(kind, payload, { nextKind: kind, intervalMs });
   });
 }
+runtime.register('assistant.replan', async (payload) => replanTask({ store, proactivity, taskId: payload.taskId, reason: payload.reason }));
 runtime.register('assistant.mobile-push', runIndependent('assistant.mobile-push', () => mobilePushService.deliverPending(), 30 * 1000));
 runtime.start();
 for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000], ['assistant.mobile-push', 30 * 1000]]) {

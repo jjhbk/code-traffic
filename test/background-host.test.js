@@ -12,7 +12,9 @@ const { WorkflowService } = require('../host/workflows/service');
   const databasePath = path.join(directory, 'assistant.db');
   const store = new SqliteStore({ filename: databasePath });
   const workflow = store.createWorkflow({ workflowType: 'background-fixture', state: 'waiting_event', payload: {} });
+  store.saveTaskCandidate({ candidateId: 'background-replan-task', observationId: 'background-replan-observation', summary: 'Send the update', dueDate: 'today', evidence: { start: 0, end: 6, text: 'update' }, extractorVersion: 'test' });
   store.enqueueJob({ kind: 'workflow.resume', payload: { workflowId: workflow.workflowId }, runAt: Date.now(), dedupeKey: 'background-fixture' });
+  store.enqueueJob({ kind: 'assistant.replan', payload: { taskId: 'background-replan-task', reason: 'source-removed' }, runAt: Date.now(), dedupeKey: 'background-replan-fixture' });
   store.enqueueJob({ kind: 'assistant.digest', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest' });
   store.close();
 
@@ -38,13 +40,17 @@ const { WorkflowService } = require('../host/workflows/service');
   while (Date.now() < deadline) {
     const probe = new SqliteStore({ filename: databasePath });
     current = probe.getWorkflow(workflow.workflowId);
+    const notifications = probe.listPendingNotifications({ notificationClass: 'assistant-replan' });
     probe.close();
-    if (current.state === 'needs_attention' && jobs === 1 && cadenceObserved) break;
+    if (current.state === 'needs_attention' && jobs === 1 && cadenceObserved && notifications.length === 1) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(current.state, 'needs_attention');
   assert.equal(jobs, 1);
   assert.equal(cadenceObserved, true);
+  const replanProbe = new SqliteStore({ filename: databasePath });
+  assert.equal(replanProbe.listPendingNotifications({ notificationClass: 'assistant-replan' }).length, 1);
+  replanProbe.close();
   assert.deepEqual(await host.stop(), { stopped: true });
   liveStore.close();
   const failedChild = new EventEmitter();
