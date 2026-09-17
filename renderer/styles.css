@@ -300,6 +300,10 @@ h1 { font-size: 30px; font-weight: 730; letter-spacing: -.045em; background: lin
 .settings-select { width: 100%; border-radius: 6px; padding: 11px 12px; }
 
 .task-graph { width: 100%; min-height: 300px; border: 1px solid var(--line); border-radius: 14px; background: rgba(5, 13, 18, .62); }
+.assistant-form { display: grid; gap: 10px; margin-top: 16px; }
+.assistant-form textarea { width: 100%; resize: vertical; min-height: 72px; }
+.assistant-inbound { border-left: 3px solid var(--amber); }
+.assistant-outbound { border-left: 3px solid var(--green); }
 .activity-list { display: grid; gap: 8px; }
 .activity-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 14px; padding: 12px 14px; border: 1px solid rgba(143, 194, 194, .14); border-radius: 12px; background: rgba(7, 17, 23, .46); }
 .activity-item strong { color: #e9ffff; font-size: 12px; }

@@ -392,6 +392,20 @@ function wireIpc() {
   ipcMain.handle('tasks:graph', () => hostStore?.taskGraph({ includeDismissed: true }) || { nodes: [], edges: [] });
   ipcMain.handle('assistant:decisions', () => proactivityService?.evaluate(hostStore?.listTasks() || []) || []);
   ipcMain.handle('assistant:conversation', () => conversationService?.history('desktop:signal-box') || []);
+  ipcMain.handle('assistant:send', (_event, { text = '' } = {}) => {
+    if (!conversationService || !proactivityService) throw new Error('Assistant conversation is unavailable.');
+    const content = String(text).trim();
+    if (!content) throw new Error('Enter a message for the assistant.');
+    const conversation = conversationService.open('desktop:signal-box');
+    conversationService.receive(conversation.conversationId, content, `desktop:${crypto.randomUUID()}`);
+    const decisions = proactivityService.evaluate(hostStore?.listTasks() || []);
+    const active = decisions.filter((decision) => decision.type !== 'wait');
+    const response = active.length
+      ? `I found ${active.length} item${active.length === 1 ? '' : 's'} that may need attention. Review Assistant activity for the evidence and next step.`
+      : 'I saved that in the assistant conversation. There are no triggered next steps right now.';
+    conversationService.respond(conversation.conversationId, response);
+    return { response, decisions, history: conversationService.history(conversation.conversationId) };
+  });
   ipcMain.handle('assistant:status', () => assistantRuntime?.health() || { running: false, busy: false });
   ipcMain.handle('assistant:workflows', () => hostStore?.listWorkflows({ activeOnly: true }) || []);
   ipcMain.handle('assistant:context', () => hostStore?.listContext() || []);

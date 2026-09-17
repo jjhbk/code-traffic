@@ -472,8 +472,8 @@ async function loadTaskGraph() {
   } catch (caught) { empty.hidden = false; empty.textContent = caught.message || 'Task graph unavailable.'; svg.hidden = true; }
 }
 
-const dataViews = ['activity-view', 'tasks-view', 'graph-view', 'mail-view', 'calendar-view', 'drive-view'];
-const dataViewButtons = { 'activity-view': 'activity-toggle', 'tasks-view': 'tasks-toggle', 'graph-view': 'graph-toggle', 'mail-view': 'mail-toggle', 'calendar-view': 'calendar-toggle', 'drive-view': 'drive-toggle' };
+const dataViews = ['activity-view', 'assistant-view', 'tasks-view', 'graph-view', 'mail-view', 'calendar-view', 'drive-view'];
+const dataViewButtons = { 'activity-view': 'activity-toggle', 'assistant-view': 'assistant-toggle', 'tasks-view': 'tasks-toggle', 'graph-view': 'graph-toggle', 'mail-view': 'mail-toggle', 'calendar-view': 'calendar-toggle', 'drive-view': 'drive-toggle' };
 async function toggleDataView(viewId, loader) {
   const target = document.getElementById(viewId);
   const shouldOpen = target.hidden;
@@ -491,6 +491,29 @@ document.getElementById('tasks-toggle').addEventListener('click', () => toggleDa
 document.getElementById('tasks-refresh').addEventListener('click', loadTasks);
 document.getElementById('activity-toggle').addEventListener('click', () => toggleDataView('activity-view', loadActivity));
 document.getElementById('activity-refresh').addEventListener('click', loadActivity);
+async function loadAssistantConversation() {
+  const target = document.getElementById('assistant-history');
+  target.replaceChildren();
+  try {
+    const messages = await window.signalBox.getAssistantConversation();
+    if (!messages.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No assistant messages yet.'; target.append(empty); return; }
+    for (const message of messages) {
+      const card = document.createElement('article'); card.className = `activity-card assistant-${message.direction}`;
+      const meta = document.createElement('small'); meta.textContent = `${message.direction} · ${new Date(message.createdAt).toLocaleString()}`;
+      const body = document.createElement('p'); body.textContent = message.content;
+      card.append(meta, body); target.append(card);
+    }
+  } catch (caught) { showError(caught.message || 'Assistant conversation unavailable.'); }
+}
+document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));
+document.getElementById('assistant-refresh').addEventListener('click', loadAssistantConversation);
+document.getElementById('assistant-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = document.getElementById('assistant-input');
+  const text = input.value.trim(); if (!text) return;
+  try { await window.signalBox.sendAssistantMessage({ text }); input.value = ''; await loadAssistantConversation(); }
+  catch (caught) { showError(caught.message || 'Could not send assistant message.'); }
+});
 document.getElementById('graph-toggle').addEventListener('click', () => toggleDataView('graph-view', loadTaskGraph));
 document.getElementById('graph-refresh').addEventListener('click', loadTaskGraph);
 document.getElementById('mail-toggle').addEventListener('click', () => toggleDataView('mail-view', loadMailMessages));

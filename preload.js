@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   getTaskGraph: () => ipcRenderer.invoke('tasks:graph'),
   getAssistantDecisions: () => ipcRenderer.invoke('assistant:decisions'),
   getAssistantConversation: () => ipcRenderer.invoke('assistant:conversation'),
+  sendAssistantMessage: (payload) => ipcRenderer.invoke('assistant:send', payload),
   getAssistantStatus: () => ipcRenderer.invoke('assistant:status'),
   getAssistantWorkflows: () => ipcRenderer.invoke('assistant:workflows'),
   getAssistantContext: () => ipcRenderer.invoke('assistant:context'),

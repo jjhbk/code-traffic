@@ -36,6 +36,7 @@
             <button id="telegram-settings" type="button">Telegram settings</button>
             <button id="model-settings" type="button">AI settings</button>
             <button id="activity-toggle" type="button">Activity</button>
+            <button id="assistant-toggle" type="button">Assistant</button>
             <button id="graph-toggle" type="button">Task graph</button>
             <button id="gmail-settings" type="button">Service connections</button>
             <button id="mail-toggle" type="button">Mail</button>
@@ -54,6 +55,15 @@
       <section id="activity-view" class="tasks-view activity-view" hidden>
         <div class="tasks-heading"><div><h2>Assistant activity</h2><p class="field-hint">What Signal Box has recently ingested, decided, sent, or executed.</p></div><button id="activity-refresh" class="panel-action" type="button">Refresh</button></div>
         <div id="activity-list" class="activity-list" aria-live="polite"></div>
+      </section>
+      <section id="assistant-view" class="tasks-view" hidden>
+        <div class="tasks-heading"><div><h2>Assistant</h2><p class="field-hint">Ask about unfinished work, preferences, or the next step.</p></div><button id="assistant-refresh" class="panel-action" type="button">Refresh</button></div>
+        <div id="assistant-history" class="activity-list" aria-live="polite"></div>
+        <form id="assistant-form" class="assistant-form">
+          <label for="assistant-input">Message</label>
+          <textarea id="assistant-input" rows="3" maxlength="4000" placeholder="What should I follow up on?"></textarea>
+          <button type="submit">Send to assistant</button>
+        </form>
       </section>
       <section id="board" class="board" aria-live="polite"></section>
       <section id="tasks-view" class="tasks-view" hidden>
