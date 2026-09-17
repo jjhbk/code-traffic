@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { SqliteStore } = require('../host/store/sqlite-store');
 const { ApprovalService } = require('../host/approvals/service');
 const { BrowserActionService } = require('../host/browser/service');
+const { ProviderAutonomousActionService } = require('../host/actions/provider-autonomous-service');
 
 (async () => {
   const store = new SqliteStore();
@@ -20,16 +21,25 @@ const { BrowserActionService } = require('../host/browser/service');
     expiresAt: Date.now() + 60_000,
     maxUses: 1,
   });
-  assert.throws(() => approvals.createStandingGrant({ capability: 'gmail.send' }, {
+  const mailGrant = approvals.createStandingGrant({ capability: 'gmail.send' }, {
     principal: 'signal-box-user',
     surface: 'desktop',
+    constraints: { threadId: 'thread-provider' },
     expiresAt: Date.now() + 60_000,
-  }), /only for browser actions/);
+  });
+  let sent = 0;
+  const providerService = new ProviderAutonomousActionService({ store, approvals, providers: {
+    gmail: () => ({ sendReply: async (payload) => { sent += 1; assert.equal(payload.signalBoxAttemptId.length > 0, true); return { id: 'message-provider', threadId: payload.threadId }; }, reconcileReply: async () => ({ found: true, messageId: 'message-provider', threadId: 'thread-provider' }) }),
+  } });
+  const providerRun = await providerService.executeWithStandingGrant({ capability: 'gmail.send', destination: 'alex@example.com', threadId: 'thread-provider', content: { subject: 'Re: Handoff', body: 'Checking in.' } }, { grantId: mailGrant.grantId });
+  assert.equal(providerRun.receipt.status, 'confirmed');
+  assert.equal(store.getAutonomousRun(providerRun.runId).status, 'confirmed');
+  assert.equal(sent, 1);
   const result = await service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId });
   assert.equal(result.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(result.runId).status, 'confirmed');
   assert.equal(executions, 1);
-  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 1);
+  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 2);
   assert.equal(store.listAutonomousRuns({ grantId: grant.grantId }).length, 1);
   await assert.rejects(() => service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId }), /usage limit/);
   const revoked = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: {}, expiresAt: Date.now() + 60_000 });

@@ -50,6 +50,7 @@ const { BrowserBridge } = require('./host/browser/bridge');
 const { BrowserActionService } = require('./host/browser/service');
 const { ActionRegistry } = require('./host/actions/registry');
 const { ActionExecutionService } = require('./host/actions/execution-service');
+const { ProviderAutonomousActionService } = require('./host/actions/provider-autonomous-service');
 const { BrowserRecipeExecutor } = require('./host/browser/executor');
 const { BridgeBrowserAdapter } = require('./host/browser/bridge-adapter');
 const { uberCabBooking, uberCabQuote } = require('./host/browser/recipes');
@@ -114,6 +115,7 @@ let conversationService;
 let followUpWorkflow;
 let planningService;
 let actionExecutionService;
+let providerAutonomousActionService;
 const actionRegistry = new ActionRegistry({ recipes: [uberCabBooking, uberCabQuote] });
 let availabilityWorkflow;
 let meetingPrepWorkflow;
@@ -494,6 +496,11 @@ function wireIpc() {
   ipcMain.handle('assistant:autonomous-runs', (_event, { grantId = null, limit = 100 } = {}) => hostStore?.listAutonomousRuns({ grantId, limit }) || []);
   ipcMain.handle('assistant:reconcile-autonomous-run', (_event, { runId, evidence } = {}) => {
     if (!hostStore || !approvalService || !runId) throw new Error('An autonomous run is required.');
+    const run = hostStore.getAutonomousRun(runId);
+    if (run?.action?.capability && ['gmail.send', 'calendar.update'].includes(run.action.capability)) {
+      if (!providerAutonomousActionService) throw new Error('Provider autonomous execution is unavailable.');
+      return providerAutonomousActionService.reconcileUnknownRun(runId);
+    }
     return new BrowserActionService({ approvals: approvalService, store: hostStore }).reconcileUnknownRun(runId, { evidence });
   });
   ipcMain.handle('assistant:execute-standing-browser', async (_event, { recipeId, inputs = {}, grantId, sessionId = null, taskId = null } = {}) => {
@@ -1146,7 +1153,14 @@ async function start() {
       if (backgroundHost) health.background = await backgroundHost.pause(appSettings.assistantPaused);
       return health;
     },
-    onReconcile: ({ runId, evidence }) => new BrowserActionService({ approvals: approvalService, store: hostStore }).reconcileUnknownRun(runId, { evidence }),
+    onReconcile: ({ runId, evidence }) => {
+      const run = hostStore.getAutonomousRun(runId);
+      if (run?.action?.capability && ['gmail.send', 'calendar.update'].includes(run.action.capability)) {
+        if (!providerAutonomousActionService) throw new Error('Provider autonomous execution is unavailable.');
+        return providerAutonomousActionService.reconcileUnknownRun(runId);
+      }
+      return new BrowserActionService({ approvals: approvalService, store: hostStore }).reconcileUnknownRun(runId, { evidence });
+    },
     getConnections: () => {
       const account = mailCredentials?.load('gmail-account') || '';
       const health = (provider) => account ? hostStore?.getConnectorHealth(`${provider}:${account}`) || null : null;
@@ -1189,6 +1203,16 @@ async function start() {
           const current = hostStore.getWorkflow(action.workflowId);
           if (current) hostStore.updateWorkflow(action.workflowId, { state: 'needs_attention', payload: { ...current.payload, outcome: status, error: error.message }, details: { attemptId: attempt.attemptId } });
         }
+      },
+    });
+    providerAutonomousActionService = new ProviderAutonomousActionService({
+      store: hostStore,
+      approvals: approvalService,
+      registry: actionRegistry,
+      providers: {
+        gmail: (action) => createGmailProvider(action),
+        calendar: (action) => createCalendarProvider(action),
+        accountAddress: () => mailCredentials?.load('gmail-account') || null,
       },
     });
     planningService = new PlanningService({ workflows, browserActions: new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null }), registry: actionRegistry });
@@ -1476,8 +1500,25 @@ async function runProactiveActions({ decisions: delegatedDecisions = null } = {}
       : (proactivityService?.evaluate(tasks) || []));
   if (!Array.isArray(delegatedDecisions)) proactivityService?.enqueueAttentionNotifications(tasks, decisions);
   await executeAutomaticBrowserDecisions(tasks, decisions);
+  await executeAutomaticProviderDecisions(tasks, decisions);
   await prepareProactiveFollowUps(tasks, decisions);
   return { tasks: tasks.length, decisions: decisions.length, decisionsDelegated: Array.isArray(delegatedDecisions) };
+}
+
+async function executeAutomaticProviderDecisions(tasks, decisions) {
+  if (!providerAutonomousActionService) return [];
+  const executed = [];
+  for (const decision of decisions.filter((item) => item.type === 'execute_provider').slice(0, 3)) {
+    const task = tasks.find((item) => item.taskId === decision.taskId);
+    if (!task || !decision.action) continue;
+    try {
+      const result = await providerAutonomousActionService.executeWithStandingGrant(decision.action, { grantId: decision.grantId, principal: 'signal-box-user', surface: 'desktop' });
+      executed.push({ taskId: task.taskId, runId: result.runId });
+    } catch (error) {
+      console.error(`[assistant] automatic provider action failed for ${task.taskId}: ${error.message}`);
+    }
+  }
+  return executed;
 }
 
 async function runBrowserAvailabilityCheck({ workflowId } = {}) {

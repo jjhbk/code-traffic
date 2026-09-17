@@ -103,6 +103,9 @@ class ProactivityService {
 
   selectAutomaticDecisions(decisions = [], { maxActions = this.maxAutomaticActionsPerCycle } = {}) {
     const limit = Number.isInteger(maxActions) && maxActions >= 0 ? maxActions : this.maxAutomaticActionsPerCycle;
+    // Browser execution has a separate bridge frontier. Provider actions use
+    // the same per-cycle limit at their dispatch boundary, but must not enter
+    // the browser recipe executor.
     const eligible = decisions.filter((decision) => decision?.type === 'execute_browser');
     return {
       selected: eligible.slice(0, limit),
@@ -153,7 +156,18 @@ class ProactivityService {
 
   _automaticDecision(task, now) {
     const automation = task.automation;
-    if (!automation || automation.type !== 'browser' || !automation.recipeId || !automation.capability) return null;
+    if (!automation) return null;
+    if (automation.type === 'provider') {
+      const action = { ...(automation.action || {}), taskId: task.taskId, taskVersion: task.updatedAt };
+      if (!['gmail.send', 'calendar.update'].includes(action.capability)) return this._decision(task, 'wait', 'unsupported-provider-automation', []);
+      const priorRuns = this.store.listAutonomousRuns().filter((run) => run.action?.taskId === task.taskId).sort((a, b) => b.createdAt - a.createdAt);
+      if (priorRuns.some((run) => run.status === 'unknown')) return this._decision(task, 'suggest_resolution', 'automation-outcome-unknown', []);
+      if (priorRuns.some((run) => run.status === 'confirmed' && automation.repeat !== true)) return this._decision(task, 'wait', 'automation-completed', []);
+      const grant = this._standingGrant(action, now);
+      if (!grant) return this._decision(task, 'wait', 'automatic-action-not-authorized', []);
+      return this._decision(task, 'execute_provider', 'standing-permission-matched', task.evidence?.text ? [task.evidence.text] : [], { capability: action.capability, requiresApproval: false, grantId: grant.grantId, action });
+    }
+    if (automation.type !== 'browser' || !automation.recipeId || !automation.capability) return null;
     const active = this.store.listWorkflows({ taskId: task.taskId, activeOnly: true });
     if (active.some((workflow) => workflow.workflowType === 'browser-action')) return this._decision(task, 'wait', 'automation-in-progress', []);
     const priorRuns = this.store.listAutonomousRuns().filter((run) => run.action?.taskId === task.taskId).sort((a, b) => b.createdAt - a.createdAt);
@@ -162,16 +176,20 @@ class ProactivityService {
     if (confirmedRuns.length && automation.repeat !== true) return this._decision(task, 'wait', 'automation-completed', []);
     if (confirmedRuns.length && Number(automation.cooldownMs) > 0 && now - confirmedRuns[0].createdAt < Number(automation.cooldownMs)) return this._decision(task, 'wait', 'automation-cooldown', []);
     const action = { capability: automation.capability, recipeId: automation.recipeId, origin: automation.origin || null, inputs: automation.inputs || {} };
-    const grant = this.store.listStandingGrants({ principal: 'signal-box-user', includeInactive: false }).find((candidate) => candidate.status === 'active'
+    const grant = this._standingGrant(action, now);
+    if (!grant) return this._decision(task, 'wait', 'automatic-action-not-authorized', []);
+    return this._decision(task, 'execute_browser', 'standing-permission-matched', task.evidence?.text ? [task.evidence.text] : [], {
+      capability: action.capability, requiresApproval: false, grantId: grant.grantId, recipeId: action.recipeId, inputs: action.inputs,
+    });
+  }
+
+  _standingGrant(action, now) {
+    return this.store.listStandingGrants({ principal: 'signal-box-user', includeInactive: false }).find((candidate) => candidate.status === 'active'
       && candidate.capability === action.capability
       && now < candidate.expiresAt
       && (candidate.maxUses === null || candidate.usedCount < candidate.maxUses)
       && (candidate.lastUsedAt === null || now - candidate.lastUsedAt >= candidate.cooldownMs)
       && matchesGrantConstraints(action, candidate.constraints));
-    if (!grant) return this._decision(task, 'wait', 'automatic-action-not-authorized', []);
-    return this._decision(task, 'execute_browser', 'standing-permission-matched', task.evidence?.text ? [task.evidence.text] : [], {
-      capability: action.capability, requiresApproval: false, grantId: grant.grantId, recipeId: action.recipeId, inputs: action.inputs,
-    });
   }
 
   _decision(task, type, reason, evidence, details = {}) {

@@ -65,5 +65,11 @@ const attention = service.enqueueAttentionNotifications([unknownTask], [decide(u
 assert.equal(attention.length, 1);
 assert.equal(attention[0].notificationClass, 'assistant-attention');
 assert.equal(service.enqueueAttentionNotifications([unknownTask], [decide(unknownTask)]).length, 0, 'attention notifications are deduplicated');
+store.saveTaskCandidate({ candidateId: 'provider-automatic-task', observationId: 'provider-automatic-observation', summary: 'Send the status update', threadId: 'provider-thread', evidence: { start: 0, end: 1, text: 'Send the status update' }, extractorVersion: 'test', automation: { type: 'provider', action: { capability: 'gmail.send', destination: 'alex@example.com', threadId: 'provider-thread', content: { subject: 'Status', body: 'The update is ready.' } } } });
+const providerTask = store.listTasks({ includeDismissed: true }).find((task) => task.taskId === 'provider-automatic-task');
+const providerGrant = store.createStandingGrant({ principal: 'signal-box-user', capability: 'gmail.send', surface: 'desktop', constraints: { threadId: 'provider-thread' }, expiresAt: now + 60_000, policyVersion: 'single-user-1' });
+const providerDecision = decide(providerTask);
+assert.equal(providerDecision.type, 'execute_provider');
+assert.equal(providerDecision.grantId, providerGrant.grantId);
 store.close();
 console.log('proactivity tests passed');
