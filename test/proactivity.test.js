@@ -46,6 +46,10 @@ const grant = store.createStandingGrant({ principal: 'signal-box-user', capabili
 const automatic = decide(automaticTask);
 assert.equal(automatic.type, 'execute_browser');
 assert.equal(automatic.grantId, grant.grantId);
+const dependencyNotification = service.enqueueDependencyNotification(automaticTask, { dependency: 'browser-session', reason: 'browser-session-unavailable', evidence: 'Connect the browser.' });
+assert.equal(dependencyNotification.notificationClass, 'assistant-attention');
+assert.equal(dependencyNotification.items[0].evidence.dependency, 'browser-session');
+assert.equal(service.enqueueDependencyNotification(automaticTask, { dependency: 'browser-session', reason: 'browser-session-unavailable', evidence: 'Connect the browser.' }), null);
 store.createWorkflow({ workflowType: 'browser-action', taskId: automaticTask.taskId, state: 'executing', payload: {} });
 assert.equal(decide(automaticTask).reason, 'automation-in-progress');
 store.updateWorkflow(store.listWorkflows({ taskId: automaticTask.taskId, activeOnly: true })[0].workflowId, { state: 'completed' });

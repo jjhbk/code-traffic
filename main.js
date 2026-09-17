@@ -1540,6 +1540,11 @@ async function executeAutomaticBrowserDecisions(tasks, decisions) {
     const sessionId = appSettings.browserSessionId;
     if (!sessionId || !browserBridge.status(sessionId).connected) {
       console.error(`[assistant] automatic browser action waiting for browser session: ${recipe.id}`);
+      proactivityService?.enqueueDependencyNotification(task, {
+        dependency: 'browser-session',
+        reason: 'browser-session-unavailable',
+        evidence: sessionId ? `Connect browser session ${sessionId} to continue.` : 'No browser session is configured.',
+      });
       continue;
     }
     try {

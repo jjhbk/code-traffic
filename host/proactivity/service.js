@@ -129,6 +129,17 @@ class ProactivityService {
     return enqueued;
   }
 
+  enqueueDependencyNotification(task, { dependency = 'browser', reason = 'dependency-unavailable', evidence = null } = {}) {
+    if (!task?.taskId) return null;
+    const taskVersion = task.updatedAt || task.createdAt || 'unknown';
+    return this.store.enqueueNotification({
+      notificationId: `assistant-dependency:${task.taskId}:${taskVersion}:${dependency}:${reason}`,
+      dateKey: `assistant-dependency:${task.taskId}:${taskVersion}:${dependency}:${reason}`,
+      notificationClass: 'assistant-attention',
+      items: [{ taskId: task.taskId, summary: task.summary, reason, evidence: { dependency, taskVersion, ...(evidence ? { detail: evidence } : {}) } }],
+    });
+  }
+
   _blockingTasks(task) {
     const relations = this.store.taskRelations(task.taskId);
     const tasks = new Map(this.store.listTasks({ includeDismissed: true }).map((item) => [item.taskId, item]));
