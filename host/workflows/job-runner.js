@@ -14,13 +14,23 @@ class JobRunner {
     this.handlers[kind] = handler;
   }
 
+  complete(job, options) {
+    try {
+      return this.store.completeJob(job.jobId, job.leaseToken, options);
+    } catch (error) {
+      if (!/lease/i.test(error.message)) throw error;
+      const current = this.store.getJob(job.jobId);
+      return { ...(current || job), leaseLost: true };
+    }
+  }
+
   async runOnce({ limit = 10 } = {}) {
     const jobs = this.store.claimJobs({ limit, leaseMs: this.leaseMs, workerId: this.workerId, now: this.clock(), kinds: this.kinds });
     const results = [];
     for (const job of jobs) {
       const handler = this.handlers[job.kind];
       if (!handler) {
-        results.push(await this.store.completeJob(job.jobId, job.leaseToken, { status: 'failed', error: `No handler registered for ${job.kind}.` }));
+        results.push(await this.complete(job, { status: 'failed', error: `No handler registered for ${job.kind}.` }));
         continue;
       }
       const heartbeatMs = Math.max(10, Math.floor(this.leaseMs / 3));
@@ -36,10 +46,10 @@ class JobRunner {
           renewLease: (leaseMs = this.leaseMs) => this.store.renewJob(job.jobId, job.leaseToken, leaseMs, this.clock()),
         });
         if (leaseError) throw leaseError;
-        results.push(await this.store.completeJob(job.jobId, job.leaseToken, { status: 'completed', error: result?.error || null }));
+        results.push(await this.complete(job, { status: 'completed', error: result?.error || null }));
       } catch (error) {
         const retry = job.attempts < job.maxAttempts;
-        results.push(await this.store.completeJob(job.jobId, job.leaseToken, {
+        results.push(await this.complete(job, {
           status: retry ? 'queued' : 'failed',
           runAt: retry ? this.clock() + Math.min(60 * 60 * 1000, 1000 * (2 ** Math.min(job.attempts - 1, 8))) : null,
           error: error.message,
