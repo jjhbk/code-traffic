@@ -12,6 +12,10 @@ class AssistantRuntime {
     this.startedAt = null;
     this.running = false;
     this.paused = Boolean(paused);
+    this.lastTickAt = null;
+    this.lastTickDurationMs = null;
+    this.lastTickJobs = 0;
+    this.lastError = null;
   }
 
   register(kind, handler) { this.runner.register(kind, handler); }
@@ -24,9 +28,21 @@ class AssistantRuntime {
     if (this.paused) return [];
     if (this.running) return [];
     this.running = true;
-    try { return await this.runner.runOnce(); }
-    catch (error) { this.onError?.(error); return []; }
-    finally { this.running = false; }
+    const startedAt = this.clock();
+    this.lastTickAt = startedAt;
+    try {
+      const results = await this.runner.runOnce();
+      this.lastTickJobs = results.length;
+      this.lastError = results.find((result) => result.status === 'failed')?.lastError || null;
+      return results;
+    } catch (error) {
+      this.lastError = error.message;
+      this.onError?.(error);
+      return [];
+    } finally {
+      this.lastTickDurationMs = Math.max(0, this.clock() - startedAt);
+      this.running = false;
+    }
   }
 
   start() {
@@ -46,7 +62,7 @@ class AssistantRuntime {
   setPaused(paused) { this.paused = Boolean(paused); return this.health(); }
 
   health() {
-    return { running: Boolean(this.timer), busy: this.running, paused: this.paused, startedAt: this.startedAt, intervalMs: this.intervalMs };
+    return { running: Boolean(this.timer), busy: this.running, paused: this.paused, startedAt: this.startedAt, intervalMs: this.intervalMs, lastTickAt: this.lastTickAt, lastTickDurationMs: this.lastTickDurationMs, lastTickJobs: this.lastTickJobs, lastError: this.lastError };
   }
 }
 
