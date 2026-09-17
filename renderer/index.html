@@ -7,6 +7,7 @@
     <title>Signal Box</title>
     <link rel="icon" type="image/png" href="../branding/signal-box-loop-mark.png">
     <link rel="stylesheet" href="styles.css?v=12">
+    <link rel="stylesheet" href="assistant-design.css?v=1">
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css?v=3">
   </head>
   <body>
@@ -19,35 +20,45 @@
         <button id="window-close" class="window-close" type="button" aria-label="Close">×</button>
       </div>
     </div>
+    <a class="skip-link" href="#assistant-input">Skip to assistant</a>
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <div class="sidebar-identity"><img src="../branding/signal-box-loop-mark.png" alt=""><div>Signal Box<small>YOUR PERSONAL ASSISTANT</small></div></div>
+      <nav class="nav-group" aria-label="Workspace">
+        <p class="nav-caption">WORKSPACE</p>
+        <button id="assistant-toggle" type="button"><span aria-hidden="true">✧</span>Overview</button>
+        <button id="tasks-toggle" type="button"><span aria-hidden="true">✓</span>My tasks</button>
+        <button id="graph-toggle" type="button"><span aria-hidden="true">⌘</span>Connections</button>
+        <button id="activity-toggle" type="button"><span aria-hidden="true">◷</span>Activity</button>
+        <button id="sessions-toggle" type="button"><span aria-hidden="true">▤</span>Agent sessions</button>
+      </nav>
+      <nav class="nav-group" aria-label="Sources">
+        <p class="nav-caption">YOUR SOURCES</p>
+        <button id="mail-toggle" type="button"><span aria-hidden="true">✉</span>Mail</button>
+        <button id="calendar-toggle" type="button"><span aria-hidden="true">▦</span>Calendar</button>
+        <button id="drive-toggle" type="button"><span aria-hidden="true">▱</span>Files</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button id="connections-toggle" type="button">＋ Connect your tools</button>
+        <details class="sidebar-settings"><summary>Settings <span aria-hidden="true">⌄</span></summary><div>
+          <button id="model-settings" type="button">AI models</button><button id="telegram-settings" type="button">Telegram</button>
+          <button id="gmail-settings" type="button">Google account</button><button id="digest-settings" type="button">Notifications &amp; data</button>
+          <button id="browser-extension-settings" type="button">Browser access</button>
+          <button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="false">Sound off</button>
+        </div></details>
+        <div class="profile-chip"><span class="profile-avatar">Y</span><div>Your workspace<small>Personal · on this device</small></div></div>
+      </div>
+    </aside>
     <main class="shell">
       <header class="topbar">
         <div class="brand-block">
-          <div class="brand-row"><img class="brand-mark" src="../branding/signal-box-loop-mark.png" alt=""><div><p class="eyebrow">PERSONAL ASSISTANT · ALWAYS ON</p><h1>Signal Box</h1></div></div>
-          <p id="summary">No sessions</p>
+          <p class="eyebrow">YOUR SPACE, IN SYNC</p><h1 id="view-title">Overview</h1>
         </div>
         <div class="actions">
-            <button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="false">Sound off</button>
-            <select id="agent-select" class="agent-select" aria-label="Agent">
-              <option value="claude">Claude Code</option>
-              <option value="codex">Codex</option>
-              <option value="terminal">Terminal</option>
-            </select>
-            <button id="clear-all" class="clear-all" type="button">Clear all</button>
-            <button id="telegram-settings" type="button">Telegram settings</button>
-            <button id="model-settings" type="button">AI settings</button>
-            <button id="activity-toggle" type="button">Activity</button>
-            <button id="assistant-toggle" type="button">Assistant</button>
-            <button id="graph-toggle" type="button">Task graph</button>
-            <button id="gmail-settings" type="button">Service connections</button>
-            <button id="mail-toggle" type="button">Mail</button>
-            <button id="calendar-toggle" type="button">Calendar</button>
-            <button id="drive-toggle" type="button">Drive</button>
-            <button id="tasks-toggle" type="button">Tasks</button>
-            <button id="digest-settings" type="button">Digest settings</button>
-            <button id="browser-extension-settings" type="button">Set up browser access</button>
-            <button id="new-session" class="new-session" type="button">+ New session</button>
+            <span id="workspace-date" class="workspace-date"></span>
+            <span id="assistant-health" class="health-pill" role="status">Checking assistant…</span>
           </div>
       </header>
+      <div id="view-search" class="view-search" role="search" hidden><label for="workspace-search">Find in this view</label><input id="workspace-search" type="search" placeholder="Search tasks…" autocomplete="off"><p id="search-empty" class="tasks-empty" role="status" hidden>No matches. Try a different word.</p></div>
       <section id="setup-panel" class="setup-panel" hidden>
         <div class="setup-heading"><div><p class="section-kicker">SETUP CENTER</p><h2>Make Signal Box useful</h2><p>Connect the services you want monitored and notified.</p></div><span class="setup-count" id="setup-count"></span></div>
         <div id="setup-list" class="setup-list"></div>
@@ -57,16 +68,20 @@
         <div id="activity-list" class="activity-list" aria-live="polite"></div>
       </section>
       <section id="assistant-view" class="tasks-view" hidden>
-        <div class="tasks-heading"><div><h2>Assistant</h2><p class="field-hint">Ask about unfinished work, preferences, or the next step.</p></div><div><button id="assistant-pause" class="panel-action" type="button">Pause</button><button id="assistant-refresh" class="panel-action" type="button">Refresh</button></div></div>
-        <div id="assistant-decisions" class="assistant-summary" aria-live="polite"></div>
-        <div id="assistant-workflows" class="assistant-summary" aria-live="polite"></div>
+        <div class="assistant-hero"><div class="hero-copy"><p class="section-kicker">A LITTLE CLARITY. MORE ROOM TO THINK.</p><h2>Your day, with<br><em>less on your mind.</em></h2><p>Keep track of what matters. Pick up where you left off.</p></div><div class="signal-orbit" aria-hidden="true"><div class="orbit-ring"></div><div class="orbit-ring orbit-two"></div><img src="../branding/signal-box-loop-mark.png" alt=""><span class="orbit-dot"></span></div></div>
+        <div class="assistant-conversation">
         <div id="assistant-history" class="activity-list" aria-live="polite"></div>
         <form id="assistant-form" class="assistant-form">
-          <label for="assistant-input">Message</label>
-          <textarea id="assistant-input" rows="3" maxlength="4000" placeholder="What should I follow up on?"></textarea>
-          <button type="submit">Send to assistant</button>
+          <label for="assistant-input">What’s on your mind?</label>
+          <textarea id="assistant-input" rows="2" maxlength="4000" placeholder="Ask about your tasks, follow-ups, or saved preferences…"></textarea>
+          <div class="composer-footer"><span>⌘ / Ctrl + Enter to send</span><button type="submit">Send message <span aria-hidden="true">↗</span></button></div>
         </form>
+        <div class="prompt-chips" aria-label="Conversation starters"><button type="button" data-prompt="What needs attention?">What needs attention? <span aria-hidden="true">↗</span></button><button type="button" data-prompt="What preferences do you remember?">My preferences <span aria-hidden="true">↗</span></button><button type="button" data-prompt="remember response style: concise and direct">Remember a preference <span aria-hidden="true">＋</span></button></div>
+        </div>
+        <div class="section-toolbar"><div><p class="section-kicker">THE BIG PICTURE</p><h2>Your assistant at work</h2></div><div><button id="assistant-pause" type="button">Pause</button><button id="assistant-refresh" type="button" aria-label="Refresh assistant">↻ Refresh</button></div></div>
+        <div class="assistant-panels"><div id="assistant-decisions" class="assistant-summary" aria-live="polite"></div><div id="assistant-workflows" class="assistant-summary" aria-live="polite"></div></div>
       </section>
+      <div id="session-toolbar" class="section-toolbar" hidden><div><h2>Your agent sessions</h2><p id="summary">No sessions</p></div><div class="actions"><select id="agent-select" class="agent-select" aria-label="Agent"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="terminal">Terminal</option></select><button id="clear-all" class="clear-all" type="button">Clear all</button><button id="new-session" class="new-session" type="button">+ New session</button></div></div>
       <section id="board" class="board" aria-live="polite"></section>
       <section id="tasks-view" class="tasks-view" hidden>
         <div class="tasks-heading"><h2>Tasks</h2><button id="tasks-refresh" class="panel-action" type="button">Refresh</button></div>
@@ -328,5 +343,6 @@
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js?v=3"></script>
     <script src="audio.js?v=3"></script>
     <script src="app.js?v=7"></script>
+    <script src="dialog-focus.js?v=1"></script>
   </body>
 </html>

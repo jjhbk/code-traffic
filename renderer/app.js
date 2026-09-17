@@ -92,6 +92,7 @@ document.getElementById('deny-browser-test').addEventListener('click', async () 
   document.getElementById('browser-test-status').textContent = 'Test action cancelled.';
 });
 const setupPanel = document.getElementById('setup-panel');
+let setupExpanded = false;
 let sessions = [];
 let archivedSessions = [];
 let hasTelegramToken = false;
@@ -184,8 +185,9 @@ function render() {
 }
 
 function renderSetup(items) {
-  setupPanel.hidden = !items.length;
-  if (!items.length) return;
+  setupPanel.hidden = !items.length || !setupExpanded;
+  document.getElementById('connections-toggle').textContent = items.length ? `＋ Set up your tools · ${items.length}` : '＋ Connect your tools';
+  if (!items.length) { document.getElementById('setup-list').replaceChildren(); return; }
   document.getElementById('setup-count').textContent = `${items.length} step${items.length === 1 ? '' : 's'} remaining`;
   const list = document.getElementById('setup-list');
   list.replaceChildren();
@@ -248,7 +250,7 @@ function renderTasks() {
     const card = document.createElement('article'); card.className = 'task-card';
     const title = document.createElement('h3'); title.textContent = task.summary || 'Untitled task'; card.append(title);
     const meta = document.createElement('p'); meta.className = 'task-meta';
-    meta.textContent = `${task.owner === 'self' ? 'You owe this' : 'Counterparty owes this'}${task.counterparty ? ` · ${task.counterparty}` : ''}${task.dueDate ? ` · due ${task.dueDate}` : ''}`;
+    meta.textContent = `${task.owner === 'self' ? 'Your next step' : 'Waiting on someone'}${task.counterparty ? ` · ${task.counterparty}` : ''}${task.dueDate ? ` · due ${task.dueDate}` : ''}`;
     card.append(meta);
     if (task.evidence?.text) { const evidence = document.createElement('blockquote'); evidence.textContent = task.evidence.text; card.append(evidence); }
     const actions = document.createElement('div'); actions.className = 'task-actions';
@@ -266,7 +268,7 @@ function renderTasks() {
         reply.addEventListener('click', () => openReplyModal(task));
         actions.append(reply);
       }
-      const suppress = document.createElement('button'); suppress.type = 'button'; suppress.textContent = 'Suppress counterparty';
+      const suppress = document.createElement('button'); suppress.type = 'button'; suppress.textContent = 'Mute this contact';
       suppress.addEventListener('click', async () => { await window.signalBox.suppressCounterparty({ counterparty: task.counterparty }); await loadTasks(); });
       actions.append(suppress);
     }
@@ -474,19 +476,51 @@ async function loadTaskGraph() {
 
 const dataViews = ['activity-view', 'assistant-view', 'tasks-view', 'graph-view', 'mail-view', 'calendar-view', 'drive-view'];
 const dataViewButtons = { 'activity-view': 'activity-toggle', 'assistant-view': 'assistant-toggle', 'tasks-view': 'tasks-toggle', 'graph-view': 'graph-toggle', 'mail-view': 'mail-toggle', 'calendar-view': 'calendar-toggle', 'drive-view': 'drive-toggle' };
+const searchableViews = new Set(['tasks-view', 'mail-view', 'calendar-view', 'drive-view']);
+function filterCurrentView() {
+  const visible = dataViews.find((id) => !document.getElementById(id).hidden);
+  if (!searchableViews.has(visible)) return;
+  const query = document.getElementById('workspace-search').value.trim().toLocaleLowerCase();
+  const cards = [...document.querySelectorAll(`#${visible} .task-card`)];
+  cards.forEach((card) => { card.hidden = !card.textContent.toLocaleLowerCase().includes(query); });
+  document.getElementById('search-empty').hidden = !query || cards.some((card) => !card.hidden);
+}
+document.getElementById('workspace-search').addEventListener('input', filterCurrentView);
+for (const id of searchableViews) new MutationObserver(filterCurrentView).observe(document.getElementById(id), { childList: true, subtree: true });
 async function toggleDataView(viewId, loader) {
   const target = document.getElementById(viewId);
-  const shouldOpen = target.hidden;
+  board.hidden = true;
+  document.getElementById('session-toolbar').hidden = true;
+  document.getElementById('sessions-toggle').setAttribute('aria-pressed', 'false');
+  document.getElementById('view-search').hidden = !searchableViews.has(viewId);
+  document.getElementById('workspace-search').value = '';
+  document.getElementById('workspace-search').placeholder = `Search ${({ 'tasks-view': 'tasks', 'mail-view': 'mail', 'calendar-view': 'events', 'drive-view': 'files' })[viewId] || 'this view'}…`;
+  document.getElementById('search-empty').hidden = true;
   dataViews.forEach((id) => {
     document.getElementById(id).hidden = true;
     document.getElementById(dataViewButtons[id])?.setAttribute('aria-pressed', 'false');
   });
-  if (shouldOpen) {
     target.hidden = false;
     document.getElementById(dataViewButtons[viewId])?.setAttribute('aria-pressed', 'true');
+    document.getElementById('view-title').textContent = document.getElementById(dataViewButtons[viewId]).textContent.trim().replace(/^[^\p{L}]+/u, '');
     await loader();
-  }
 }
+document.getElementById('sessions-toggle').addEventListener('click', () => {
+  document.getElementById('view-search').hidden = true;
+  dataViews.forEach((id) => { document.getElementById(id).hidden = true; document.getElementById(dataViewButtons[id]).setAttribute('aria-pressed', 'false'); });
+  board.hidden = false;
+  document.getElementById('session-toolbar').hidden = false;
+  document.getElementById('sessions-toggle').setAttribute('aria-pressed', 'true');
+  document.getElementById('view-title').textContent = 'Agent sessions';
+});
+document.querySelector('.skip-link').addEventListener('click', async (event) => { event.preventDefault(); await toggleDataView('assistant-view', loadAssistantConversation); document.getElementById('assistant-input').focus(); });
+document.getElementById('connections-toggle').addEventListener('click', async () => {
+  setupExpanded = !setupExpanded;
+  await refreshSetupCenter();
+  if (!document.getElementById('setup-list').children.length) document.getElementById('gmail-settings').click();
+  else setupPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+document.getElementById('workspace-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 document.getElementById('tasks-toggle').addEventListener('click', () => toggleDataView('tasks-view', loadTasks));
 document.getElementById('tasks-refresh').addEventListener('click', loadTasks);
 document.getElementById('activity-toggle').addEventListener('click', () => toggleDataView('activity-view', loadActivity));
@@ -503,39 +537,45 @@ async function loadAssistantConversation() {
     const pauseButton = document.getElementById('assistant-pause');
     pauseButton.textContent = status.paused ? 'Resume' : 'Pause';
     pauseButton.dataset.paused = status.paused ? 'true' : 'false';
-    const [messages, decisions, workflows] = await Promise.all([
-      window.signalBox.getAssistantConversation(), window.signalBox.getAssistantDecisions(), window.signalBox.getAssistantWorkflows(),
+    const health = document.getElementById('assistant-health');
+    health.textContent = status.paused ? 'Assistant paused' : status.running || status.background?.running ? 'Assistant active' : 'Assistant offline';
+    health.dataset.state = status.paused ? 'paused' : status.running || status.background?.running ? 'active' : 'unavailable';
+    const [messages, decisions, workflows, assistantTasks] = await Promise.all([
+      window.signalBox.getAssistantConversation(), window.signalBox.getAssistantDecisions(), window.signalBox.getAssistantWorkflows(), window.signalBox.listTasks(),
     ]);
+    const taskNames = new Map(assistantTasks.map((task) => [task.taskId, task.summary]));
     const actionable = decisions.filter((decision) => decision.type !== 'wait');
     const decisionHeading = document.createElement('h3'); decisionHeading.textContent = actionable.length ? 'Needs attention' : 'No triggered next steps';
     decisionsTarget.append(decisionHeading);
+    if (!actionable.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'A little breathing room. No tasks need attention right now.'; decisionsTarget.append(empty); }
     for (const decision of actionable) {
       const card = document.createElement('article'); card.className = 'assistant-state';
-      const task = document.createElement('strong'); task.textContent = decision.taskId;
-      const detail = document.createElement('span'); detail.textContent = `${decision.type.replaceAll('_', ' ')} · ${decision.reason.replaceAll('-', ' ')}`;
+      const task = document.createElement('strong'); task.textContent = taskNames.get(decision.taskId) || 'Task to review';
+      const detail = document.createElement('span'); detail.textContent = `${({ digest: 'Upcoming deadline', clarify: 'Needs clarification', draft_follow_up: 'Time to follow up' })[decision.type] || decision.type.replaceAll('_', ' ')} · ${decision.reason.replaceAll('-', ' ')}`;
       const evidence = document.createElement('small'); evidence.textContent = decision.evidence?.length ? `Evidence: ${decision.evidence.join(' ').slice(0, 240)}` : 'No supporting evidence recorded.';
       card.append(task, detail, evidence); decisionsTarget.append(card);
+      const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review tasks →'; review.addEventListener('click', () => document.getElementById('tasks-toggle').click()); card.append(review);
     }
     if (workflows.length) {
       const workflowHeading = document.createElement('h3'); workflowHeading.textContent = 'Active workflows'; workflowsTarget.append(workflowHeading);
       for (const workflow of workflows) {
         const card = document.createElement('article'); card.className = 'assistant-state';
-        const title = document.createElement('strong'); title.textContent = `${workflow.workflowType} · ${workflow.state}`;
-        const detail = document.createElement('span'); detail.textContent = workflow.taskId ? `Task ${workflow.taskId}` : `Workflow ${workflow.workflowId}`;
+        const title = document.createElement('strong'); title.textContent = taskNames.get(workflow.taskId) || 'Follow-up';
+        const detail = document.createElement('span'); detail.textContent = ({ awaiting_approval: 'Waiting for your review', waiting_event: 'Waiting for a reply', needs_attention: 'Needs your attention', verifying: 'Checking the outcome', executing: 'In progress' })[workflow.state] || workflow.state.replaceAll('_', ' ');
         const wake = document.createElement('small'); wake.textContent = workflow.wakeAt ? `Next check: ${new Date(workflow.wakeAt).toLocaleString()}` : 'No next check scheduled.';
         const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel workflow';
         cancel.addEventListener('click', async () => { cancel.disabled = true; try { await window.signalBox.cancelAssistantWorkflow({ workflowId: workflow.workflowId }); await loadAssistantConversation(); } catch (caught) { cancel.disabled = false; showError(caught.message || 'Could not cancel workflow.'); } });
         card.append(title, detail, wake, cancel); workflowsTarget.append(card);
       }
     }
-    if (!messages.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No assistant messages yet.'; target.append(empty); return; }
+    if (!workflows.length) { const heading = document.createElement('h3'); heading.textContent = 'Following up'; const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'Nothing in motion yet. Follow-ups you start will appear here.'; workflowsTarget.append(heading, empty); }
     for (const message of messages) {
       const card = document.createElement('article'); card.className = `activity-card assistant-${message.direction}`;
-      const meta = document.createElement('small'); meta.textContent = `${message.direction} · ${new Date(message.createdAt).toLocaleString()}`;
+      const meta = document.createElement('small'); meta.textContent = `${message.direction === 'inbound' ? 'You' : 'Signal Box'} · ${new Date(message.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
       const body = document.createElement('p'); body.textContent = message.content;
       card.append(meta, body); target.append(card);
     }
-  } catch (caught) { showError(caught.message || 'Assistant conversation unavailable.'); }
+  } catch (caught) { document.getElementById('assistant-health').textContent = 'Assistant unavailable'; document.getElementById('assistant-health').dataset.state = 'unavailable'; showError(caught.message || 'Assistant conversation unavailable.'); }
 }
 document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));
 document.getElementById('assistant-refresh').addEventListener('click', loadAssistantConversation);
@@ -550,8 +590,18 @@ document.getElementById('assistant-form').addEventListener('submit', async (even
   event.preventDefault();
   const input = document.getElementById('assistant-input');
   const text = input.value.trim(); if (!text) return;
-  try { await window.signalBox.sendAssistantMessage({ text }); input.value = ''; await loadAssistantConversation(); }
+  const send = event.currentTarget.querySelector('button[type="submit"]');
+  if (send.disabled) return;
+  send.disabled = true; send.textContent = 'Sending…';
+  try { await window.signalBox.sendAssistantMessage({ text }); if (input.value.trim() === text) input.value = ''; await loadAssistantConversation(); }
   catch (caught) { showError(caught.message || 'Could not send assistant message.'); }
+  finally { send.disabled = false; send.textContent = 'Send message ↗'; input.focus(); }
+});
+document.querySelectorAll('[data-prompt]').forEach((button) => button.addEventListener('click', () => {
+  const input = document.getElementById('assistant-input'); input.value = button.dataset.prompt; input.focus();
+}));
+document.getElementById('assistant-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); document.getElementById('assistant-form').requestSubmit(); }
 });
 document.getElementById('graph-toggle').addEventListener('click', () => toggleDataView('graph-view', loadTaskGraph));
 document.getElementById('graph-refresh').addEventListener('click', loadTaskGraph);
@@ -1226,6 +1276,7 @@ window.signalBox.getSettings().then((settings) => {
   }
 }).catch((caught) => showError(caught.message));
 refreshSetupCenter();
+toggleDataView('assistant-view', loadAssistantConversation);
 setInterval(render, 1000);
 setInterval(() => {
   if (!document.getElementById('activity-view').hidden) loadActivity();
