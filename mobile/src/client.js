@@ -37,6 +37,7 @@ class MobileCoreClient {
 
   health() { return this.request('/api/v1/mobile/health'); }
   today() { return this.request('/api/v1/mobile/today'); }
+  taskGraph({ taskId = '', depth = 2, limit = 100 } = {}) { return this.request(`/api/v1/mobile/graph?taskId=${encodeURIComponent(taskId)}&depth=${encodeURIComponent(depth)}&limit=${encodeURIComponent(limit)}`); }
   conversation(conversationId = 'mobile:default') { return this.request(`/api/v1/mobile/conversation?conversationId=${encodeURIComponent(conversationId)}`); }
   workflows() { return this.request('/api/v1/mobile/workflows'); }
   context() { return this.request('/api/v1/mobile/context'); }

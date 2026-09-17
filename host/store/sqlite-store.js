@@ -1072,13 +1072,38 @@ class SqliteStore {
     return rows.map((row) => ({ ...JSON.parse(row.taskJson), taskId: row.taskId, status: row.status, createdAt: row.createdAt, updatedAt: row.updatedAt }));
   }
 
-  taskGraph({ includeDismissed = true } = {}) {
-    const tasks = this.listTasks({ includeDismissed });
+  taskGraph({ includeDismissed = true, taskId = null, depth = null, limit = 500 } = {}) {
+    const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 500));
+    const allTasks = this.listTasks({ includeDismissed });
+    const relationRows = this.db.prepare(`SELECT from_task_id AS fromTaskId, to_task_id AS toTaskId, relation_type AS relationType, details_json AS detailsJson
+      FROM task_relations ORDER BY created_at`).all();
+    let tasks;
+    if (taskId) {
+      const byId = new Map(allTasks.map((task) => [task.taskId, task]));
+      if (!byId.has(taskId)) return { nodes: [], edges: [] };
+      const maxDepth = depth === null || depth === undefined ? 2 : Math.min(10, Math.max(0, Number(depth) || 0));
+      const selected = new Set([taskId]);
+      const queue = [{ taskId, depth: 0 }];
+      while (queue.length) {
+        const current = queue.shift();
+        if (current.depth >= maxDepth) continue;
+        for (const relation of relationRows) {
+          const next = relation.fromTaskId === current.taskId ? relation.toTaskId : relation.toTaskId === current.taskId ? relation.fromTaskId : null;
+          if (next && byId.has(next) && !selected.has(next)) {
+            selected.add(next);
+            queue.push({ taskId: next, depth: current.depth + 1 });
+          }
+        }
+      }
+      tasks = [...selected].slice(0, safeLimit).map((id) => byId.get(id));
+    } else {
+      tasks = allTasks.slice(0, safeLimit);
+    }
     const taskIds = new Set(tasks.map((task) => task.taskId));
     const evidenceRows = this.db.prepare(`SELECT te.task_id AS taskId, te.observation_id AS observationId,
       te.evidence_text AS evidenceText, o.observation_json AS observationJson
       FROM task_evidence te JOIN observations o ON o.observation_id = te.observation_id`).all();
-    const nodes = tasks.map((task) => ({ id: `task:${task.taskId}`, type: 'task', label: task.summary || 'Untitled task', status: task.status, owner: task.owner || null, dueDate: task.dueDate || null }));
+    const nodes = tasks.map((task) => ({ id: `task:${task.taskId}`, type: 'task', label: task.summary || 'Untitled task', status: task.status, owner: task.owner || null, dueDate: task.dueDate || null, dueAt: task.dueAt || null, timeZone: task.timeZone || null }));
     const edges = [];
     const seenObservations = new Set();
     for (const row of evidenceRows) {
@@ -1092,8 +1117,6 @@ class SqliteStore {
       }
       edges.push({ from: `task:${row.taskId}`, to: observationId, type: 'evidence', label: row.evidenceText || '' });
     }
-    const relationRows = this.db.prepare(`SELECT from_task_id AS fromTaskId, to_task_id AS toTaskId, relation_type AS relationType, details_json AS detailsJson
-      FROM task_relations`).all();
     for (const row of relationRows) {
       if (!taskIds.has(row.fromTaskId) || !taskIds.has(row.toTaskId)) continue;
       let details = {};

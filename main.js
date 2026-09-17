@@ -441,7 +441,7 @@ function wireIpc() {
   ipcMain.handle('model:check', async () => ({ ...(await (modelRouter?.availability() || { mode: 'off', local: false, frontier: false, active: false, localAvailable: false })), hardware: modelHardware }));
   ipcMain.handle('model:diagnostics', () => modelRouter?.diagnostics() || { mode: 'off', metrics: {} });
   ipcMain.handle('model:probe', async () => modelRouter?.probe() || { localCall: false, redacted: false });
-  ipcMain.handle('tasks:graph', () => hostStore?.taskGraph({ includeDismissed: true }) || { nodes: [], edges: [] });
+  ipcMain.handle('tasks:graph', (_event, options = {}) => hostStore?.taskGraph({ includeDismissed: true, taskId: options.taskId || null, depth: options.depth, limit: options.limit }) || { nodes: [], edges: [] });
   ipcMain.handle('assistant:decisions', () => proactivityService?.evaluate(hostStore?.listTasks() || []) || []);
   ipcMain.handle('assistant:conversation', () => conversationService?.history('desktop:signal-box') || []);
   ipcMain.handle('assistant:send', (_event, { text = '' } = {}) => {

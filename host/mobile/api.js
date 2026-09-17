@@ -36,6 +36,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'pair') return this.pair(body);
       if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
       if (method === 'GET' && resource === 'today') return this.today(device, query);
+      if (method === 'GET' && resource === 'graph') return { graph: this.store.taskGraph({ includeDismissed: false, taskId: query.taskId || null, depth: query.depth === undefined ? 2 : Number(query.depth), limit: Number(query.limit || 100) }) };
       if (method === 'GET' && resource === 'notifications') return this.notifications(device, query);
       if (method === 'GET' && resource === 'approvals') return { approvals: this.store.listPendingApprovals({ principal: 'signal-box-user', surface: 'mobile', now: this.clock() }) };
       if (method === 'GET' && resource === 'connections') return { connections: await this.getConnections() };
