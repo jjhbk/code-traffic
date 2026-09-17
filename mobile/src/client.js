@@ -1,6 +1,22 @@
 const OUTBOX_KEY = 'signal-box.mobile.outbox.v1';
 const NOTIFICATION_CURSOR_KEY = 'signal-box.mobile.notifications.cursor.v1';
 
+function assistantHealthStatus(payload = {}) {
+  const core = payload.core || payload;
+  const background = core.background || null;
+  const jobs = core.jobs || {};
+  const backgroundJobs = background?.jobs || {};
+  const overdue = Number(jobs.overdue || 0) + Number(backgroundJobs.overdue || 0);
+  const expiredRunning = Number(jobs.expiredRunning || 0) + Number(backgroundJobs.expiredRunning || 0);
+  const queued = Number(jobs.queued || 0) + Number(backgroundJobs.queued || 0);
+  if (core.paused || background?.paused) return { key: 'paused', label: 'PAUSED', detail: 'Monitoring is paused by you.', queued, overdue, expiredRunning };
+  if (background?.lifecycle === 'recovering' || overdue > 0 || expiredRunning > 0) return { key: 'catching-up', label: 'CATCHING UP', detail: overdue || expiredRunning ? 'The assistant is working through delayed background work.' : 'The background host is recovering.', queued, overdue, expiredRunning };
+  if (core.running === false && background?.running !== true) return { key: 'unavailable', label: 'UNAVAILABLE', detail: 'The Electron core is not reachable.', queued, overdue, expiredRunning };
+  if (background?.lifecycle === 'starting') return { key: 'starting', label: 'STARTING', detail: 'The assistant is starting up.', queued, overdue, expiredRunning };
+  if (core.running === true || background?.running === true) return { key: 'running', label: 'RUNNING', detail: queued ? `${queued} durable job${queued === 1 ? '' : 's'} queued.` : 'Monitoring your context and work.', queued, overdue, expiredRunning };
+  return { key: 'unknown', label: 'CONNECTING', detail: 'Checking the Electron core.', queued, overdue, expiredRunning };
+}
+
 function id() {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
   return `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -102,4 +118,4 @@ class MobileCoreClient {
   async writeOutbox(items) { if (this.storage) await this.storage.setItem(OUTBOX_KEY, JSON.stringify(items.slice(-100))); }
 }
 
-module.exports = { MobileCoreClient, MobileApiError, OUTBOX_KEY, NOTIFICATION_CURSOR_KEY };
+module.exports = { MobileCoreClient, MobileApiError, OUTBOX_KEY, NOTIFICATION_CURSOR_KEY, assistantHealthStatus };

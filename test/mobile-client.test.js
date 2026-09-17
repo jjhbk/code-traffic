@@ -1,5 +1,11 @@
 const assert = require('node:assert/strict');
-const { MobileCoreClient, NOTIFICATION_CURSOR_KEY } = require('../mobile/src/client');
+const { MobileCoreClient, NOTIFICATION_CURSOR_KEY, assistantHealthStatus } = require('../mobile/src/client');
+
+assert.equal(assistantHealthStatus({ core: { running: true, paused: true } }).key, 'paused');
+assert.equal(assistantHealthStatus({ core: { running: true, background: { running: true, lifecycle: 'recovering' } } }).label, 'CATCHING UP');
+assert.equal(assistantHealthStatus({ core: { running: true, jobs: { queued: 2, overdue: 1 } } }).detail, 'The assistant is working through delayed background work.');
+assert.equal(assistantHealthStatus({ core: { running: false, background: { running: false, lifecycle: 'unavailable' } } }).key, 'unavailable');
+assert.equal(assistantHealthStatus({ core: { running: true, jobs: { queued: 3 } } }).detail, '3 durable jobs queued.');
 
 (async () => {
   const values = new Map();
