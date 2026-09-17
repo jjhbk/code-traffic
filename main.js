@@ -86,12 +86,12 @@ if (disableSandbox) {
 // advertise a desktop environment, so Electron can otherwise select basic_text.
 if (process.platform === 'linux' && process.env.WSL_INTEROP) {
   app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
-  // Prefer WSLg's native Wayland backend when it is available; forcing X11
-  // regressed native cursor rendering on some WSLg/Electron combinations.
-  // Set SIGNAL_BOX_OZONE_PLATFORM=x11 for older X-only WSL environments.
+  // X11 is the reliable WSLg painting path for this Electron build. Wayland
+  // remains available for environments where it is known to render correctly.
+  // Set SIGNAL_BOX_OZONE_PLATFORM=wayland to opt into WSLg Wayland.
   process.env.XCURSOR_THEME ||= 'Adwaita';
   process.env.XCURSOR_SIZE ||= '24';
-  app.commandLine.appendSwitch('ozone-platform', process.env.SIGNAL_BOX_OZONE_PLATFORM || (process.env.WAYLAND_DISPLAY ? 'wayland' : 'x11'));
+  app.commandLine.appendSwitch('ozone-platform', process.env.SIGNAL_BOX_OZONE_PLATFORM || 'x11');
 }
 
 // WSLg/Wayland can expose a display while the GPU shared-image path is unavailable.
