@@ -7,6 +7,12 @@ function valueFor(name, inputs, context) {
 }
 
 function assertExpression(expression, inputs, context) {
+  const present = /^present\s+([A-Za-z][\w]*)$/.exec(String(expression || '').trim());
+  if (present) {
+    const value = valueFor(present[1], inputs, context);
+    if (value === undefined || value === null || String(value).trim() === '') throw new Error(`Browser assertion failed: ${present[1]} is not present.`);
+    return;
+  }
   const match = /^([A-Za-z][\w]*)\s*(<=|>=|===|==|<|>)\s*([A-Za-z][\w]*|-?\d+(?:\.\d+)?)$/.exec(String(expression || '').trim());
   if (!match) throw new Error('Browser assertion is not supported.');
   const left = valueFor(match[1], inputs, context);

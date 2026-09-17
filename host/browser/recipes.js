@@ -28,6 +28,8 @@ const uberCabBooking = validateRecipe({
     { id: 'quote', kind: 'read', target: 'fare', output: 'fare' },
     { id: 'fare-check', kind: 'assert', expression: 'fare <= maxFare' },
     { id: 'request', kind: 'click', target: 'requestRide', commit: true },
+    { id: 'confirmation', kind: 'read', target: 'bookingConfirmation', output: 'bookingConfirmation' },
+    { id: 'booking-confirmed', kind: 'assert', expression: 'present bookingConfirmation' },
   ],
 });
 

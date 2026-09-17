@@ -9,6 +9,7 @@ function target(name) {
     rideType: ['select[aria-label*="ride" i]', '[role="combobox"][aria-label*="ride" i]'],
     fare: ['[aria-label*="price" i]', '[aria-label*="fare" i]'],
     requestRide: ['button[aria-label*="request" i]', 'button[aria-label*="confirm" i]', 'button[type="submit"]'],
+    bookingConfirmation: ['[aria-label*="trip" i]', '[aria-label*="confirmed" i]', '[data-testid*="trip" i]', '[data-testid*="confirmation" i]'],
   };
   return (fallbacks[name] || []).map((selector) => document.querySelector(selector)).find(Boolean) || null;
 }
