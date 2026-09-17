@@ -22,5 +22,9 @@ const { MobileCoreClient, NOTIFICATION_CURSOR_KEY } = require('../mobile/src/cli
   const synced = await client.syncNotifications();
   assert.equal(synced.nextCursor, 'cursor-1');
   assert.equal(values.get(NOTIFICATION_CURSOR_KEY), 'cursor-1');
+  const pause = await client.setAssistantPaused(true);
+  assert.equal(calls.at(-1).url, 'http://core/api/v1/mobile/assistant/pause');
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { paused: true });
+  assert.equal(pause.accepted, true);
   console.log('mobile client tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -26,7 +26,8 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   const conversation = new ConversationService({ store, channel: 'mobile', proactivity });
   const approvals = new ApprovalService({ store });
   const context = new MobileContextService({ store });
-  const mobileApi = new MobileApi({ store, conversation, proactivity, approvals, context, getStatus: () => ({ running: true, host: 'fixture' }) });
+  let assistantPaused = false;
+  const mobileApi = new MobileApi({ store, conversation, proactivity, approvals, context, onPause: async ({ paused }) => { assistantPaused = paused; return { paused }; }, getStatus: () => ({ running: true, paused: assistantPaused, host: 'fixture' }) });
   const board = new Board({ authToken: 'hook-secret', mobileAuthToken: 'mobile-secret', mobileApi });
   const port = 4950 + Math.floor(Math.random() * 50);
   await board.listen(port);
@@ -34,6 +35,8 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal((await request(port, '/api/v1/mobile/health', { token: 'wrong' })).status, 401);
   const health = await request(port, '/api/v1/mobile/health');
   assert.equal(health.status, 200); assert.equal(health.body.protocolVersion, '1'); assert.equal(health.body.core.host, 'fixture');
+  const paused = await request(port, '/api/v1/mobile/assistant/pause', { method: 'POST', body: { paused: true } });
+  assert.equal(paused.status, 200); assert.equal(paused.body.health.paused, true); assert.equal(assistantPaused, true);
   const pushRegistration = await request(port, '/api/v1/mobile/devices/push-token', { method: 'POST', body: { pushToken: 'ExponentPushToken[fixture]', platform: 'expo' } });
   assert.equal(pushRegistration.status, 200); assert.equal(store.listMobilePushTokens()[0].pushToken, 'ExponentPushToken[fixture]');
   const pushRevoked = await request(port, '/api/v1/mobile/devices/push-token/revoke', { method: 'POST', commandId: 'revoke-push-1', body: {} });

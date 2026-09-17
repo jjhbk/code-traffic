@@ -1175,6 +1175,14 @@ async function start() {
     pairing: mobilePairing,
     context: mobileContext,
     onApproval: executeMobileApproval,
+    onPause: async ({ paused }) => {
+      if (!assistantRuntime) throw new Error('Assistant runtime is unavailable.');
+      appSettings = { ...appSettings, assistantPaused: Boolean(paused) };
+      writeSettings(app.getPath('userData'), appSettings);
+      const health = assistantRuntime.setPaused(appSettings.assistantPaused);
+      if (backgroundHost) health.background = await backgroundHost.pause(appSettings.assistantPaused);
+      return health;
+    },
     getConnections: () => {
       const account = mailCredentials?.load('gmail-account') || '';
       const health = (provider) => account ? hostStore?.getConnectorHealth(`${provider}:${account}`) || null : null;
