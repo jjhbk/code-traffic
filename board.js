@@ -424,7 +424,7 @@ class Board extends EventEmitter {
         if (!this.mobileApi) { sendJson(response, 503, { error: 'Mobile API is unavailable.' }); return; }
         try {
           const body = request.method === 'GET' ? {} : await readJsonBody(request, 512 * 1024);
-          const result = await this.mobileApi.handle({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body });
+          const result = await this.mobileApi.handle({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body, headers: request.headers });
           sendJson(response, 200, result);
         } catch (error) { sendJson(response, error.status || (error.message === 'Request body exceeds limit.' ? 413 : 400), { error: error.message }); }
         return;

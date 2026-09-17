@@ -301,6 +301,12 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS mobile_commands (
+    command_id TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );`,
 ];
 
 class SqliteStore {
@@ -329,6 +335,19 @@ class SqliteStore {
   }
 
   close() { this.db.close(); }
+
+  getMobileCommand(commandId) {
+    if (!commandId) return null;
+    const row = this.db.prepare('SELECT command_id AS commandId, operation, result_json AS resultJson, created_at AS createdAt FROM mobile_commands WHERE command_id = ?').get(commandId);
+    return row ? { ...row, result: JSON.parse(row.resultJson) } : null;
+  }
+
+  saveMobileCommand(commandId, operation, result) {
+    if (!commandId || !operation || !result || typeof result !== 'object') throw new Error('Invalid mobile command receipt.');
+    this.db.prepare('INSERT INTO mobile_commands(command_id, operation, result_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(command_id) DO NOTHING')
+      .run(commandId, operation, JSON.stringify(result), this.clock());
+    return this.getMobileCommand(commandId);
+  }
 
   enqueueJob({ jobId = crypto.randomUUID(), kind, payload = {}, runAt = this.clock(), maxAttempts = 5, dedupeKey = null } = {}) {
     if (!kind || !payload || typeof payload !== 'object' || !Number.isFinite(runAt) || !Number.isInteger(maxAttempts) || maxAttempts < 1) {

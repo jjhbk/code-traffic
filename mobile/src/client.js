@@ -1,0 +1,83 @@
+const OUTBOX_KEY = 'signal-box.mobile.outbox.v1';
+
+function id() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+  return `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+class MobileApiError extends Error {
+  constructor(message, { status = null, payload = null } = {}) {
+    super(message); this.name = 'MobileApiError'; this.status = status; this.payload = payload;
+  }
+}
+
+class MobileCoreClient {
+  constructor({ baseUrl, token, fetchImpl = globalThis.fetch, storage = null, clock = () => Date.now() } = {}) {
+    if (!baseUrl || !token || typeof fetchImpl !== 'function') throw new Error('Mobile core client requires base URL, token, and fetch implementation.');
+    this.baseUrl = String(baseUrl).replace(/\/$/, ''); this.token = token; this.fetchImpl = fetchImpl; this.storage = storage; this.clock = clock;
+  }
+
+  async request(path, { method = 'GET', body = undefined, idempotencyKey = null } = {}) {
+    let response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${this.token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    } catch (error) {
+      throw Object.assign(new MobileApiError(`Signal Box core is unreachable: ${error.message}`), { code: 'NETWORK_UNAVAILABLE' });
+    }
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { /* Empty response. */ }
+    if (!response.ok) throw new MobileApiError(payload?.error || `Core request failed with status ${response.status}.`, { status: response.status, payload });
+    return payload;
+  }
+
+  health() { return this.request('/api/v1/mobile/health'); }
+  today() { return this.request('/api/v1/mobile/today'); }
+  conversation(conversationId = 'mobile:default') { return this.request(`/api/v1/mobile/conversation?conversationId=${encodeURIComponent(conversationId)}`); }
+  workflows() { return this.request('/api/v1/mobile/workflows'); }
+  context() { return this.request('/api/v1/mobile/context'); }
+  permissions() { return this.request('/api/v1/mobile/permissions'); }
+
+  async sendMessage(text, { conversationId = 'mobile:default', externalId = id() } = {}) {
+    return this.command('/api/v1/mobile/conversation/messages', { conversationId, text, externalId }, externalId);
+  }
+
+  async updateTask(taskId, body) { return this.command(`/api/v1/mobile/tasks/${encodeURIComponent(taskId)}/status`, body); }
+  async cancelWorkflow(workflowId) { return this.command(`/api/v1/mobile/workflows/${encodeURIComponent(workflowId)}/cancel`, {}); }
+  async createPermission(body) { return this.command('/api/v1/mobile/permissions', body); }
+  async revokePermission(grantId) { return this.command(`/api/v1/mobile/permissions/${encodeURIComponent(grantId)}/revoke`, {}); }
+  async sendLocation(body) { return this.command('/api/v1/mobile/context/location', body); }
+  async sendSensor(body) { return this.command('/api/v1/mobile/context/sensor', body); }
+
+  async command(path, body, commandId = id()) {
+    try { return await this.request(path, { method: 'POST', body, idempotencyKey: commandId }); }
+    catch (error) {
+      if (error.code !== 'NETWORK_UNAVAILABLE' || !this.storage) throw error;
+      const outbox = await this.readOutbox();
+      if (!outbox.some((item) => item.commandId === commandId)) { outbox.push({ commandId, path, body, createdAt: this.clock() }); await this.writeOutbox(outbox); }
+      return { queued: true, commandId, pending: outbox.length };
+    }
+  }
+
+  async flushOutbox() {
+    const pending = await this.readOutbox(); const remaining = [];
+    for (const item of pending) {
+      try { await this.request(item.path, { method: 'POST', body: item.body, idempotencyKey: item.commandId }); }
+      catch (error) { remaining.push(item); if (error.code === 'NETWORK_UNAVAILABLE') break; }
+    }
+    await this.writeOutbox(remaining); return { flushed: pending.length - remaining.length, pending: remaining.length };
+  }
+
+  async readOutbox() {
+    if (!this.storage) return [];
+    try { const value = await this.storage.getItem(OUTBOX_KEY); const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : []; }
+    catch (_) { return []; }
+  }
+
+  async writeOutbox(items) { if (this.storage) await this.storage.setItem(OUTBOX_KEY, JSON.stringify(items.slice(-100))); }
+}
+
+module.exports = { MobileCoreClient, MobileApiError, OUTBOX_KEY };

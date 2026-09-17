@@ -14,24 +14,34 @@ class MobileApi {
     this.clock = clock;
   }
 
-  async handle({ method, path, query = {}, body = {} } = {}) {
-    const parts = String(path || '').split('/').filter(Boolean);
-    if (parts[0] !== 'api' || parts[1] !== 'v1' || parts[2] !== 'mobile') throw this._error(404, 'Mobile endpoint not found.');
-    const resource = parts[3] || '';
-    if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
-    if (method === 'GET' && resource === 'today') return this.today();
-    if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
-    if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
-    if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
-    if (method === 'POST' && resource === 'workflows' && parts[4] && parts[5] === 'cancel') return { workflow: this.store.updateWorkflow(parts[4], { state: 'cancelled', details: { reason: 'mobile-user-cancelled' } }) };
-    if (method === 'GET' && resource === 'context') return { context: this.store.listContext() };
-    if (method === 'GET' && resource === 'permissions') return { permissions: this.store.listStandingGrants({ principal: 'signal-box-user' }) };
-    if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
-    if (method === 'POST' && resource === 'permissions') return { permission: this.createPermission(body) };
-    if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'status') return { task: this.updateTask(parts[4], body) };
-    if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation(body);
-    if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body);
-    throw this._error(404, 'Mobile endpoint not found.');
+  async handle({ method, path, query = {}, body = {}, headers = {} } = {}) {
+    const operation = async () => {
+      const parts = String(path || '').split('/').filter(Boolean);
+      if (parts[0] !== 'api' || parts[1] !== 'v1' || parts[2] !== 'mobile') throw this._error(404, 'Mobile endpoint not found.');
+      const resource = parts[3] || '';
+      if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
+      if (method === 'GET' && resource === 'today') return this.today();
+      if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
+      if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
+      if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
+      if (method === 'POST' && resource === 'workflows' && parts[4] && parts[5] === 'cancel') return { workflow: this.store.updateWorkflow(parts[4], { state: 'cancelled', details: { reason: 'mobile-user-cancelled' } }) };
+      if (method === 'GET' && resource === 'context') return { context: this.store.listContext() };
+      if (method === 'GET' && resource === 'permissions') return { permissions: this.store.listStandingGrants({ principal: 'signal-box-user' }) };
+      if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
+      if (method === 'POST' && resource === 'permissions') return { permission: this.createPermission(body) };
+      if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'status') return { task: this.updateTask(parts[4], body) };
+      if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation(body);
+      if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body);
+      throw this._error(404, 'Mobile endpoint not found.');
+    };
+    if (method !== 'POST') return operation();
+    const commandId = String(headers['idempotency-key'] || body.externalId || '').trim();
+    if (!commandId || commandId.length > 200) throw this._error(400, 'An idempotency key is required for mobile commands.');
+    const cached = this.store.getMobileCommand(commandId);
+    if (cached) return { ...cached.result, replayed: true, ...(Object.prototype.hasOwnProperty.call(cached.result, 'duplicate') ? { duplicate: true } : {}) };
+    const result = await operation();
+    this.store.saveMobileCommand(commandId, `${method} ${path}`, result);
+    return { ...result, replayed: false };
   }
 
   today() {
