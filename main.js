@@ -65,8 +65,11 @@ const hasSingleInstance = app.requestSingleInstanceLock();
 if (!hasSingleInstance) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (!windowRef || windowRef.isDestroyed()) return;
+app.on('second-instance', () => {
+    if (!windowRef || windowRef.isDestroyed()) {
+      createWindow();
+      return;
+    }
     if (windowRef.isMinimized()) windowRef.restore();
     windowRef.show();
     windowRef.focus();
