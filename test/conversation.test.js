@@ -7,7 +7,7 @@ const store = new SqliteStore();
 const service = new ConversationService({ store, channel: 'telegram' });
 const conversation = service.open('telegram:chat-1');
 service.receive(conversation.conversationId, 'Remind me about Alex', 'telegram-update-1');
-service.receive(conversation.conversationId, 'Remind me about Alex', 'telegram-update-1');
+assert.equal(service.receive(conversation.conversationId, 'Remind me about Alex', 'telegram-update-1').duplicate, true);
 service.respond(conversation.conversationId, 'I will check the open obligation.');
 assert.equal(service.history(conversation.conversationId).length, 2);
 assert.equal(service.history(conversation.conversationId)[0].direction, 'inbound');

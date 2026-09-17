@@ -1018,12 +1018,15 @@ class SqliteStore {
     if (!conversationId || !['inbound', 'outbound', 'system'].includes(direction) || !String(content || '').trim()) throw new Error('Invalid conversation message.');
     if (!this.db.prepare('SELECT conversation_id FROM conversations WHERE conversation_id = ?').get(conversationId)) throw new Error('Conversation not found.');
     const existing = externalId ? this.db.prepare('SELECT message_id AS messageId FROM conversation_messages WHERE conversation_id = ? AND external_id = ?').get(conversationId, externalId) : null;
-    if (existing) return this.getConversationMessage(existing.messageId);
+    if (existing) return { ...this.getConversationMessage(existing.messageId), duplicate: true };
     const now = this.clock();
-    this.db.prepare(`INSERT INTO conversation_messages(message_id, conversation_id, external_id, direction, content, task_id, workflow_id, created_at)
+    const result = this.db.prepare(`INSERT OR IGNORE INTO conversation_messages(message_id, conversation_id, external_id, direction, content, task_id, workflow_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(messageId, conversationId, externalId, direction, String(content), taskId, workflowId, now);
-    this.db.prepare('UPDATE conversations SET updated_at = ? WHERE conversation_id = ?').run(now, conversationId);
-    return this.getConversationMessage(messageId);
+    if (Number(result.changes) === 1) this.db.prepare('UPDATE conversations SET updated_at = ? WHERE conversation_id = ?').run(now, conversationId);
+    const saved = Number(result.changes) === 1
+      ? this.getConversationMessage(messageId)
+      : this.getConversationMessage(this.db.prepare('SELECT message_id AS messageId FROM conversation_messages WHERE conversation_id = ? AND external_id = ?').get(conversationId, externalId).messageId);
+    return { ...saved, duplicate: Number(result.changes) !== 1 };
   }
 
   getConversationMessage(messageId) {

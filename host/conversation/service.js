@@ -30,9 +30,8 @@ class ConversationService {
     const content = String(text || '').trim();
     if (!content) throw new Error('Enter a message for the assistant.');
     const conversation = this.open(conversationId || undefined);
-    const duplicate = externalId && this.history(conversation.conversationId).some((message) => message.externalId === externalId);
     const inbound = this.receive(conversation.conversationId, content, externalId);
-    if (duplicate || inbound.direction !== 'inbound') return { duplicate: true, response: null, decisions: [], history: this.history(conversation.conversationId) };
+    if (inbound.duplicate || inbound.direction !== 'inbound') return { duplicate: true, response: null, decisions: [], history: this.history(conversation.conversationId) };
     const tasks = this.store.listTasks({ includeDismissed: true });
     const command = content.match(/^\s*(dismiss|snooze)\s+([a-f0-9-]{8,})(?:\s+(\d+))?\s*$/i);
     const workflowCommand = content.match(/^\s*cancel\s+(?:workflow|work)\s+([a-f0-9-]{8,})\s*$/i);
