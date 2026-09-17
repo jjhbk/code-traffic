@@ -38,6 +38,9 @@ function request(port, pathname, { token, method = 'GET', body = null, commandId
   const crossDevicePush = await request(port, '/api/v1/mobile/devices/push-token', { token: paired.body.token, method: 'POST', commandId: 'paired-push-2', body: { deviceId: 'other-device', pushToken: 'ExponentPushToken[other]', platform: 'expo' } });
   assert.equal(crossDevicePush.status, 403);
   assert.equal((await request(port, '/api/v1/mobile/pair', { token: 'bootstrap-secret', method: 'POST', body: { code: issued.code, deviceName: 'Second phone' }, commandId: 'pair-test-command-2' })).status, 400);
+  const selfRevoked = await request(port, '/api/v1/mobile/devices/revoke', { token: second.body.token, method: 'POST', commandId: 'self-revoke-1', body: {} });
+  assert.equal(selfRevoked.status, 200); assert.ok(selfRevoked.body.device.revokedAt);
+  assert.equal((await request(port, '/api/v1/mobile/health', { token: second.body.token })).status, 401);
   pairing.revoke(paired.body.device.deviceId);
   assert.equal((await request(port, '/api/v1/mobile/health', { token: paired.body.token })).status, 401);
   await board.closeServer(); store.close(); console.log('mobile pairing tests passed');

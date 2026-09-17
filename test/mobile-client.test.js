@@ -60,5 +60,8 @@ assert.throws(() => new MobileCoreClient({ baseUrl: 'https://user:pass@assistant
   const deletedLocation = await client.deleteLocationHistory();
   assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/context/location/delete');
   assert.equal(deletedLocation.accepted, true);
+  const revoked = await client.revokeDevice();
+  assert.equal(calls.at(-1).url, 'http://127.0.0.1:4747/api/v1/mobile/devices/revoke');
+  assert.equal(revoked.accepted, true);
   console.log('mobile client tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

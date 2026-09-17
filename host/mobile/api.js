@@ -47,6 +47,7 @@ class MobileApi {
       if (method === 'GET' && resource === 'connections') return { connections: await this.getConnections() };
       if (method === 'POST' && resource === 'devices' && parts[4] === 'push-token' && parts[5] === 'revoke') return this.revokePushToken(device);
       if (method === 'POST' && resource === 'devices' && parts[4] === 'push-token') return this.registerPushToken(body, device);
+      if (method === 'POST' && resource === 'devices' && parts[4] === 'revoke') return this.revokeCurrentDevice(device);
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
       if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
@@ -141,6 +142,12 @@ class MobileApi {
   revokePushToken(device = null) {
     try { return { registration: this.store.revokeMobilePushToken(device?.deviceId || 'legacy-mobile') }; }
     catch (error) { throw this._error(400, error.message); }
+  }
+
+  revokeCurrentDevice(device = null) {
+    if (!this.pairing || !device?.deviceId) throw this._error(503, 'Mobile device management is unavailable.');
+    try { return { device: this.pairing.revoke(device.deviceId) }; }
+    catch (error) { throw this._error(404, error.message); }
   }
 
   sendMessage(body = {}) {

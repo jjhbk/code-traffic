@@ -97,6 +97,7 @@ class MobileCoreClient {
   async acknowledgeNotification(notificationId) { return this.command(`/api/v1/mobile/notifications/${encodeURIComponent(notificationId)}/ack`, {}); }
   async registerPushToken(pushToken, platform = 'expo') { return this.command('/api/v1/mobile/devices/push-token', { pushToken, platform }); }
   async revokePushToken() { return this.command('/api/v1/mobile/devices/push-token/revoke', {}); }
+  async revokeDevice() { return this.command('/api/v1/mobile/devices/revoke', {}); }
   async confirmAutonomousRun(runId, evidence) { return this.command(`/api/v1/mobile/assistant/autonomous-runs/${encodeURIComponent(runId)}/confirm`, { evidence }); }
 
   async command(path, body, commandId = id()) {
