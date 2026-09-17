@@ -31,6 +31,8 @@ class ApprovalService {
 
   cancel(requestId, reason = 'invalidated') { return this.store.cancelApproval(requestId, reason); }
 
+  getApproval(requestId) { return this.store.getApproval(requestId); }
+
   execution(attempt) { return this.store.recordExecutionAttempt(attempt); }
 
   claimExecution(attempt) { return this.store.claimExecutionAttempt(attempt); }

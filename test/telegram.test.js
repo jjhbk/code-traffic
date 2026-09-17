@@ -246,6 +246,36 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   assert.deepStrictEqual(browserExecuted, ['browser-request', 'browser-session', '42', 'telegram']);
   browserControl.stop();
 
+  const restartedMessages = [];
+  const restartedDecisions = [];
+  let restartedExecution = null;
+  const restartedApproval = {
+    requestId: 'restart-browser-request',
+    status: 'pending',
+    surfaces: ['telegram'],
+    action: { capability: 'browser.commit', sessionId: 'restart-browser-session' },
+    options: [{ optionId: 'allow', label: 'Run once' }, { optionId: 'deny', label: 'Cancel' }],
+  };
+  const restartedControl = new TelegramControl({
+    token: 'test-token', chatId: '42', listSessions: () => [], getHistory: () => ({ pendingQuestions: [] }),
+    approvalService: {
+      getApproval: (requestId) => requestId === restartedApproval.requestId ? restartedApproval : null,
+      decide: (...args) => restartedDecisions.push(args),
+    },
+    approveBrowserAction: async (...args) => { restartedExecution = args; },
+    fetchImpl: async (_url, options) => { restartedMessages.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ ok: true, result: {} }) }; },
+  });
+  restartedControl.stopped = false;
+  await restartedControl.handleUpdate({ callback_query: {
+    id: 'restarted-browser-approval',
+    data: 'sb:approval:restart-browser-request:allow',
+    message: { chat: { id: 42 } },
+  } });
+  assert.deepStrictEqual(restartedDecisions[0], ['restart-browser-request', 'allow', { principal: 'signal-box-user', surface: 'telegram' }]);
+  assert.deepStrictEqual(restartedExecution, ['restart-browser-request', 'restart-browser-session', '42', 'telegram']);
+  assert.match(restartedMessages.at(-1).text, /Browser action started/);
+  restartedControl.stop();
+
   const freshOffsets = [];
   const freshRequests = [];
   const freshControl = new TelegramControl({

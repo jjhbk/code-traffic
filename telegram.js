@@ -145,8 +145,9 @@ class TelegramControl {
   async sendReplyApproval(request) {
     if (!this.enabled || !this.configured || !request?.action) return false;
     const action = request.action;
-    const approve = this.addAction({ type: 'mail-reply-approval', requestId: request.request_id || request.requestId, optionId: 'send' });
-    const deny = this.addAction({ type: 'mail-reply-denial', requestId: request.request_id || request.requestId, optionId: 'deny' });
+    const requestId = request.request_id || request.requestId;
+    const approve = this.addAction({ type: 'mail-reply-approval', requestId, optionId: 'send' }, `sb:approval:${requestId}:send`);
+    const deny = this.addAction({ type: 'mail-reply-denial', requestId, optionId: 'deny' }, `sb:approval:${requestId}:deny`);
     await this.send(`✉️ Review Gmail reply\n\nTo: ${action.destination}\nSubject: ${action.content.subject}\n\n${action.content.body}\n\n${action.consequences}`, {
       reply_markup: { inline_keyboard: [[
         { text: 'Send reply', callback_data: approve },
@@ -159,14 +160,15 @@ class TelegramControl {
   async sendBrowserApproval(request) {
     if (!this.enabled || !this.configured || !request?.action) return false;
     const action = request.action;
-    const approve = this.addAction({ type: 'browser-approval', requestId: request.request_id || request.requestId, optionId: 'allow', sessionId: action.sessionId });
-    const deny = this.addAction({ type: 'browser-denial', requestId: request.request_id || request.requestId, optionId: 'deny' });
+    const requestId = request.request_id || request.requestId;
+    const approve = this.addAction({ type: 'browser-approval', requestId, optionId: 'allow', sessionId: action.sessionId }, `sb:approval:${requestId}:allow`);
+    const deny = this.addAction({ type: 'browser-denial', requestId, optionId: 'deny' }, `sb:approval:${requestId}:deny`);
     await this.send(`🌐 Review browser action\n\nRecipe: ${action.recipeId}\nSite: ${action.origin}\nPickup: ${action.inputs?.pickup}\nDestination: ${action.inputs?.destination}\nRide: ${action.inputs?.rideType}\nMaximum fare: ${action.inputs?.maxFare}\n\n${action.consequences}`, { reply_markup: { inline_keyboard: [[{ text: 'Run once', callback_data: approve }, { text: 'Cancel', callback_data: deny }]] } });
     return true;
   }
 
-  addAction(action) {
-    const token = `action:${crypto.randomBytes(8).toString("hex")}`;
+  addAction(action, durableToken = null) {
+    const token = durableToken || `action:${crypto.randomBytes(8).toString("hex")}`;
     this.actions.set(token, action);
     while (this.actions.size > 200) this.actions.delete(this.actions.keys().next().value);
     return token;
@@ -364,7 +366,8 @@ class TelegramControl {
       }
       return;
     }
-    const action = this.actions.get(query.data);
+    const inMemoryAction = this.actions.get(query.data);
+    const action = inMemoryAction || this.resolveDurableAction(query.data);
     if (!action) {
       await this.request('answerCallbackQuery', {
         callback_query_id: query.id,
@@ -381,7 +384,7 @@ class TelegramControl {
         await this.ensureSession(action.tile);
         const current = this.listSessions().find((item) => (item.tile || item.key) === action.tile);
         const pending = this.getHistory?.(current)?.pendingQuestions || [];
-        if (this.actions.get(query.data) !== action || !current?.owned
+        if ((inMemoryAction && this.actions.get(query.data) !== action) || !current?.owned
           || !pending.some((question) => JSON.stringify(question) === action.questionSignature)) {
           this.actions.delete(query.data);
           throw new Error('This approval has expired. Wait for the current question.');
@@ -491,6 +494,36 @@ class TelegramControl {
         show_alert: true,
       });
     }
+  }
+
+  resolveDurableAction(token) {
+    const match = /^sb:approval:([^:]+):([^:]+)$/.exec(String(token || ''));
+    if (!match || !this.approvalService?.getApproval) return null;
+    const [, requestId, optionId] = match;
+    const approval = this.approvalService.getApproval(requestId);
+    if (!approval || approval.status !== 'pending' || !approval.surfaces?.includes('telegram')) return null;
+    const option = approval.options?.find((item) => item.optionId === optionId);
+    if (!option) return null;
+    const capability = approval.action?.capability;
+    if (capability === 'gmail.send') {
+      return { type: optionId === 'send' ? 'mail-reply-approval' : 'mail-reply-denial', requestId, optionId };
+    }
+    if (String(capability || '').startsWith('browser.')) {
+      return { type: optionId === 'allow' ? 'browser-approval' : 'browser-denial', requestId, optionId, sessionId: approval.action.sessionId };
+    }
+    if (capability !== 'agent.input') return null;
+    const tile = approval.action.target;
+    const session = this.listSessions().find((item) => (item.tile || item.key) === tile);
+    const questions = this.getHistory?.(session)?.pendingQuestions || [];
+    const questionSignature = approval.action.questionSignature;
+    const question = questions.find((item) => JSON.stringify(item) === questionSignature);
+    const optionIndex = Number(String(optionId).replace(/^option-/, '')) - 1;
+    const currentOption = question?.options?.[optionIndex];
+    if (!session?.owned || !question || !currentOption) return null;
+    return {
+      type: 'answer', tile, label: currentOption.label, optionId, requestId, questionSignature,
+      keys: currentOption.keys || `${'\x1b[B'.repeat(optionIndex)}${question.multiSelect ? ' \r' : '\r'}`,
+    };
   }
 
   selectedSession() {
@@ -731,7 +764,7 @@ class TelegramControl {
             requestId: persistedApproval?.request_id || null,
             questionSignature,
             keys: option.keys || `${'\x1b[B'.repeat(optionIndex)}${question.multiSelect ? ' \r' : '\r'}`,
-          });
+          }, persistedApproval ? `sb:approval:${persistedApproval.request_id || persistedApproval.requestId}:${optionId}` : null);
           const prefix = questions.length > 1 ? `${questionIndex + 1}. ` : '';
           inlineKeyboard.push([{
             text: `${prefix}${option.label}`.slice(0, 64),
