@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MobileCoreClient } from './src/client';
 
 const CONFIG_KEY = 'signal-box.mobile.config.v1';
@@ -25,6 +25,13 @@ export default function App() {
 
   useEffect(() => { AsyncStorage.getItem(CONFIG_KEY).then((value) => { if (!value) return; const saved = JSON.parse(value); setConfig(saved); setBaseUrl(saved.baseUrl); setToken(saved.token); setClient(new MobileCoreClient({ ...saved, storage: AsyncStorage })); }); }, []);
   useEffect(() => { refresh(); }, [client]);
+  useEffect(() => {
+    if (!client) return undefined;
+    const refreshIfActive = () => { if (AppState.currentState === 'active') refresh(client); };
+    const subscription = AppState.addEventListener('change', (state) => { if (state === 'active') refresh(client); });
+    const interval = setInterval(refreshIfActive, 30_000);
+    return () => { subscription.remove(); clearInterval(interval); };
+  }, [client]);
 
   const savePairing = async () => { const url = baseUrl.trim(); const bootstrap = token.trim(); const code = pairingCode.trim(); if (!url || !bootstrap || !code) return setError('Enter the Electron core URL, bootstrap token, and one-time pairing code.'); setLoading(true); try { const result = await new MobileCoreClient({ baseUrl: url, token: bootstrap }).pairDevice(code, 'Signal Box mobile'); const saved = { baseUrl: url, token: result.token, deviceId: result.device.deviceId }; await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(saved)); setConfig(saved); setClient(new MobileCoreClient({ ...saved, storage: AsyncStorage })); setNotice('Device paired with the Electron core.'); } catch (caught) { setError(caught.message); } finally { setLoading(false); } };
   const send = async () => { if (!message.trim() || !client) return; setLoading(true); try { const result = await client.sendMessage(message.trim()); setNotice(result.queued ? 'Saved offline; it will send when the core returns.' : 'Sent to Signal Box.'); setMessage(''); await refresh(); } catch (caught) { setError(caught.message); } finally { setLoading(false); } };
