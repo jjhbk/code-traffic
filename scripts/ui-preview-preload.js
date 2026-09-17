@@ -12,6 +12,7 @@ const api = {
   getAssistantConversation: async () => messages,
   getAssistantDecisions: async () => [{ taskId: 'demo-task', type: 'digest', reason: 'due-today', evidence: [tasks[0].evidence.text] }],
   getAssistantWorkflows: async () => [],
+  getAssistantNotifications: async () => [], acknowledgeAssistantNotification: async () => ({ acknowledged: true }),
   listStandingGrants: async () => [], listAutonomousRuns: async () => [], startAvailabilityWatch: async () => ({ workflowId: 'preview-watch' }),
   getMobilePairing: async () => ({ protocolVersion: '1', pairingCode: 'PREVIEW1', pairingExpiresAt: Date.now() + 600000, hostUrl: 'http://127.0.0.1:4747', bootstrapToken: 'preview-token' }),
   sendAssistantMessage: async ({ text }) => { messages.push({ direction: 'inbound', content: text, createdAt: Date.now() }, { direction: 'outbound', content: 'The launch brief is ready for your review.', createdAt: Date.now() }); },

@@ -458,6 +458,11 @@ function wireIpc() {
     if (!workflowId || !hostStore) throw new Error('Assistant workflow storage is unavailable.');
     return new WorkflowService({ store: hostStore }).cancel(workflowId);
   });
+  ipcMain.handle('assistant:notifications', () => hostStore?.listMobileNotifications({ deviceId: 'desktop-electron', limit: 50 }) || []);
+  ipcMain.handle('assistant:ack-notification', (_event, { notificationId } = {}) => {
+    if (!hostStore || !notificationId) throw new Error('A notification is required.');
+    return hostStore.acknowledgeMobileNotification(notificationId, 'desktop-electron');
+  });
   ipcMain.handle('assistant:context', () => hostStore?.listContext() || []);
   ipcMain.handle('assistant:standing-grants', () => hostStore?.listStandingGrants({ principal: 'signal-box-user' }) || []);
   ipcMain.handle('assistant:create-standing-grant', (_event, { capability, surface = 'desktop', constraints = {}, expiresAt, maxUses = null, cooldownMs = 0 } = {}) => {

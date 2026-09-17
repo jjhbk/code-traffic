@@ -528,9 +528,11 @@ document.getElementById('activity-refresh').addEventListener('click', loadActivi
 async function loadAssistantConversation() {
   const decisionsTarget = document.getElementById('assistant-decisions');
   const workflowsTarget = document.getElementById('assistant-workflows');
+  const notificationsTarget = document.getElementById('assistant-notifications');
   const target = document.getElementById('assistant-history');
   decisionsTarget.replaceChildren();
   workflowsTarget.replaceChildren();
+  notificationsTarget.replaceChildren();
   target.replaceChildren();
   try {
     const status = await window.signalBox.getAssistantStatus();
@@ -540,8 +542,8 @@ async function loadAssistantConversation() {
     const health = document.getElementById('assistant-health');
     health.textContent = status.paused ? 'Assistant paused' : status.running || status.background?.running ? 'Assistant active' : 'Assistant offline';
     health.dataset.state = status.paused ? 'paused' : status.running || status.background?.running ? 'active' : 'unavailable';
-    const [messages, decisions, workflows, assistantTasks] = await Promise.all([
-      window.signalBox.getAssistantConversation(), window.signalBox.getAssistantDecisions(), window.signalBox.getAssistantWorkflows(), window.signalBox.listTasks(),
+    const [messages, decisions, workflows, assistantTasks, notifications] = await Promise.all([
+      window.signalBox.getAssistantConversation(), window.signalBox.getAssistantDecisions(), window.signalBox.getAssistantWorkflows(), window.signalBox.listTasks(), window.signalBox.getAssistantNotifications(),
     ]);
     const taskNames = new Map(assistantTasks.map((task) => [task.taskId, task.summary]));
     const actionable = decisions.filter((decision) => decision.type !== 'wait');
@@ -569,6 +571,18 @@ async function loadAssistantConversation() {
       }
     }
     if (!workflows.length) { const heading = document.createElement('h3'); heading.textContent = 'Following up'; const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'Nothing in motion yet. Follow-ups you start will appear here.'; workflowsTarget.append(heading, empty); }
+    const pendingNotifications = notifications.filter((notification) => !notification.acknowledged);
+    const notificationHeading = document.createElement('h3'); notificationHeading.textContent = pendingNotifications.length ? `${pendingNotifications.length} new signal${pendingNotifications.length === 1 ? '' : 's'}` : 'No new signals'; notificationsTarget.append(notificationHeading);
+    if (!pendingNotifications.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'The assistant has nothing new to hand back right now.'; notificationsTarget.append(empty); }
+    for (const notification of pendingNotifications) {
+      const card = document.createElement('article'); card.className = 'assistant-state';
+      const item = notification.items?.[0] || {};
+      const title = document.createElement('strong'); title.textContent = item.summary || 'Signal Box update';
+      const detail = document.createElement('span'); detail.textContent = item.reason || notification.notificationClass.replaceAll('-', ' ');
+      const seen = document.createElement('button'); seen.type = 'button'; seen.textContent = 'Mark seen';
+      seen.addEventListener('click', async () => { seen.disabled = true; try { await window.signalBox.acknowledgeAssistantNotification({ notificationId: notification.notificationId }); await loadAssistantConversation(); } catch (caught) { seen.disabled = false; showError(caught.message || 'Could not acknowledge signal.'); } });
+      card.append(title, detail, seen); notificationsTarget.append(card);
+    }
     await loadAssistantPermissions();
     for (const message of messages) {
       const card = document.createElement('article'); card.className = `activity-card assistant-${message.direction}`;
@@ -610,6 +624,7 @@ async function loadAssistantPermissions() {
 }
 document.getElementById('assistant-toggle').addEventListener('click', () => toggleDataView('assistant-view', loadAssistantConversation));
 document.getElementById('assistant-refresh').addEventListener('click', loadAssistantConversation);
+document.getElementById('notifications-refresh')?.addEventListener('click', loadAssistantConversation);
 document.getElementById('permissions-refresh')?.addEventListener('click', loadAssistantPermissions);
 document.getElementById('mobile-pairing-generate')?.addEventListener('click', async () => {
   const button = document.getElementById('mobile-pairing-generate'); const output = document.getElementById('mobile-pairing-output');

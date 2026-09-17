@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('signalBox', {
   setAssistantPaused: (payload) => ipcRenderer.invoke('assistant:pause', payload),
   getAssistantWorkflows: () => ipcRenderer.invoke('assistant:workflows'),
   cancelAssistantWorkflow: (payload) => ipcRenderer.invoke('assistant:cancel-workflow', payload),
+  getAssistantNotifications: () => ipcRenderer.invoke('assistant:notifications'),
+  acknowledgeAssistantNotification: (payload) => ipcRenderer.invoke('assistant:ack-notification', payload),
   getAssistantContext: () => ipcRenderer.invoke('assistant:context'),
   listStandingGrants: () => ipcRenderer.invoke('assistant:standing-grants'),
   createStandingGrant: (payload) => ipcRenderer.invoke('assistant:create-standing-grant', payload),
