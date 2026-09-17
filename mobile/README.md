@@ -2,7 +2,9 @@
 
 This is a separate React Native (Expo) interaction surface for the Electron assistant core.
 
-The app owns presentation, explicit location and one-shot battery consent, memory/context controls, connector visibility, and an offline command outbox. It does not open SQLite, run inference, hold provider credentials, or execute browser actions. The Electron core remains authoritative for tasks, memory, permissions, workflows, planning, notifications, and receipts.
+The app owns presentation, explicit foreground or opt-in background location and one-shot battery consent, memory/context controls, connector visibility, and an offline command outbox. It does not open SQLite, run inference, hold provider credentials, or execute browser actions. The Electron core remains authoritative for tasks, memory, permissions, workflows, planning, notifications, and receipts.
+
+Background location is disabled by default. After the user grants the operating-system permissions and enables it from Controls, the app samples balanced location periodically and sends it through the same durable outbox used by other mobile context. The user can disable it from Controls at any time; the Electron core only receives these observations with the `background-location` consent scope.
 
 ## Run
 

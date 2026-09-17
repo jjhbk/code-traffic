@@ -15,6 +15,7 @@
     "expo-battery": "~9.1.0",
     "expo-location": "~18.1.0",
     "expo-notifications": "~0.31.4",
+    "expo-task-manager": "~13.1.5",
     "expo-system-ui": "~5.0.11",
     "react": "19.0.0",
     "react-native": "0.79.6"

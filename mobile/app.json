@@ -3,7 +3,7 @@
     "name": "Signal Box",
     "slug": "signal-box-mobile",
     "icon": "./assets/icon.png",
-    "plugins": ["expo-notifications"],
+    "plugins": ["expo-notifications", ["expo-location", { "locationAlwaysAndWhenInUsePermission": "Signal Box uses your location in the background only when you enable location-aware assistant context." }]],
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -12,13 +12,15 @@
       "bundleIdentifier": "com.signalbox.assistant",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Signal Box uses your location only when you enable a location-aware assistant context."
+        "NSLocationWhenInUseUsageDescription": "Signal Box uses your location only when you enable a location-aware assistant context.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Signal Box uses your location in the background only when you enable location-aware assistant context.",
+        "UIBackgroundModes": ["location"]
       }
     },
     "android": {
       "package": "com.signalbox.assistant",
       "edgeToEdgeEnabled": true,
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"]
     }
   }
 }
