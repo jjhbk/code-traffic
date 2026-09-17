@@ -61,6 +61,15 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(place.status, 200); assert.equal(place.body.place.recordType, 'place');
   const notifications = await request(port, '/api/v1/mobile/notifications');
   assert.equal(notifications.status, 200); assert.ok(Array.isArray(notifications.body.notifications));
+  store.enqueueNotification({ notificationId: 'mobile-notification-1', dateKey: 'mobile-1', notificationClass: 'location', items: [{ summary: 'Check pickup', reason: 'Arrived home' }] });
+  const newNotifications = await request(port, '/api/v1/mobile/notifications?after=0');
+  assert.equal(newNotifications.body.notifications.some((item) => item.notificationId === 'mobile-notification-1' && !item.acknowledged), true);
+  const acknowledged = await request(port, '/api/v1/mobile/notifications/mobile-notification-1/ack', { method: 'POST', body: {} });
+  assert.equal(acknowledged.status, 200); assert.equal(acknowledged.body.acknowledged, true);
+  const seenNotifications = await request(port, '/api/v1/mobile/notifications?after=0');
+  assert.equal(seenNotifications.body.notifications.find((item) => item.notificationId === 'mobile-notification-1').acknowledged, true);
+  const cursorNotifications = await request(port, `/api/v1/mobile/notifications?after=${newNotifications.body.nextCursor}`);
+  assert.equal(cursorNotifications.body.notifications.some((item) => item.notificationId === 'mobile-notification-1'), false);
   const approval = approvals.request({ capability: 'browser.read', recipeId: 'fixture.read.v1', options: [{ optionId: 'allow', label: 'Allow once' }, { optionId: 'deny', label: 'Deny' }] }, { principal: 'signal-box-user', surfaces: ['mobile'], expiresAt: Date.now() + 60_000 });
   const pendingApprovals = await request(port, '/api/v1/mobile/approvals');
   assert.equal(pendingApprovals.body.approvals.some((item) => item.request_id === approval.request_id), true);

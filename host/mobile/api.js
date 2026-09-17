@@ -21,14 +21,15 @@ class MobileApi {
       const resource = parts[3] || '';
       if (method === 'POST' && resource === 'pair') return this.pair(body);
       if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
-      if (method === 'GET' && resource === 'today') return this.today();
-      if (method === 'GET' && resource === 'notifications') return { notifications: this.store.listPendingNotifications({ limit: 50 }) };
+      if (method === 'GET' && resource === 'today') return this.today(device, query);
+      if (method === 'GET' && resource === 'notifications') return this.notifications(device, query);
       if (method === 'GET' && resource === 'approvals') return { approvals: this.store.listPendingApprovals({ principal: 'signal-box-user', surface: 'mobile', now: this.clock() }) };
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
       if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
       if (method === 'POST' && resource === 'workflows' && parts[4] && parts[5] === 'cancel') return { workflow: this.store.updateWorkflow(parts[4], { state: 'cancelled', details: { reason: 'mobile-user-cancelled' } }) };
       if (method === 'POST' && resource === 'approvals' && parts[4] && parts[5] === 'decide') return this.decideApproval(parts[4], body);
+      if (method === 'POST' && resource === 'notifications' && parts[4] && parts[5] === 'ack') return this.acknowledgeNotification(parts[4], device);
       if (method === 'GET' && resource === 'context') return { context: this.store.listContext() };
       if (method === 'GET' && resource === 'permissions') return { permissions: this.store.listStandingGrants({ principal: 'signal-box-user' }) };
       if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
@@ -69,9 +70,21 @@ class MobileApi {
 
   authenticate(token) { return this.pairing?.authenticate(token) || null; }
 
-  today() {
+  today(device = null, query = {}) {
     const tasks = this.store.listTasks();
-    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions: this.proactivity.evaluate(tasks), workflows: this.store.listWorkflows({ activeOnly: true }), notifications: this.store.listPendingNotifications({ limit: 20 }) };
+    return { protocolVersion: PROTOCOL_VERSION, generatedAt: this.clock(), tasks, decisions: this.proactivity.evaluate(tasks), workflows: this.store.listWorkflows({ activeOnly: true }), notifications: this.notifications(device, query).notifications };
+  }
+
+  notifications(device = null, query = {}) {
+    const deviceId = device?.deviceId || 'legacy-mobile';
+    const notifications = this.store.listMobileNotifications({ deviceId, afterCreatedAt: Number(query.after || 0), limit: Number(query.limit || 50) });
+    const nextCursor = notifications.length ? notifications[notifications.length - 1].createdAt : Number(query.after || 0);
+    return { notifications, nextCursor };
+  }
+
+  acknowledgeNotification(notificationId, device = null) {
+    try { return this.store.acknowledgeMobileNotification(notificationId, device?.deviceId || 'legacy-mobile'); }
+    catch (error) { throw this._error(error.message === 'Notification not found.' ? 404 : 400, error.message); }
   }
 
   sendMessage(body = {}) {

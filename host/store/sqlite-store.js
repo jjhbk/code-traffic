@@ -329,6 +329,12 @@ const MIGRATIONS = [
     event_id TEXT NOT NULL,
     triggered_at INTEGER NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS mobile_notification_receipts (
+    notification_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    acknowledged_at INTEGER NOT NULL,
+    PRIMARY KEY(notification_id, device_id)
+  );`,
 ];
 
 class SqliteStore {
@@ -451,6 +457,26 @@ class SqliteStore {
       ? this.db.prepare("SELECT notification_id AS notificationId, date_key AS dateKey, notification_class AS notificationClass, payload_json AS payloadJson, status, created_at AS createdAt FROM notification_outbox WHERE notification_class = ? AND status = 'pending' ORDER BY created_at DESC LIMIT ?").all(notificationClass, safeLimit)
       : this.db.prepare("SELECT notification_id AS notificationId, date_key AS dateKey, notification_class AS notificationClass, payload_json AS payloadJson, status, created_at AS createdAt FROM notification_outbox WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?").all(safeLimit);
     return row.map((item) => ({ ...item, items: JSON.parse(item.payloadJson) }));
+  }
+
+  listMobileNotifications({ deviceId, afterCreatedAt = 0, limit = 50 } = {}) {
+    if (!deviceId) throw new Error('A mobile device is required.');
+    const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+    return this.db.prepare(`SELECT n.notification_id AS notificationId, n.date_key AS dateKey, n.notification_class AS notificationClass,
+      n.payload_json AS payloadJson, n.status, n.created_at AS createdAt,
+      CASE WHEN r.notification_id IS NULL THEN 0 ELSE 1 END AS acknowledged
+      FROM notification_outbox n LEFT JOIN mobile_notification_receipts r ON r.notification_id = n.notification_id AND r.device_id = ?
+      WHERE n.created_at > ? ORDER BY n.created_at, n.notification_id LIMIT ?`).all(deviceId, Number(afterCreatedAt) || 0, safeLimit)
+      .map((item) => ({ ...item, acknowledged: Boolean(item.acknowledged), items: JSON.parse(item.payloadJson) }));
+  }
+
+  acknowledgeMobileNotification(notificationId, deviceId) {
+    if (!notificationId || !deviceId) throw new Error('A notification and mobile device are required.');
+    if (!this.db.prepare('SELECT notification_id FROM notification_outbox WHERE notification_id = ?').get(notificationId)) throw new Error('Notification not found.');
+    this.db.prepare('INSERT INTO mobile_notification_receipts(notification_id, device_id, acknowledged_at) VALUES (?, ?, ?) ON CONFLICT(notification_id, device_id) DO UPDATE SET acknowledged_at = excluded.acknowledged_at')
+      .run(notificationId, deviceId, this.clock());
+    this.audit('mobile-notification-acknowledged', null, null, { notificationId, deviceId });
+    return { notificationId, deviceId, acknowledged: true };
   }
 
   enqueueJob({ jobId = crypto.randomUUID(), kind, payload = {}, runAt = this.clock(), maxAttempts = 5, dedupeKey = null } = {}) {
@@ -1091,7 +1117,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,

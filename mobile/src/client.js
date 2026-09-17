@@ -41,7 +41,7 @@ class MobileCoreClient {
   context() { return this.request('/api/v1/mobile/context'); }
   permissions() { return this.request('/api/v1/mobile/permissions'); }
   approvals() { return this.request('/api/v1/mobile/approvals'); }
-  notifications() { return this.request('/api/v1/mobile/notifications'); }
+  notifications(after = 0) { return this.request(`/api/v1/mobile/notifications?after=${encodeURIComponent(after)}`); }
   pairDevice(code, deviceName = 'Signal Box mobile') { return this.request('/api/v1/mobile/pair', { method: 'POST', body: { code, deviceName }, idempotencyKey: `pair:${code}` }); }
 
   async sendMessage(text, { conversationId = 'mobile:default', externalId = id() } = {}) {
@@ -56,6 +56,7 @@ class MobileCoreClient {
   async sendLocation(body) { return this.command('/api/v1/mobile/context/location', body); }
   async savePlace(body) { return this.command('/api/v1/mobile/context/place', body); }
   async sendSensor(body) { return this.command('/api/v1/mobile/context/sensor', body); }
+  async acknowledgeNotification(notificationId) { return this.command(`/api/v1/mobile/notifications/${encodeURIComponent(notificationId)}/ack`, {}); }
 
   async command(path, body, commandId = id()) {
     try { return await this.request(path, { method: 'POST', body, idempotencyKey: commandId }); }
