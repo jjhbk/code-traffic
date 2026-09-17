@@ -29,8 +29,8 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   let assistantPaused = false;
   const mobileApi = new MobileApi({ store, conversation, proactivity, approvals, context, onPause: async ({ paused }) => { assistantPaused = paused; return { paused }; }, onReconcile: ({ runId, evidence }) => store.updateAutonomousRun(runId, 'confirmed', { details: { reconciliation: { source: 'mobile-test', evidence } }, receipt: { status: 'confirmed', verification: 'user-reconciled', evidence } }), getStatus: () => ({ running: true, paused: assistantPaused, host: 'fixture' }) });
   const board = new Board({ authToken: 'hook-secret', mobileAuthToken: 'mobile-secret', mobileApi });
-  const port = 4950 + Math.floor(Math.random() * 50);
-  await board.listen(port);
+  const server = await board.listen(0);
+  const port = server.address().port;
 
   assert.equal((await request(port, '/api/v1/mobile/health', { token: 'wrong' })).status, 401);
   const health = await request(port, '/api/v1/mobile/health');

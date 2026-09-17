@@ -136,6 +136,26 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   assert.equal(calendarCalls[1].options.method, 'PUT');
   assert.match(calendarCalls[1].options.body, /New title/);
   await assert.rejects(() => editableCalendar.updateEvent('event-1', { summary: 'Conflict' }, { etag: 'stale' }), (error) => error.code === 'PRECONDITION_FAILED');
+  const calendarSandboxRequests = [];
+  const calendarSandbox = http.createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    calendarSandboxRequests.push({ method: request.method, url: request.url, ifMatch: request.headers['if-match'], body });
+    response.setHeader('Content-Type', 'application/json');
+    if (request.method === 'GET') {
+      response.end(JSON.stringify({ id: 'event-sandbox', etag: 'sandbox-etag', summary: 'Before', start: { dateTime: '2026-09-18T15:00:00Z' }, end: { dateTime: '2026-09-18T16:00:00Z' } }));
+      return;
+    }
+    response.end(JSON.stringify({ id: 'event-sandbox', etag: 'sandbox-etag-2', summary: 'After' }));
+  });
+  await new Promise((resolve) => calendarSandbox.listen(0, '127.0.0.1', resolve));
+  const calendarSandboxAddress = calendarSandbox.address();
+  const sandboxCalendarProvider = new GoogleCalendarProvider({ accessToken: 'calendar-token', apiBase: `http://127.0.0.1:${calendarSandboxAddress.port}/calendar/v3/calendars/primary` });
+  const sandboxEvent = await sandboxCalendarProvider.updateEvent('event-sandbox', { summary: 'After' }, { etag: 'sandbox-etag' });
+  assert.equal(sandboxEvent.summary, 'After');
+  assert.deepEqual(calendarSandboxRequests.map((item) => [item.method, item.url]), [['GET', '/calendar/v3/calendars/primary/events/event-sandbox'], ['PUT', '/calendar/v3/calendars/primary/events/event-sandbox']]);
+  assert.equal(calendarSandboxRequests[1].ifMatch, 'sandbox-etag', 'calendar writes carry the provider etag precondition');
+  await new Promise((resolve) => calendarSandbox.close(resolve));
   let driveCalls = 0;
   let driveFileCalls = 0;
   const driveCallKinds = [];
