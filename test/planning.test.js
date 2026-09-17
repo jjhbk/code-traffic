@@ -4,6 +4,7 @@ const { ApprovalService } = require('../host/approvals/service');
 const { WorkflowService } = require('../host/workflows/service');
 const { BrowserActionService } = require('../host/browser/service');
 const { PlanningService } = require('../host/planning/service');
+const { ActionRegistry } = require('../host/actions/registry');
 
 (async () => {
   const store = new SqliteStore();
@@ -18,6 +19,12 @@ const { PlanningService } = require('../host/planning/service');
   assert.equal(result.payload.outcome, 'confirmed');
   assert.equal(result.steps.find((step) => step.stepId === 'execute').state, 'completed');
   await assert.rejects(() => planner.executeDecision({ decision: { type: 'execute_browser', requiresApproval: false }, recipe, grantId: grant.grantId, executor: { run: async () => ({ status: 'confirmed' }) } }), /usage limit/);
+  const registry = new ActionRegistry({ recipes: [recipe] });
+  const registeredPlanner = new PlanningService({ workflows, browserActions: browser, registry });
+  const secondGrant = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: { recipeId: recipe.id }, expiresAt: Date.now() + 60_000, maxUses: 1 });
+  const registered = await registeredPlanner.executeDecision({ decision: { type: 'execute_browser', requiresApproval: false }, recipe, grantId: secondGrant.grantId, executor: { run: async () => ({ status: 'confirmed' }) } });
+  assert.equal(registered.state, 'completed');
+  await assert.rejects(() => registeredPlanner.executeDecision({ decision: { type: 'execute_browser', requiresApproval: false }, recipe: { ...recipe, digest: 'tampered' }, grantId: secondGrant.grantId, executor: { run: async () => ({ status: 'confirmed' }) } }), /changed/);
   assert.equal(store.listWorkflows({ activeOnly: true }).length, 1);
   store.close();
   console.log('planning tests passed');

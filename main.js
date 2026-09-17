@@ -47,6 +47,7 @@ const { OllamaClient } = require('./host/models/clients');
 const { IsolatedFrontierClient } = require('./host/models/frontier-gateway');
 const { BrowserBridge } = require('./host/browser/bridge');
 const { BrowserActionService } = require('./host/browser/service');
+const { ActionRegistry } = require('./host/actions/registry');
 const { BrowserRecipeExecutor } = require('./host/browser/executor');
 const { BridgeBrowserAdapter } = require('./host/browser/bridge-adapter');
 const { uberCabBooking, uberCabQuote } = require('./host/browser/recipes');
@@ -110,6 +111,7 @@ let proactivityService;
 let conversationService;
 let followUpWorkflow;
 let planningService;
+const actionRegistry = new ActionRegistry({ recipes: [uberCabBooking, uberCabQuote] });
 let availabilityWorkflow;
 let meetingPrepWorkflow;
 let mobileConversationService;
@@ -480,9 +482,7 @@ function wireIpc() {
   ipcMain.handle('assistant:autonomous-runs', (_event, { grantId = null, limit = 100 } = {}) => hostStore?.listAutonomousRuns({ grantId, limit }) || []);
   ipcMain.handle('assistant:execute-standing-browser', async (_event, { recipeId, inputs = {}, grantId, sessionId = null, taskId = null } = {}) => {
     if (!hostStore || !approvalService || !planningService || !browserBridge) throw new Error('Automatic browser execution is unavailable.');
-    const recipes = { [uberCabBooking.id]: uberCabBooking, [uberCabQuote.id]: uberCabQuote };
-    const recipe = recipes[recipeId];
-    if (!recipe) throw new Error('This browser recipe is not registered for automatic execution.');
+    const recipe = actionRegistry.browserRecipe(recipeId);
     const activeSessionId = sessionId || appSettings.browserSessionId;
     if (!activeSessionId || !browserBridge.status(activeSessionId).connected) throw new Error('The required browser session is not connected.');
     const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId: activeSessionId, origin: recipe.origin });
@@ -1190,7 +1190,7 @@ async function start() {
   if (hostStore && approvalService) {
     const workflows = new WorkflowService({ store: hostStore });
     followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows });
-    planningService = new PlanningService({ workflows, browserActions: new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null }) });
+    planningService = new PlanningService({ workflows, browserActions: new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null }), registry: actionRegistry });
     availabilityWorkflow = new AvailabilityWorkflow({ store: hostStore, workflows });
     meetingPrepWorkflow = new MeetingPrepWorkflow({ store: hostStore, workflows });
   }
