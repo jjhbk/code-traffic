@@ -1527,7 +1527,7 @@ async function executeAutomaticBrowserDecisions(tasks, decisions) {
       const adapter = new BridgeBrowserAdapter({ bridge: browserBridge, sessionId, origin: recipe.origin });
       const executor = new BrowserRecipeExecutor({ browser: adapter });
       const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor });
-      const workflow = await planningService.executeDecision({ decision, recipe, inputs: decision.inputs || {}, grantId: decision.grantId, taskId: task.taskId, executor });
+      const workflow = await planningService.executeDecision({ decision, recipe, inputs: decision.inputs || {}, grantId: decision.grantId, taskId: task.taskId, taskVersion: decision.taskVersion ?? task.updatedAt ?? null, executor });
       executed.push({ taskId: task.taskId, workflowId: workflow.workflowId });
     } catch (error) {
       console.error(`[assistant] automatic browser action failed for ${task.taskId}: ${error.message}`);

@@ -38,10 +38,14 @@ class BrowserActionService {
     }
   }
 
-  async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', taskId = null, executor = this.executor } = {}) {
+  async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', taskId = null, taskVersion = null, executor = this.executor } = {}) {
     if (!grantId || !executor) throw new Error('A standing grant and browser executor are required.');
     const checked = validateRecipe(recipe);
-    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects, taskId };
+    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects, taskId, taskVersion };
+    if (taskId && taskVersion != null) {
+      const currentTask = this.store.listTasks({ includeDismissed: true }).find((task) => task.taskId === taskId);
+      if (!currentTask || currentTask.status !== 'active' || Number(currentTask.updatedAt) !== Number(taskVersion)) throw new Error('This browser action is stale because the task changed.');
+    }
     this.approvals.authorizeStanding(action, { grantId, principal, surface });
     const actionDigest = digest(action);
     const run = this.store.createAutonomousRun({ grantId, action, actionDigest, details: { capability: action.capability, recipeId: action.recipeId, surface } });
