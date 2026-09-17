@@ -58,6 +58,7 @@ class MobileApi {
       if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
       if (method === 'POST' && resource === 'permissions') return { permission: this.createPermission(body) };
       if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'status') return { task: this.updateTask(parts[4], body) };
+      if (method === 'POST' && resource === 'tasks' && parts[4] && parts[5] === 'context-trigger') return { task: this.setTaskContextTrigger(parts[4], body) };
       if (method === 'POST' && resource === 'context' && parts[4] === 'location') return this.ingestLocation(body, device);
       if (method === 'POST' && resource === 'context' && parts[4] === 'sensor') return this.ingestSensor(body, device);
       if (method === 'POST' && resource === 'context' && parts[4] === 'place') return this.savePlace(body);
@@ -178,6 +179,11 @@ class MobileApi {
       if (body.snoozeUntilAt !== undefined) return this.store.snoozeTask(taskId, Number(body.snoozeUntilAt));
       throw new Error('A task status or snoozeUntilAt is required.');
     } catch (error) { throw this._error(400, error.message); }
+  }
+
+  setTaskContextTrigger(taskId, body = {}) {
+    try { return this.store.setTaskContextTrigger(taskId, body); }
+    catch (error) { throw this._error(400, error.message); }
   }
 
   cancelWorkflow(workflowId) {

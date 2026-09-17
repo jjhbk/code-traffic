@@ -372,6 +372,10 @@ function wireIpc() {
     if (!hostStore) throw new Error('Task storage is unavailable.');
     return hostStore.snoozeTask(taskId, untilAt);
   });
+  ipcMain.handle('tasks:set-context-trigger', (_event, { taskId, placeKey, cooldownMs } = {}) => {
+    if (!hostStore) throw new Error('Task storage is unavailable.');
+    return hostStore.setTaskContextTrigger(taskId, { placeKey, cooldownMs });
+  });
   ipcMain.handle('tasks:suppress-counterparty', (_event, { counterparty, untilAt = null } = {}) => {
     if (!hostStore) throw new Error('Task storage is unavailable.');
     hostStore.setSuppression('counterparty', counterparty, untilAt, 'user');

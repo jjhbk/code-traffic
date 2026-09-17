@@ -79,6 +79,10 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(battery.status, 200); assert.equal(battery.body.sensorContext.context.recordKey, 'mobile.sensor.battery');
   const place = await request(port, '/api/v1/mobile/context/place', { method: 'POST', body: { placeKey: 'home', label: 'Home', latitude: 1, longitude: 2, radiusMeters: 150, consent: true } });
   assert.equal(place.status, 200); assert.equal(place.body.place.recordType, 'place');
+  const triggerTask = store.saveTaskCandidate({ candidateId: 'mobile-trigger-task', observationId: 'mobile-trigger-observation', summary: 'Pick up the return', evidence: { start: 0, end: 1, text: 'Pick up the return' }, extractorVersion: 'test' });
+  const trigger = await request(port, `/api/v1/mobile/tasks/${triggerTask.taskId}/context-trigger`, { method: 'POST', body: { placeKey: 'home', cooldownMs: 60_000 } });
+  assert.equal(trigger.status, 200); assert.equal(trigger.body.task.contextTrigger.placeKey, 'home');
+  assert.equal(store.listTasks({ includeDismissed: true }).find((task) => task.taskId === triggerTask.taskId).contextTrigger.type, 'arrival');
   store.upsertContext({ recordType: 'preference', recordKey: 'response-style', value: 'concise', source: { channel: 'test' }, confidence: 'high', confirmed: true });
   const contextSnapshot = await request(port, '/api/v1/mobile/context');
   assert.equal(contextSnapshot.body.context.some((record) => record.recordKey === 'response-style'), true);

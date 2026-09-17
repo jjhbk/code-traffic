@@ -1481,6 +1481,16 @@ class SqliteStore {
     });
   }
 
+  setTaskContextTrigger(taskId, { placeKey, cooldownMs = 24 * 60 * 60 * 1000 } = {}) {
+    const key = String(placeKey || '').trim();
+    const cooldown = Number(cooldownMs);
+    if (!/^[A-Za-z0-9:_-]{1,80}$/.test(key) || !Number.isFinite(cooldown) || cooldown < 60_000 || cooldown > 365 * 24 * 60 * 60 * 1000) throw new Error('A task arrival trigger requires a valid place and cooldown.');
+    if (!this.getContext('place', key)) throw new Error('Save that place before attaching an arrival reminder.');
+    const task = this.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
+    if (!task || ['done', 'dismissed'].includes(task.status)) throw new Error('Only an active task can receive an arrival reminder.');
+    return this.correctTask(taskId, { contextTrigger: { type: 'arrival', placeKey: key, cooldownMs: cooldown } });
+  }
+
   reserveDigest({ dateKey, budgetDateKey = dateKey, items, cap, notificationClass = 'digest' }) {
     if (!dateKey || !Array.isArray(items) || !Number.isInteger(cap) || cap < 1) throw new Error('Invalid digest reservation.');
     const now = this.clock();

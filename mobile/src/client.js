@@ -84,6 +84,7 @@ class MobileCoreClient {
   }
 
   async updateTask(taskId, body) { return this.command(`/api/v1/mobile/tasks/${encodeURIComponent(taskId)}/status`, body); }
+  async setTaskContextTrigger(taskId, body) { return this.command(`/api/v1/mobile/tasks/${encodeURIComponent(taskId)}/context-trigger`, body); }
   async cancelWorkflow(workflowId) { return this.command(`/api/v1/mobile/workflows/${encodeURIComponent(workflowId)}/cancel`, {}); }
   async createPermission(body) { return this.command('/api/v1/mobile/permissions', body); }
   async revokePermission(grantId) { return this.command(`/api/v1/mobile/permissions/${encodeURIComponent(grantId)}/revoke`, {}); }

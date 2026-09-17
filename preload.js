@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('signalBox', {
   getActivity: () => ipcRenderer.invoke('activity:list'),
   updateTask: (payload) => ipcRenderer.invoke('tasks:update', payload),
   snoozeTask: (payload) => ipcRenderer.invoke('tasks:snooze', payload),
+  setTaskContextTrigger: (payload) => ipcRenderer.invoke('tasks:set-context-trigger', payload),
   suppressCounterparty: (payload) => ipcRenderer.invoke('tasks:suppress-counterparty', payload),
   listSuppressions: () => ipcRenderer.invoke('tasks:list-suppressions'),
   removeSuppression: (payload) => ipcRenderer.invoke('tasks:remove-suppression', payload),
