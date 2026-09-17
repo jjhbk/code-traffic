@@ -18,6 +18,12 @@ class ApprovalService {
 
   createStandingGrant(actionProposal, { principal, surface = 'desktop', constraints = {}, expiresAt, maxUses = null, cooldownMs = 0 } = {}) {
     const decisionPolicy = this.policy.evaluate({ ...actionProposal, autonomous: false }, { surfaces: [surface] });
+    // Standing grants are consumed by the autonomous browser runner. Provider
+    // writes still require an explicit, one-time approval until they have a
+    // durable workflow, postcondition, and reconciliation path of their own.
+    if (!decisionPolicy.capability.startsWith('browser.')) {
+      throw new Error('Standing permissions are currently available only for browser actions.');
+    }
     return this.store.createStandingGrant({ principal, capability: decisionPolicy.capability, surface, constraints, expiresAt, maxUses, cooldownMs, policyVersion: this.policyVersion });
   }
 

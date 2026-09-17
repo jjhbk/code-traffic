@@ -20,6 +20,11 @@ const { BrowserActionService } = require('../host/browser/service');
     expiresAt: Date.now() + 60_000,
     maxUses: 1,
   });
+  assert.throws(() => approvals.createStandingGrant({ capability: 'gmail.send' }, {
+    principal: 'signal-box-user',
+    surface: 'desktop',
+    expiresAt: Date.now() + 60_000,
+  }), /only for browser actions/);
   const result = await service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId });
   assert.equal(result.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(result.runId).status, 'confirmed');
