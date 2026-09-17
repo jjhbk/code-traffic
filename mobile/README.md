@@ -34,3 +34,5 @@ npx expo export --platform android
 The export verifies that the standalone React Native surface bundles independently of the Electron application. A successful export is not a substitute for installing on a physical Android/iOS device and validating pairing, trusted TLS, background-location permissions, push delivery, and reconnect behavior.
 
 Native release profiles are defined in `eas.json`: use `npx eas build --profile development`, `preview`, or `production` after configuring an Expo/EAS project and push credentials. The repository intentionally does not contain account-specific project IDs or signing secrets.
+
+When an EAS project is linked, its project ID is read from the Expo runtime configuration and supplied to push-token registration; without a linked project, push enablement remains unavailable until the build is configured.
