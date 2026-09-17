@@ -1427,6 +1427,7 @@ async function runScheduledDigest() {
   await prepareProactiveFollowUps(tasks, decisions);
   const decisionTypes = new Map(decisions.map((decision) => [decision.taskId, decision.type]));
   const actionableTasks = tasks.filter((task) => decisionTypes.get(task.taskId) !== 'wait');
+  if (!digestScheduler.isScheduledDue()) return null;
   let modelRanking = null;
   try { modelRanking = await modelRouter?.rank(actionableTasks); } catch (error) { console.error(`[models] ranking unavailable; using deterministic ranking: ${error.message}`); }
   const digest = digestScheduler.prepareScheduled(actionableTasks, modelRanking);

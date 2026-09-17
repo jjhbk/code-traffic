@@ -21,7 +21,9 @@ assert.equal(scheduler.prepare([{ taskId: 'suppressed', summary: 'Suppressed', s
 const scheduledStore = new SqliteStore();
 const scheduled = new DigestScheduler({ store: scheduledStore, timeZone: 'America/New_York', digestAt: '08:30', cadenceMinutes: 0, clock: () => Date.parse('2026-09-16T13:00:00Z') });
 assert.equal(scheduled.isDue(), true);
+assert.equal(scheduled.isScheduledDue(), true);
 assert.equal(scheduled.prepareScheduled([{ taskId: 'scheduled', summary: 'Scheduled', status: 'active', dueDate: 'today', owner: 'self' }]).items[0].taskId, 'scheduled');
+assert.equal(scheduled.isScheduledDue(), false);
 assert.equal(scheduled.prepareScheduled([{ taskId: 'scheduled-2', summary: 'Second', status: 'active', owner: 'self' }]), null, 'scheduled digest is reserved once per day');
 scheduledStore.close();
 const intervalStore = new SqliteStore();

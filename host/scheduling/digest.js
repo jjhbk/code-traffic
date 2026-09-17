@@ -62,16 +62,24 @@ class DigestScheduler {
 
   prepareScheduled(tasks = [], modelRanking = null) {
     const now = this.clock();
+    if (!this.isScheduledDue(now)) return null;
     const day = dateKey(now, this.timeZone);
-    if (this.isQuiet(now)) return null;
+    if (this.cadenceMinutes > 0) {
+      const slot = Math.floor(now / (this.cadenceMinutes * 60 * 1000));
+      return this.prepare(tasks, modelRanking, { deliveryKey: `${day}:${slot}`, budgetKey: day });
+    }
+    return this.prepare(tasks, modelRanking, { deliveryKey: day, budgetKey: day });
+  }
+
+  isScheduledDue(now = this.clock()) {
+    const day = dateKey(now, this.timeZone);
+    if (this.isQuiet(now)) return false;
     if (this.cadenceMinutes > 0) {
       const slot = Math.floor(now / (this.cadenceMinutes * 60 * 1000));
       const deliveryKey = `${day}:${slot}`;
-      if (this.store.hasNotificationForDate(deliveryKey, 'digest')) return null;
-      return this.prepare(tasks, modelRanking, { deliveryKey, budgetKey: day });
+      return !this.store.hasNotificationForDate(deliveryKey, 'digest');
     }
-    if (!this.isDue(now) || this.store.hasNotificationForDate(day, 'digest')) return null;
-    return this.prepare(tasks, modelRanking, { deliveryKey: day, budgetKey: day });
+    return this.isDue(now) && !this.store.hasNotificationForDate(day, 'digest');
   }
 }
 
