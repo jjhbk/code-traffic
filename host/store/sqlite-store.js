@@ -343,6 +343,16 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL,
     revoked_at INTEGER
   );`,
+  `CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
+    notification_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    sent_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(notification_id, device_id)
+  );`,
 ];
 
 class SqliteStore {
@@ -457,6 +467,31 @@ class SqliteStore {
     const result = this.db.prepare('UPDATE mobile_push_tokens SET revoked_at = ?, updated_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(this.clock(), this.clock(), String(deviceId));
     if (Number(result.changes)) this.audit('mobile-push-revoked', null, null, { deviceId: String(deviceId) });
     return { deviceId: String(deviceId), revoked: Number(result.changes) === 1 };
+  }
+
+  listMobilePushWork({ limit = 50 } = {}) {
+    const safeLimit = Math.min(500, Math.max(1, Number(limit) || 50));
+    return this.db.prepare(`SELECT n.notification_id AS notificationId, n.created_at AS createdAt,
+      t.device_id AS deviceId, t.push_token AS pushToken, t.platform,
+      COALESCE(d.attempts, 0) AS attempts, d.status AS deliveryStatus
+      FROM notification_outbox n JOIN mobile_push_tokens t ON t.revoked_at IS NULL AND n.created_at >= t.created_at
+      LEFT JOIN mobile_push_deliveries d ON d.notification_id = n.notification_id AND d.device_id = t.device_id
+      WHERE d.status IS NULL OR (d.status = 'failed' AND d.attempts < 5)
+      ORDER BY n.created_at, n.notification_id LIMIT ?`).all(safeLimit);
+  }
+
+  recordMobilePushDelivery({ notificationId, deviceId, status, error = null } = {}) {
+    if (!notificationId || !deviceId || !['sent', 'failed'].includes(status)) throw new Error('Invalid mobile push delivery.');
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO mobile_push_deliveries(notification_id, device_id, status, attempts, last_error, sent_at, updated_at)
+      VALUES (?, ?, ?, 1, ?, ?, ?)
+      ON CONFLICT(notification_id, device_id) DO UPDATE SET status = excluded.status,
+      attempts = mobile_push_deliveries.attempts + 1, last_error = excluded.last_error,
+      sent_at = CASE WHEN excluded.status = 'sent' THEN excluded.sent_at ELSE mobile_push_deliveries.sent_at END,
+      updated_at = excluded.updated_at`)
+      .run(String(notificationId), String(deviceId), status, error ? String(error).slice(0, 500) : null, status === 'sent' ? now : null, now);
+    this.audit(`mobile-push-${status}`, null, null, { notificationId: String(notificationId), deviceId: String(deviceId), error: error || null });
+    return { notificationId: String(notificationId), deviceId: String(deviceId), status };
   }
 
   recordLocationTrigger({ triggerKey, taskId, placeKey, eventId, triggeredAt = this.clock() } = {}) {
@@ -1153,7 +1188,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens', 'mobile_push_deliveries'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
