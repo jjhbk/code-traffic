@@ -47,6 +47,21 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   assert.equal(paged.nextCursor, 'c3');
   assert.equal(paged.messages.length, 2);
   assert.equal(pagedCalls.filter((url) => url.includes('/history?')).length, 2);
+  const boundedHistoryCalls = [];
+  const boundedHistoryProvider = new GmailProvider({ accessToken: 'access', fetchImpl: async (url) => {
+    boundedHistoryCalls.push(url);
+    if (url.includes('/history?') && !url.includes('pageToken=next')) return { ok: true, status: 200, json: async () => ({ historyId: 'c2', nextPageToken: 'next', history: [{ messagesAdded: [{ message: { id: 'm1', threadId: 't1' } }, { message: { id: 'm2', threadId: 't2' } }] }] }) };
+    if (url.includes('/history?') && url.includes('pageToken=next')) return { ok: true, status: 200, json: async () => ({ historyId: 'c3', history: [{ messagesAdded: [{ message: { id: 'm3', threadId: 't3' } }] }] }) };
+    const id = url.match(/messages\/(m\d+)/)?.[1];
+    return { ok: true, status: 200, json: async () => ({ id, threadId: id.replace('m', 't'), payload: { headers: [], body: { data: 'SGk=' } } }) };
+  } });
+  const firstHistoryPage = await boundedHistoryProvider.sync({ cursor: 'c1', boundedWindow: 1 });
+  assert.equal(firstHistoryPage.messages.length, 1);
+  assert.match(firstHistoryPage.nextCursor, /^sb1\./);
+  const secondHistoryPage = await boundedHistoryProvider.sync({ cursor: firstHistoryPage.nextCursor, boundedWindow: 1 });
+  assert.equal(secondHistoryPage.messages[0].id, 'm3');
+  assert.equal(secondHistoryPage.nextCursor, 'c3');
+  assert.equal(boundedHistoryCalls.filter((url) => url.includes('/history?')).length, 2);
   const sent = await provider.sendReply({ to: 'a@example.com', subject: 'Re: Hello', body: 'Thanks', threadId: 't1' });
   assert.equal(sent.id, undefined);
   assert.equal(GMAIL_SCOPE, 'https://www.googleapis.com/auth/gmail.readonly');
@@ -65,6 +80,19 @@ const provider = new GmailProvider({ accessToken: 'access', fetchImpl: async (ur
   assert.equal(calendarResult.nextCursor, 'cal-2');
   assert.equal(calendarResult.messages[0].subject, 'Design review');
   assert.equal(calendarResult.messages[0].threadId, 'calendar:event-1');
+  const calendarPages = [];
+  const pagedCalendar = new GoogleCalendarProvider({ accessToken: 'access', fetchImpl: async (url) => {
+    calendarPages.push(url);
+    if (!url.includes('pageToken=cal-next')) return { ok: true, status: 200, json: async () => ({ nextPageToken: 'cal-next', nextSyncToken: 'cal-final', items: [{ id: 'event-page-1', summary: 'Page one', start: { dateTime: '2026-09-18T15:00:00Z' }, end: { dateTime: '2026-09-18T16:00:00Z' } }] }) };
+    return { ok: true, status: 200, json: async () => ({ nextSyncToken: 'cal-final', items: [{ id: 'event-page-2', summary: 'Page two', start: { dateTime: '2026-09-18T16:00:00Z' }, end: { dateTime: '2026-09-18T17:00:00Z' } }] }) };
+  } });
+  const firstCalendarPage = await pagedCalendar.sync({ boundedWindow: 1 });
+  assert.equal(firstCalendarPage.messages.length, 1);
+  assert.match(firstCalendarPage.nextCursor, /^sb1\./);
+  const secondCalendarPage = await pagedCalendar.sync({ cursor: firstCalendarPage.nextCursor, boundedWindow: 1 });
+  assert.equal(secondCalendarPage.messages[0].id, 'event-page-2');
+  assert.equal(secondCalendarPage.nextCursor, 'cal-final');
+  assert.equal(calendarPages.length, 2);
   const calendarCalls = [];
   const editableCalendar = new GoogleCalendarProvider({ accessToken: 'access', fetchImpl: async (url, options = {}) => {
     calendarCalls.push({ url, options });

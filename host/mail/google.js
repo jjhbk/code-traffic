@@ -9,6 +9,20 @@ const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const API_ROOT = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
+function encodeSyncCursor(value) {
+  return `sb1.${Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')}`;
+}
+
+function decodeSyncCursor(value, kind) {
+  if (typeof value !== 'string' || !value.startsWith('sb1.')) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value.slice(4), 'base64url').toString('utf8'));
+    return parsed?.kind === kind ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function base64UrlDecode(value) {
   return Buffer.from(String(value || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
 }
@@ -85,11 +99,13 @@ class GoogleCalendarProvider {
 
   async sync({ cursor = null, boundedWindow = 100 } = {}) {
     const events = [];
-    let pageToken = null;
+    const continuation = decodeSyncCursor(cursor, 'calendar-page');
+    const syncToken = continuation?.syncToken || (cursor || null);
+    let pageToken = continuation?.pageToken || null;
     let result;
     do {
       const parameters = new URLSearchParams({ singleEvents: 'true', maxResults: String(Math.min(2500, boundedWindow)) });
-      if (cursor) parameters.set('syncToken', cursor);
+      if (syncToken) parameters.set('syncToken', syncToken);
       else parameters.set('orderBy', 'startTime');
       if (pageToken) parameters.set('pageToken', pageToken);
       try { result = await this.request(`/events?${parameters}`); } catch (error) {
@@ -98,8 +114,14 @@ class GoogleCalendarProvider {
       }
       events.push(...(result.items || []));
       pageToken = result.nextPageToken || null;
-    } while (pageToken && events.length < boundedWindow);
-    return { messages: events.slice(0, boundedWindow).map((event) => this.normalizeEvent(event)), nextCursor: result?.nextSyncToken || cursor || null };
+      if (pageToken && events.length >= boundedWindow) {
+        return {
+          messages: events.slice(0, boundedWindow).map((event) => this.normalizeEvent(event)),
+          nextCursor: encodeSyncCursor({ kind: 'calendar-page', syncToken: result.nextSyncToken || syncToken, pageToken }),
+        };
+      }
+    } while (pageToken);
+    return { messages: events.slice(0, boundedWindow).map((event) => this.normalizeEvent(event)), nextCursor: result?.nextSyncToken || syncToken || null };
   }
 
   normalizeEvent(event = {}) {
@@ -195,19 +217,25 @@ class GmailProvider {
   }
 
   async sync({ cursor = null, boundedWindow = 100 } = {}) {
-    if (cursor) {
+    const historyContinuation = decodeSyncCursor(cursor, 'gmail-history');
+    if (cursor && (!cursor.startsWith('sb1.') || historyContinuation)) {
       try {
         const ids = new Map();
-        let pageToken = null;
-        let nextHistoryId = cursor;
+        let pageToken = historyContinuation?.pageToken || null;
+        const historyCursor = historyContinuation?.historyId || cursor;
+        let nextHistoryId = historyContinuation?.nextHistoryId || historyCursor;
         do {
-          const query = new URLSearchParams({ startHistoryId: String(cursor), historyTypes: 'messageAdded', maxResults: '500' });
+          const query = new URLSearchParams({ startHistoryId: String(historyCursor), historyTypes: 'messageAdded', maxResults: '500' });
           if (pageToken) query.set('pageToken', pageToken);
           const history = await this.request(`/history?${query}`);
           for (const entry of history.history || []) for (const added of entry.messagesAdded || []) ids.set(added.message.id, added.message.threadId);
           nextHistoryId = history.historyId || nextHistoryId;
           pageToken = history.nextPageToken || null;
-        } while (pageToken && ids.size < boundedWindow);
+          if (pageToken && ids.size >= boundedWindow) {
+            const messages = await Promise.all([...ids.keys()].slice(0, boundedWindow).map((id) => this.message(id)));
+            return { messages, nextCursor: encodeSyncCursor({ kind: 'gmail-history', historyId: historyCursor, nextHistoryId, pageToken }) };
+          }
+        } while (pageToken);
         const messages = await Promise.all([...ids.keys()].map((id) => this.message(id)));
         return { messages: messages.slice(0, boundedWindow), nextCursor: nextHistoryId };
       } catch (error) {
@@ -220,16 +248,25 @@ class GmailProvider {
       }
     }
 
+    const bootstrapContinuation = decodeSyncCursor(cursor, 'gmail-bootstrap');
+    const labels = ['INBOX', 'SENT'];
     const ids = new Map();
-    for (const labelId of ['INBOX', 'SENT']) {
-      let pageToken = null;
+    let labelIndex = bootstrapContinuation?.labelIndex || 0;
+    let pageToken = bootstrapContinuation?.pageToken || null;
+    for (; labelIndex < labels.length; labelIndex += 1) {
+      const labelId = labels[labelIndex];
       do {
         const query = new URLSearchParams({ labelIds: labelId, maxResults: String(Math.min(500, boundedWindow)) });
         if (pageToken) query.set('pageToken', pageToken);
         const listed = await this.request(`/messages?${query}`);
         for (const message of listed.messages || []) ids.set(message.id, message.threadId);
         pageToken = listed.nextPageToken || null;
-      } while (pageToken && ids.size < boundedWindow);
+        if (pageToken && ids.size >= boundedWindow) {
+          const messages = await Promise.all([...ids.keys()].slice(0, boundedWindow).map((id) => this.message(id)));
+          return { messages, nextCursor: encodeSyncCursor({ kind: 'gmail-bootstrap', labelIndex, pageToken }) };
+        }
+      } while (pageToken);
+      pageToken = null;
     }
     const messages = await Promise.all([...ids.keys()].slice(0, boundedWindow).map((id) => this.message(id)));
     const profile = await this.request('/profile');
