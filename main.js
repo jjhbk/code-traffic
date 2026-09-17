@@ -97,6 +97,7 @@ let taskService;
 let digestScheduler;
 let assistantRuntime;
 let backgroundHost;
+let shuttingDown = false;
 let proactivityService;
 let conversationService;
 let followUpWorkflow;
@@ -1332,25 +1333,31 @@ app.on('window-all-closed', () => {
   // window is closed. Use the tray menu to reopen or explicitly quit.
 });
 
-app.on('before-quit', async () => {
-  stopCodexMonitor?.();
-  if (livenessTimer) clearInterval(livenessTimer);
-  if (mailSyncTimer) clearInterval(mailSyncTimer);
-  if (calendarSyncTimer) clearInterval(calendarSyncTimer);
-  if (driveSyncTimer) clearInterval(driveSyncTimer);
-  if (digestTimer) clearInterval(digestTimer);
-  assistantRuntime?.stop();
-  backgroundHost?.stop().catch((error) => console.error(`[assistant] background host shutdown failed: ${error.message}`));
-  trayRef?.destroy();
-  trayRef = null;
-  telegram?.stop();
-  modelRouter?.frontierClient?.close?.();
-  for (const child of remoteCommands.values()) {
-    try { child.kill(); } catch (_) { /* Process may already have exited. */ }
-  }
-  remoteCommands.clear();
-  for (const child of terminals.values()) child.kill();
-  terminals.clear();
-  if (board) await board.closeServer();
-  hostStore?.close();
+app.on('before-quit', (event) => {
+  if (shuttingDown) return;
+  event.preventDefault();
+  shuttingDown = true;
+  void (async () => {
+    stopCodexMonitor?.();
+    if (livenessTimer) clearInterval(livenessTimer);
+    if (mailSyncTimer) clearInterval(mailSyncTimer);
+    if (calendarSyncTimer) clearInterval(calendarSyncTimer);
+    if (driveSyncTimer) clearInterval(driveSyncTimer);
+    if (digestTimer) clearInterval(digestTimer);
+    assistantRuntime?.stop();
+    try { await backgroundHost?.stop(); } catch (error) { console.error(`[assistant] background host shutdown failed: ${error.message}`); }
+    trayRef?.destroy();
+    trayRef = null;
+    telegram?.stop();
+    modelRouter?.frontierClient?.close?.();
+    for (const child of remoteCommands.values()) {
+      try { child.kill(); } catch (_) { /* Process may already have exited. */ }
+    }
+    remoteCommands.clear();
+    for (const child of terminals.values()) child.kill();
+    terminals.clear();
+    if (board) await board.closeServer();
+    hostStore?.close();
+    app.quit();
+  })().catch((error) => { console.error(`[shutdown] ${error.message}`); app.exit(1); });
 });
