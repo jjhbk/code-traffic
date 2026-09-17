@@ -11,9 +11,11 @@ const { BackgroundHost } = require('../host/runtime/background-host');
   const store = new SqliteStore({ filename: databasePath });
   const workflow = store.createWorkflow({ workflowType: 'background-fixture', state: 'waiting_event', payload: {} });
   store.enqueueJob({ kind: 'workflow.resume', payload: { workflowId: workflow.workflowId }, runAt: Date.now(), dedupeKey: 'background-fixture' });
+  store.enqueueJob({ kind: 'assistant.digest', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest' });
   store.close();
 
-  const host = new BackgroundHost({ databasePath });
+  let jobs = 0;
+  const host = new BackgroundHost({ databasePath, onJob: async (kind) => { if (kind === 'assistant.digest') jobs += 1; } });
   const initial = await host.start();
   assert.equal(initial.running, true);
   assert.equal((await host.health()).paused, false);
@@ -25,10 +27,11 @@ const { BackgroundHost } = require('../host/runtime/background-host');
     const probe = new SqliteStore({ filename: databasePath });
     current = probe.getWorkflow(workflow.workflowId);
     probe.close();
-    if (current.state === 'needs_attention') break;
+    if (current.state === 'needs_attention' && jobs === 1) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(current.state, 'needs_attention');
+  assert.equal(jobs, 1);
   assert.deepEqual(await host.stop(), { stopped: true });
   fs.rmSync(directory, { recursive: true, force: true });
   console.log('background host tests passed');

@@ -7,11 +7,29 @@ const databasePath = process.argv[2];
 if (!databasePath || !token || typeof process.send !== 'function') throw new Error('Background host requires a database path, token, and IPC parent.');
 
 const store = new SqliteStore({ filename: databasePath });
-const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume'] });
+const parentCalls = new Map();
+let parentSequence = 0;
+function callParent(kind, payload) {
+  const id = `background-job-${++parentSequence}`;
+  return new Promise((resolve, reject) => {
+    parentCalls.set(id, { resolve, reject });
+    process.send({ type: 'job', id, token, kind, payload });
+  });
+}
+const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
 runtime.register('workflow.resume', async ({ workflowId }) => {
   if (workflowId) new WorkflowService({ store }).resume(workflowId);
 });
+for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
+  runtime.register(kind, async (payload) => {
+    await callParent(kind, payload);
+    runtime.schedule(kind, {}, Date.now() + intervalMs, `${kind}:${Math.floor((Date.now() + intervalMs) / intervalMs)}`);
+  });
+}
 runtime.start();
+for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
+  runtime.schedule(kind, {}, Date.now(), `${kind}:${Math.floor(Date.now() / intervalMs)}`);
+}
 
 function reply(id, result, error = null) {
   if (process.connected) process.send({ type: 'response', id, result, error: error ? error.message : null });
@@ -20,6 +38,13 @@ function reply(id, result, error = null) {
 process.on('message', (message) => {
   if (!message || message.token !== token || !message.id) return;
   try {
+    if (message.type === 'job-response') {
+      const pending = parentCalls.get(message.id);
+      if (!pending) return;
+      parentCalls.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error)); else pending.resolve(message.result);
+      return;
+    }
     if (message.method === 'health') reply(message.id, runtime.health());
     else if (message.method === 'pause') reply(message.id, runtime.setPaused(message.paused));
     else if (message.method === 'shutdown') {

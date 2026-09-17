@@ -1006,7 +1006,17 @@ async function start() {
     approvalService = new ApprovalService({ store: hostStore });
     if (appSettings.backgroundHost !== false) {
       try {
-        backgroundHost = new BackgroundHost({ databasePath: path.join(app.getPath('userData'), 'signal-box.db') });
+        backgroundHost = new BackgroundHost({
+          databasePath: path.join(app.getPath('userData'), 'signal-box.db'),
+          paused: appSettings.assistantPaused === true,
+          onJob: async (kind, payload) => {
+            if (kind === 'assistant.sync.gmail') return runMailSync(payload);
+            if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
+            if (kind === 'assistant.sync.drive') return runDriveSync(payload);
+            if (kind === 'assistant.digest') return runScheduledDigest(payload);
+            throw new Error(`Unsupported background job ${kind}.`);
+          },
+        });
         await backgroundHost.start();
         console.error('[assistant] background host started');
       } catch (error) {
@@ -1048,7 +1058,7 @@ async function start() {
   }) : null;
   assistantRuntime = hostStore ? new AssistantRuntime({
     store: hostStore,
-    kinds: ['assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest'],
+    kinds: backgroundHost ? ['desktop-runtime-disabled'] : null,
     intervalMs: 30 * 1000,
     paused: appSettings.assistantPaused === true,
     onError: (error) => console.error(`[assistant] runtime tick failed: ${error.message}`),
@@ -1065,10 +1075,12 @@ async function start() {
       await runScheduledDigest();
       return { completed: true };
     });
-    assistantRuntime.schedule('assistant.sync.gmail', {}, Date.now(), `assistant.sync.gmail:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
-    assistantRuntime.schedule('assistant.sync.calendar', {}, Date.now(), `assistant.sync.calendar:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
-    assistantRuntime.schedule('assistant.sync.drive', {}, Date.now(), `assistant.sync.drive:${Math.floor(Date.now() / (10 * 60 * 1000))}`);
-    assistantRuntime.schedule('assistant.digest', {}, Date.now(), `assistant:digest:${Math.floor(Date.now() / 30_000)}`);
+    if (!backgroundHost) {
+      assistantRuntime.schedule('assistant.sync.gmail', {}, Date.now(), `assistant.sync.gmail:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
+      assistantRuntime.schedule('assistant.sync.calendar', {}, Date.now(), `assistant.sync.calendar:${Math.floor(Date.now() / (5 * 60 * 1000))}`);
+      assistantRuntime.schedule('assistant.sync.drive', {}, Date.now(), `assistant.sync.drive:${Math.floor(Date.now() / (10 * 60 * 1000))}`);
+      assistantRuntime.schedule('assistant.digest', {}, Date.now(), `assistant:digest:${Math.floor(Date.now() / 30_000)}`);
+    }
   }
   for (const agent of runningAgents()) board.registerExternal(`process:${agent.pid}`, agent.cwd, agent.agent);
   try {

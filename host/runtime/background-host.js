@@ -3,12 +3,14 @@ const path = require('path');
 const { fork } = require('child_process');
 
 class BackgroundHost {
-  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex') } = {}) {
+  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false } = {}) {
     if (!databasePath) throw new Error('A background host database path is required.');
     this.databasePath = databasePath;
     this.workerPath = workerPath;
     this.forkImpl = forkImpl;
     this.token = token;
+    this.onJob = onJob;
+    this.paused = Boolean(paused);
     this.child = null;
     this.pending = new Map();
     this.sequence = 0;
@@ -18,10 +20,15 @@ class BackgroundHost {
   start() {
     if (this.child) return this.ready;
     this.ready = new Promise((resolve, reject) => {
-      const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token } });
+      const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0' } });
       this.child = child;
       child.on('message', (message) => {
         if (message.type === 'ready') resolve(message.health);
+        if (message.type === 'job') {
+          if (!this.onJob) { child.send({ type: 'job-response', id: message.id, token: this.token, error: 'No background job adapter is configured.' }); return; }
+          Promise.resolve(this.onJob(message.kind, message.payload)).then((result) => child.send({ type: 'job-response', id: message.id, token: this.token, result })).catch((error) => child.send({ type: 'job-response', id: message.id, token: this.token, error: error.message }));
+          return;
+        }
         if (message.type !== 'response') return;
         const pending = this.pending.get(message.id);
         if (!pending) return;
