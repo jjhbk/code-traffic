@@ -307,6 +307,17 @@ const MIGRATIONS = [
     result_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS telegram_callbacks (
+    token TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    action_json TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    claimed_at INTEGER,
+    consumed_at INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS telegram_callbacks_expiry ON telegram_callbacks(expires_at, status);`,
   `CREATE TABLE IF NOT EXISTS mobile_pairing_codes (
     code_id TEXT PRIMARY KEY,
     code_hash TEXT NOT NULL UNIQUE,
@@ -406,6 +417,39 @@ class SqliteStore {
     this.db.prepare('INSERT INTO mobile_commands(command_id, operation, result_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(command_id) DO NOTHING')
       .run(commandId, operation, JSON.stringify(result), this.clock());
     return this.getMobileCommand(commandId);
+  }
+
+  saveTelegramCallback({ token, chatId, action, expiresAt = this.clock() + 24 * 60 * 60 * 1000 } = {}) {
+    if (!token || !chatId || !action || typeof action !== 'object' || Array.isArray(action) || !Number.isFinite(expiresAt) || expiresAt <= this.clock()) throw new Error('Invalid Telegram callback.');
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO telegram_callbacks(token, chat_id, action_json, expires_at, status, claimed_at, consumed_at, created_at)
+      VALUES (?, ?, ?, ?, 'pending', NULL, NULL, ?)
+      ON CONFLICT(token) DO UPDATE SET chat_id = excluded.chat_id, action_json = excluded.action_json, expires_at = excluded.expires_at, status = 'pending', claimed_at = NULL, consumed_at = NULL`).run(String(token), String(chatId), JSON.stringify(action), expiresAt, now);
+    return { token: String(token), chatId: String(chatId), action, expiresAt, status: 'pending' };
+  }
+
+  claimTelegramCallback(token, chatId, { reclaimAfterMs = 10 * 60 * 1000 } = {}) {
+    if (!token || !chatId) return null;
+    const now = this.clock();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.db.prepare('SELECT token, chat_id AS chatId, action_json AS actionJson, expires_at AS expiresAt, status, claimed_at AS claimedAt FROM telegram_callbacks WHERE token = ? AND chat_id = ?').get(String(token), String(chatId));
+      if (!row || now >= row.expiresAt || row.status === 'consumed') { this.db.exec('COMMIT'); return null; }
+      if (row.status === 'claimed' && Number(row.claimedAt || 0) + reclaimAfterMs > now) { this.db.exec('COMMIT'); return null; }
+      this.db.prepare("UPDATE telegram_callbacks SET status = 'claimed', claimed_at = ? WHERE token = ? AND chat_id = ?").run(now, String(token), String(chatId));
+      this.db.exec('COMMIT');
+      return { ...row, action: JSON.parse(row.actionJson), status: 'claimed', claimedAt: now };
+    } catch (error) { try { this.db.exec('ROLLBACK'); } catch (_) {} throw error; }
+  }
+
+  completeTelegramCallback(token, chatId) {
+    const result = this.db.prepare("UPDATE telegram_callbacks SET status = 'consumed', consumed_at = ?, claimed_at = NULL WHERE token = ? AND chat_id = ? AND status = 'claimed'").run(this.clock(), String(token), String(chatId));
+    return Number(result.changes) > 0;
+  }
+
+  releaseTelegramCallback(token, chatId) {
+    const result = this.db.prepare("UPDATE telegram_callbacks SET status = 'pending', claimed_at = NULL WHERE token = ? AND chat_id = ? AND status = 'claimed'").run(String(token), String(chatId));
+    return Number(result.changes) > 0;
   }
 
   createMobilePairingCode({ codeId = crypto.randomUUID(), codeHash, expiresAt } = {}) {
@@ -1329,7 +1373,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens', 'mobile_push_deliveries'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'telegram_callbacks', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens', 'mobile_push_deliveries'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,

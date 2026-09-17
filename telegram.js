@@ -31,7 +31,7 @@ function telegramErrorText(error) {
 }
 
 class TelegramControl {
-  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, getNotification = null, assistantMessage = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, submitDelayMs = 75, approvalRetryMs = 3000, getOffset = () => null, saveOffset = () => {}, fetchImpl = globalThis.fetch }) {
+  constructor({ token, chatId, listSessions, listTasks = () => [], updateTask = null, recordDigestFeedback = null, getNotification = null, assistantMessage = null, getHistory, ensureSession, writeSession, markWorking = null, executeTerminal, interruptTerminal, sendPrompt, approvalService = null, approveMailReply = null, approveBrowserAction = null, callbackStore = null, submitDelayMs = 75, approvalRetryMs = 3000, getOffset = () => null, saveOffset = () => {}, fetchImpl = globalThis.fetch }) {
     this.token = token;
     this.chatId = String(chatId || '');
     this.listSessions = listSessions;
@@ -50,6 +50,7 @@ class TelegramControl {
     this.approvalService = approvalService;
     this.approveMailReply = approveMailReply;
     this.approveBrowserAction = approveBrowserAction;
+    this.callbackStore = callbackStore;
     this.submitDelayMs = submitDelayMs;
     this.approvalRetryMs = approvalRetryMs;
     this.fetch = fetchImpl;
@@ -170,6 +171,10 @@ class TelegramControl {
   addAction(action, durableToken = null) {
     const token = durableToken || `action:${crypto.randomBytes(8).toString("hex")}`;
     this.actions.set(token, action);
+    if (this.callbackStore?.saveTelegramCallback && this.chatId) {
+      try { this.callbackStore.saveTelegramCallback({ token, chatId: this.chatId, action }); }
+      catch (error) { console.error(`[telegram] could not persist callback: ${error.message}`); }
+    }
     while (this.actions.size > 200) this.actions.delete(this.actions.keys().next().value);
     return token;
   }
@@ -367,7 +372,8 @@ class TelegramControl {
       return;
     }
     const inMemoryAction = this.actions.get(query.data);
-    const action = inMemoryAction || this.resolveDurableAction(query.data);
+    const persistedCallback = !inMemoryAction ? this.callbackStore?.claimTelegramCallback?.(query.data, this.chatId) : null;
+    const action = inMemoryAction || persistedCallback?.action || this.resolveDurableAction(query.data);
     if (!action) {
       await this.request('answerCallbackQuery', {
         callback_query_id: query.id,
@@ -487,7 +493,9 @@ class TelegramControl {
         throw new Error('This option has expired.');
       }
       this.actions.delete(query.data);
+      if (persistedCallback) this.callbackStore.completeTelegramCallback(query.data, this.chatId);
     } catch (error) {
+      if (persistedCallback) this.callbackStore.releaseTelegramCallback(query.data, this.chatId);
       await this.request('answerCallbackQuery', {
         callback_query_id: query.id,
         text: error.message.slice(0, 200),

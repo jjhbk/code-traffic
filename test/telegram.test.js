@@ -1,5 +1,6 @@
 const assert = require('assert');
 const { TelegramControl, parseCommand, sessionListText } = require('../telegram');
+const { SqliteStore } = require('../host/store/sqlite-store');
 
 assert.deepStrictEqual(parseCommand('/use@signal_bot 2'), { name: 'use', argument: '2' });
 assert.deepStrictEqual(parseCommand('run the tests'), { name: 'send', argument: 'run the tests' });
@@ -15,6 +16,7 @@ assert.match(sessionListText(sessions, 'one'), /beta.*view only/);
 assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
 
 (async () => {
+  const callbackStore = new SqliteStore();
   const sent = [];
   const writes = [];
   const ensured = [];
@@ -43,6 +45,7 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
     interruptTerminal: () => true,
     sendPrompt: async (session, prompt) => queuedPrompts.push({ tile: session.tile, prompt }),
     assistantMessage: async (text, externalId) => assistantMessages.push({ text, externalId }),
+    callbackStore,
     recordDigestFeedback: (notificationId, useful) => feedback.push({ notificationId, useful }),
     submitDelayMs: 0,
     fetchImpl: async (_url, options) => {
@@ -115,6 +118,22 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   const durableFeedbackToken = control.digestFeedbackToken('digest-1', true);
   await control.handleUpdate({ callback_query: { id: 'feedback-1', data: durableFeedbackToken, message: { chat: { id: 42 } } } });
   assert.deepStrictEqual(feedback, [{ notificationId: 'digest-1', useful: true }]);
+
+  const persistedToken = control.addAction({ type: 'task-status', taskId: 'persisted-task', status: 'done' }, 'sb:test:persisted');
+  const persistedUpdates = [];
+  const restartedCallbackControl = new TelegramControl({
+    token: 'test-token', chatId: '42', listSessions: () => [], getHistory: () => ({ pendingQuestions: [] }),
+    callbackStore,
+    updateTask: async (taskId, status) => persistedUpdates.push({ taskId, status }),
+    fetchImpl: async (_url, options) => { sent.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ ok: true, result: {} }) }; },
+  });
+  restartedCallbackControl.stopped = false;
+  await restartedCallbackControl.handleUpdate({ callback_query: { id: 'persisted-callback', data: persistedToken, message: { chat: { id: 42 } } } });
+  assert.deepStrictEqual(persistedUpdates, [{ taskId: 'persisted-task', status: 'done' }]);
+  const duplicatePersisted = sent.length;
+  await restartedCallbackControl.handleUpdate({ callback_query: { id: 'persisted-duplicate', data: persistedToken, message: { chat: { id: 42 } } } });
+  assert.equal(sent.length, duplicatePersisted + 1, 'duplicate callback receives an expired response without reapplying the action');
+  restartedCallbackControl.stop();
 
   control.notifyState(sessions[0], 'done');
   await new Promise((resolve) => setImmediate(resolve));
@@ -313,6 +332,7 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   assert.deepStrictEqual(resumedRequests, [11]);
   assert.deepStrictEqual(resumedOffsets, []);
   resumedControl.stop();
+  callbackStore.close();
   console.log('telegram tests passed');
 })().catch((error) => {
   console.error(error);

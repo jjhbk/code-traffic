@@ -1234,6 +1234,7 @@ async function start() {
       appSettings = { ...appSettings, telegramUpdateOffset: Number(offset) };
       writeSettings(app.getPath('userData'), appSettings);
     },
+    callbackStore: hostStore,
     listSessions: () => board.list(),
     listTasks: () => hostStore?.listTasks() || [],
     updateTask: (taskId, status) => hostStore?.setTaskStatus(taskId, status),
