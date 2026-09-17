@@ -492,10 +492,36 @@ document.getElementById('tasks-refresh').addEventListener('click', loadTasks);
 document.getElementById('activity-toggle').addEventListener('click', () => toggleDataView('activity-view', loadActivity));
 document.getElementById('activity-refresh').addEventListener('click', loadActivity);
 async function loadAssistantConversation() {
+  const decisionsTarget = document.getElementById('assistant-decisions');
+  const workflowsTarget = document.getElementById('assistant-workflows');
   const target = document.getElementById('assistant-history');
+  decisionsTarget.replaceChildren();
+  workflowsTarget.replaceChildren();
   target.replaceChildren();
   try {
-    const messages = await window.signalBox.getAssistantConversation();
+    const [messages, decisions, workflows] = await Promise.all([
+      window.signalBox.getAssistantConversation(), window.signalBox.getAssistantDecisions(), window.signalBox.getAssistantWorkflows(),
+    ]);
+    const actionable = decisions.filter((decision) => decision.type !== 'wait');
+    const decisionHeading = document.createElement('h3'); decisionHeading.textContent = actionable.length ? 'Needs attention' : 'No triggered next steps';
+    decisionsTarget.append(decisionHeading);
+    for (const decision of actionable) {
+      const card = document.createElement('article'); card.className = 'assistant-state';
+      const task = document.createElement('strong'); task.textContent = decision.taskId;
+      const detail = document.createElement('span'); detail.textContent = `${decision.type.replaceAll('_', ' ')} · ${decision.reason.replaceAll('-', ' ')}`;
+      const evidence = document.createElement('small'); evidence.textContent = decision.evidence?.length ? `Evidence: ${decision.evidence.join(' ').slice(0, 240)}` : 'No supporting evidence recorded.';
+      card.append(task, detail, evidence); decisionsTarget.append(card);
+    }
+    if (workflows.length) {
+      const workflowHeading = document.createElement('h3'); workflowHeading.textContent = 'Active workflows'; workflowsTarget.append(workflowHeading);
+      for (const workflow of workflows) {
+        const card = document.createElement('article'); card.className = 'assistant-state';
+        const title = document.createElement('strong'); title.textContent = `${workflow.workflowType} · ${workflow.state}`;
+        const detail = document.createElement('span'); detail.textContent = workflow.taskId ? `Task ${workflow.taskId}` : `Workflow ${workflow.workflowId}`;
+        const wake = document.createElement('small'); wake.textContent = workflow.wakeAt ? `Next check: ${new Date(workflow.wakeAt).toLocaleString()}` : 'No next check scheduled.';
+        card.append(title, detail, wake); workflowsTarget.append(card);
+      }
+    }
     if (!messages.length) { const empty = document.createElement('p'); empty.className = 'tasks-empty'; empty.textContent = 'No assistant messages yet.'; target.append(empty); return; }
     for (const message of messages) {
       const card = document.createElement('article'); card.className = `activity-card assistant-${message.direction}`;

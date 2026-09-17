@@ -302,6 +302,10 @@ h1 { font-size: 30px; font-weight: 730; letter-spacing: -.045em; background: lin
 .task-graph { width: 100%; min-height: 300px; border: 1px solid var(--line); border-radius: 14px; background: rgba(5, 13, 18, .62); }
 .assistant-form { display: grid; gap: 10px; margin-top: 16px; }
 .assistant-form textarea { width: 100%; resize: vertical; min-height: 72px; }
+.assistant-summary { display: grid; gap: 8px; margin: 14px 0; }
+.assistant-summary h3 { margin: 0; color: #dcefe4; font-size: 13px; }
+.assistant-state { display: grid; gap: 4px; padding: 11px 13px; border: 1px solid rgba(143, 194, 194, .14); border-radius: 10px; background: rgba(7, 17, 23, .46); }
+.assistant-state span, .assistant-state small { color: #a9b9b0; }
 .assistant-inbound { border-left: 3px solid var(--amber); }
 .assistant-outbound { border-left: 3px solid var(--green); }
 .activity-list { display: grid; gap: 8px; }
