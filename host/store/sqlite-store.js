@@ -1467,6 +1467,31 @@ class SqliteStore {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const counts = {};
+      const taskIds = new Set(this.db.prepare('SELECT task_id AS taskId FROM tasks').all().map((row) => row.taskId));
+      const actionRequests = this.db.prepare('SELECT request_id AS requestId, action_json AS actionJson FROM approval_requests').all()
+        .filter((row) => {
+          try {
+            const action = JSON.parse(row.actionJson);
+            return ['gmail.send', 'calendar.update'].includes(action.capability) || taskIds.has(action.taskId);
+          } catch (_) { return false; }
+        }).map((row) => row.requestId);
+      if (actionRequests.length) {
+        const placeholders = actionRequests.map(() => '?').join(', ');
+        counts.receipts = Number(this.db.prepare(`DELETE FROM receipts WHERE attempt_id IN (SELECT attempt_id FROM execution_attempts WHERE request_id IN (${placeholders}))`).run(...actionRequests).changes);
+        counts.execution_attempts = Number(this.db.prepare(`DELETE FROM execution_attempts WHERE request_id IN (${placeholders})`).run(...actionRequests).changes);
+        counts.decisions = Number(this.db.prepare(`DELETE FROM decisions WHERE request_id IN (${placeholders})`).run(...actionRequests).changes);
+        counts.approval_options = Number(this.db.prepare(`DELETE FROM approval_options WHERE request_id IN (${placeholders})`).run(...actionRequests).changes);
+        counts.approval_requests = Number(this.db.prepare(`DELETE FROM approval_requests WHERE request_id IN (${placeholders})`).run(...actionRequests).changes);
+      }
+      if (taskIds.size) {
+        const autonomous = this.db.prepare('SELECT run_id AS runId, action_json AS actionJson FROM autonomous_runs').all()
+          .filter((row) => { try { return taskIds.has(JSON.parse(row.actionJson).taskId); } catch (_) { return false; } }).map((row) => row.runId);
+        if (autonomous.length) {
+          const placeholders = autonomous.map(() => '?').join(', ');
+          counts.autonomous_runs = Number(this.db.prepare(`DELETE FROM autonomous_runs WHERE run_id IN (${placeholders})`).run(...autonomous).changes);
+        }
+      }
+      counts.standing_grants = Number(this.db.prepare("DELETE FROM standing_grants WHERE capability IN ('gmail.send', 'calendar.update')").run().changes);
       for (const [table, sql] of [
         ['workflow_steps', 'DELETE FROM workflow_steps'],
         ['workflows', 'DELETE FROM workflows'],
