@@ -41,6 +41,7 @@ class MobileCoreClient {
   context() { return this.request('/api/v1/mobile/context'); }
   permissions() { return this.request('/api/v1/mobile/permissions'); }
   approvals() { return this.request('/api/v1/mobile/approvals'); }
+  connections() { return this.request('/api/v1/mobile/connections'); }
   notifications(after = 0) { return this.request(`/api/v1/mobile/notifications?after=${encodeURIComponent(after)}`); }
   pairDevice(code, deviceName = 'Signal Box mobile') { return this.request('/api/v1/mobile/pair', { method: 'POST', body: { code, deviceName }, idempotencyKey: `pair:${code}` }); }
 

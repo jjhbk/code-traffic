@@ -4,13 +4,13 @@ const PROTOCOL_VERSION = '1';
 const MOBILE_CONVERSATION_ID = 'mobile:default';
 
 class MobileApi {
-  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, getStatus = null, clock = () => Date.now() } = {}) {
+  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, getStatus = null, getConnections = null, clock = () => Date.now() } = {}) {
     if (!store || !conversation || !proactivity) throw new Error('Mobile API requires store, conversation, and proactivity services.');
     this.store = store;
     this.conversation = conversation;
     this.proactivity = proactivity;
     this.approvals = approvals; this.pairing = pairing; this.context = context; this.onApproval = onApproval;
-    this.getStatus = getStatus || (() => ({ running: true }));
+    this.getStatus = getStatus || (() => ({ running: true })); this.getConnections = getConnections || (() => []);
     this.clock = clock;
   }
 
@@ -24,6 +24,7 @@ class MobileApi {
       if (method === 'GET' && resource === 'today') return this.today(device, query);
       if (method === 'GET' && resource === 'notifications') return this.notifications(device, query);
       if (method === 'GET' && resource === 'approvals') return { approvals: this.store.listPendingApprovals({ principal: 'signal-box-user', surface: 'mobile', now: this.clock() }) };
+      if (method === 'GET' && resource === 'connections') return { connections: await this.getConnections() };
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
       if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };

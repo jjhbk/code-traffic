@@ -1162,6 +1162,15 @@ async function start() {
     pairing: mobilePairing,
     context: mobileContext,
     onApproval: executeMobileApproval,
+    getConnections: () => {
+      const account = mailCredentials?.load('gmail-account') || '';
+      const health = (provider) => account ? hostStore?.getConnectorHealth(`${provider}:${account}`) || null : null;
+      return [
+        { id: 'gmail', provider: 'Gmail', connected: Boolean(mailCredentials?.load('gmail-refresh-token')), running: Boolean(mailSync), health: health('gmail') },
+        { id: 'calendar', provider: 'Google Calendar', connected: Boolean(calendarSync), running: Boolean(calendarSync), health: health('calendar') },
+        { id: 'drive', provider: 'Google Drive', connected: Boolean(driveSync), running: Boolean(driveSync), health: health('drive') },
+      ];
+    },
     getStatus: async () => ({ ...(assistantRuntime?.health() || { running: false, paused: false }), background: backgroundHost ? await backgroundHost.health() : null }),
   }) : null;
   board.mobileApi = mobileApi;
