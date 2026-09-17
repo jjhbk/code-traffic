@@ -37,9 +37,22 @@ class ConversationService {
     const workflowCommand = content.match(/^\s*cancel\s+(?:workflow|work)\s+([a-f0-9-]{8,})\s*$/i);
     const memoryCommand = content.match(/^\s*(?:remember|save preference)\s+([^:]{2,80})\s*:\s*(.{1,500})\s*$/i);
     const forgetCommand = content.match(/^\s*forget\s+(person|project|goal|preference|fact|place)\s+(.{1,120})\s*$/i);
+    const correctionCommand = content.match(/^\s*correct\s+([a-f0-9-]{8,})\s+(summary|due[- ]?date|owner|counterparty)\s*:\s*(.{1,500})\s*$/i);
     let response;
     let reference = {};
-    if (forgetCommand) {
+    if (correctionCommand) {
+      const task = tasks.find((item) => item.taskId === correctionCommand[1]);
+      if (!task) response = `I couldn't find task ${correctionCommand[1]}.`;
+      else {
+        const field = correctionCommand[2].toLowerCase().replace('-', ' ');
+        const fieldName = field === 'due date' ? 'dueDate' : field;
+        const rawValue = correctionCommand[3].trim();
+        const value = fieldName === 'dueDate' && /^(none|clear|no date)$/i.test(rawValue) ? null : rawValue;
+        const corrected = this.store.correctTask(task.taskId, { [fieldName]: value });
+        response = `Updated “${task.summary}”: ${fieldName} is now ${value === null ? 'clear' : `“${value}”`}.`;
+        reference = { taskId: corrected.taskId };
+      }
+    } else if (forgetCommand) {
       const recordType = forgetCommand[1].toLowerCase();
       const recordKey = forgetCommand[2].trim().toLowerCase();
       const deleted = this.store.deleteContext(recordType, recordKey);
