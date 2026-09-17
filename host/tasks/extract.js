@@ -16,6 +16,36 @@ function candidatesFromObservation(observation, { filters = null, extractorVersi
   return candidates.length ? candidates : [candidateForClause(observation, text, { eligibleUpdate, extractorVersion, index: 0, fallbackText: text, clauseCount: 1 })].filter(Boolean);
 }
 
+function candidatesFromStructured(observation, obligations, { filters = null, extractorVersion = 'structured-1' } = {}) {
+  if (!Array.isArray(obligations) || (filters && !filters.eligible)) return [];
+  const source = `${observation.subject}\n${observation.body}`.trim();
+  return obligations.map((obligation, index) => {
+    const evidenceText = String(obligation?.evidenceText || '');
+    const start = Number(obligation?.evidenceStart);
+    const end = Number(obligation?.evidenceEnd);
+    if (!evidenceText || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > source.length || source.slice(start, end) !== evidenceText) return null;
+    const owner = ['self', 'counterparty', 'uncertain'].includes(obligation.owner) ? obligation.owner : 'uncertain';
+    const blocker = ['self', 'counterparty', 'uncertain'].includes(obligation.blocker) ? obligation.blocker : 'uncertain';
+    const stableParts = [observation.provider || 'source', observation.threadId, owner, String(observation.direction === 'incoming' ? observation.from : observation.to?.[0] || ''), evidenceText.replace(/\s+/g, ' ').trim().toLowerCase()];
+    const obligationKey = `ob_${crypto.createHash('sha256').update(stableParts.join('|')).digest('hex').slice(0, 24)}`;
+    return {
+      candidateId: `${observation.observationId}:${extractorVersion}:${index}`,
+      observationId: observation.observationId,
+      threadId: observation.threadId,
+      summary: String(obligation.summary || evidenceText).trim().slice(0, 120),
+      owner,
+      blocker,
+      counterparty: obligation.counterparty || (observation.direction === 'incoming' ? observation.from : observation.to?.[0] || null),
+      dueDate: obligation.dueDate || null,
+      dueDateBasis: obligation.dueDateBasis || null,
+      confidence: ['low', 'medium', 'high'].includes(obligation.confidence) ? obligation.confidence : 'low',
+      evidence: { start, end, text: evidenceText },
+      extractorVersion,
+      obligationKey,
+    };
+  }).filter(Boolean);
+}
+
 function splitObligationClauses(text) {
   return String(text || '').split(/(?:\r?\n+|[.!?]+\s+|,\s+(?:and|then)\s+)/i).map((clause) => clause.trim()).filter((clause) => clause.length >= 8 && /\b(i['’]?ll|i will|we['’]?ll|we will|will|please|could you|would you|can you|need you to)\b/i.test(clause));
 }
@@ -43,4 +73,4 @@ function candidateForClause(observation, clause, { eligibleUpdate, extractorVers
   };
 }
 
-module.exports = { candidateFromObservation, candidatesFromObservation, splitObligationClauses };
+module.exports = { candidateFromObservation, candidatesFromObservation, candidatesFromStructured, splitObligationClauses };

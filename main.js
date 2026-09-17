@@ -1057,7 +1057,7 @@ async function start() {
     }
   }
   wireMailSync();
-  taskService = hostStore ? new TaskService({ store: hostStore }) : null;
+  taskService = hostStore ? new TaskService({ store: hostStore, modelRouter }) : null;
   proactivityService = hostStore ? new ProactivityService({ store: hostStore }) : null;
   conversationService = hostStore ? new ConversationService({ store: hostStore, channel: 'desktop', proactivity: proactivityService }) : null;
   if (hostStore && approvalService) followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows: new WorkflowService({ store: hostStore }) });
@@ -1224,7 +1224,7 @@ async function runMailSync() {
   const adapterId = `gmail:${account}`;
   try {
     const result = await mailSync.run({ adapterId, accountAddress: account });
-    const tasks = taskService?.processAll(adapterId) || [];
+    const tasks = taskService?.processAllAsync ? await taskService.processAllAsync(adapterId) : (taskService?.processAll(adapterId) || []);
     followUpWorkflow?.reconcileReplies(hostStore.observations(adapterId));
     const syncResult = { ...result, taskCandidates: tasks.length };
     console.error(`[mail] sync complete account=${account} fetched=${syncResult.fetched} inserted=${syncResult.inserted} tasks=${syncResult.taskCandidates}`);
@@ -1244,7 +1244,7 @@ async function runCalendarSync() {
   const adapterId = `calendar:${account}`;
   try {
     const result = await calendarSync.run({ adapterId, accountAddress: account });
-    const tasks = taskService?.processAll(adapterId) || [];
+    const tasks = taskService?.processAllAsync ? await taskService.processAllAsync(adapterId) : (taskService?.processAll(adapterId) || []);
     const syncResult = { ...result, taskCandidates: tasks.length };
     hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('calendar:status-changed', { status: 'healthy', result: syncResult });
@@ -1262,7 +1262,7 @@ async function runDriveSync() {
   const adapterId = `drive:${account}`;
   try {
     const result = await driveSync.run({ adapterId, accountAddress: account, boundedWindow: 100 });
-    const tasks = taskService?.processAll(adapterId) || [];
+    const tasks = taskService?.processAllAsync ? await taskService.processAllAsync(adapterId) : (taskService?.processAll(adapterId) || []);
     const syncResult = { ...result, taskCandidates: tasks.length };
     hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('drive:status-changed', { status: 'healthy', result: syncResult });

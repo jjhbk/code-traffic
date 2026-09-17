@@ -22,6 +22,13 @@ const DRAFT_REPLY_SCHEMA = {
   properties: { subject: { type: 'string' }, body: { type: 'string' } },
   required: ['subject', 'body'],
 };
+const OBLIGATION_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: { obligations: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+    summary: { type: 'string' }, owner: { type: 'string', enum: ['self', 'counterparty', 'uncertain'] }, blocker: { type: 'string', enum: ['self', 'counterparty', 'uncertain'] }, counterparty: { type: ['string', 'null'] }, dueDate: { type: ['string', 'null'] }, dueDateBasis: { type: ['string', 'null'] }, confidence: { type: 'string', enum: ['low', 'medium', 'high'] }, evidenceText: { type: 'string' }, evidenceStart: { type: 'integer' }, evidenceEnd: { type: 'integer' },
+  }, required: ['summary', 'owner', 'blocker', 'counterparty', 'dueDate', 'dueDateBasis', 'confidence', 'evidenceText', 'evidenceStart', 'evidenceEnd'] } } },
+  required: ['obligations'],
+};
 
 function validateRanking(result, tasks) {
   if (!result || !Array.isArray(result.items)) throw new Error('Model ranking must contain an items array.');
@@ -46,6 +53,20 @@ function validateNextStep(result) {
 function validateDraftReply(result) {
   if (!result || typeof result.subject !== 'string' || !result.subject.trim() || typeof result.body !== 'string' || !result.body.trim() || result.body.length > 10_000) throw new Error('Invalid reply draft.');
   return { subject: result.subject.replace(/[\r\n]/g, ' ').trim(), body: result.body.trim() };
+}
+
+function validateObligations(result, sourceText) {
+  if (!result || !Array.isArray(result.obligations)) throw new Error('Model extraction must contain an obligations array.');
+  const source = String(sourceText || '');
+  const obligations = result.obligations.map((item) => {
+    if (!item || typeof item.summary !== 'string' || !item.summary.trim() || !['self', 'counterparty', 'uncertain'].includes(item.owner) || !['self', 'counterparty', 'uncertain'].includes(item.blocker) || !['low', 'medium', 'high'].includes(item.confidence)) return null;
+    const evidenceText = String(item.evidenceText || '');
+    const start = Number(item.evidenceStart);
+    const end = Number(item.evidenceEnd);
+    if (!evidenceText || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > source.length || source.slice(start, end) !== evidenceText) return null;
+    return { ...item, summary: item.summary.trim(), evidenceText, evidenceStart: start, evidenceEnd: end, counterparty: item.counterparty || null, dueDate: item.dueDate || null, dueDateBasis: item.dueDateBasis || null };
+  }).filter(Boolean);
+  return { obligations };
 }
 
 class ModelRouter {
@@ -145,6 +166,26 @@ class ModelRouter {
       this.metrics.lastRanking = { source: this.mode, taskCount: tasks.length, at: Date.now(), status: 'error', error: error.message };
       throw error;
     }
+  }
+
+  async extractObligations(observation) {
+    const source = `${observation?.subject || ''}\n${observation?.body || ''}`.trim();
+    if (!source || this.mode === 'off' || !this.localClient) return { obligations: [], source: 'deterministic', version: 'structured-1' };
+    if (typeof this.localClient.availabilityDetails === 'function') {
+      const details = await this.localClient.availabilityDetails();
+      if (!details.available) return { obligations: [], source: 'deterministic', reason: details.reason, version: 'structured-1' };
+    }
+    const safeSource = this.mode === 'frontier'
+      ? (await this.privacyGateway.pseudonymizeWithRecognizer(source, (text) => this.recognizeEntities(text))).text
+      : source;
+    if (this.mode === 'frontier') return { obligations: [], source: 'deterministic', reason: 'frontier-evidence-offsets-unavailable', version: 'structured-1' };
+    this.metrics.localCalls += 1;
+    const result = validateObligations(await this.localClient.complete({
+      system: 'Extract personal obligations from the source. Return only JSON matching the schema. Extract separate commitments separately. Use only exact source spans for evidence. Do not invent tasks, people, dates, or actions.',
+      prompt: JSON.stringify({ source: safeSource, direction: observation.direction || null }),
+      schema: OBLIGATION_SCHEMA,
+    }), source);
+    return { ...result, source: 'local', version: 'structured-1' };
   }
 
   async proposeNextStep(task, context = []) {
@@ -255,4 +296,4 @@ class ModelRouter {
   }
 }
 
-module.exports = { ModelRouter, RANK_SCHEMA, ENTITY_SCHEMA, NEXT_STEP_SCHEMA, DRAFT_REPLY_SCHEMA, validateRanking, validateNextStep, validateDraftReply };
+module.exports = { ModelRouter, RANK_SCHEMA, ENTITY_SCHEMA, NEXT_STEP_SCHEMA, DRAFT_REPLY_SCHEMA, OBLIGATION_SCHEMA, validateRanking, validateNextStep, validateDraftReply, validateObligations };

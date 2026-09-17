@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { EntityVault, PrivacyGateway } = require('../host/privacy/gateway');
-const { ModelRouter, validateRanking, validateNextStep, validateDraftReply } = require('../host/models/router');
+const { ModelRouter, validateRanking, validateNextStep, validateDraftReply, validateObligations } = require('../host/models/router');
 const { OllamaClient, OpenAICompatibleClient } = require('../host/models/clients');
 const { IsolatedFrontierClient } = require('../host/models/frontier-gateway');
 
@@ -33,6 +33,18 @@ const router = new ModelRouter({ privacyGateway: new PrivacyGateway({ vault: new
   const plan = await planner.proposeNextStep(tasks[0], [{ sourceId: 'mail-1', summary: 'Reply to alice@example.com', status: 'active' }]);
   assert.equal(plan.decision, 'draft_follow_up');
   assert.equal(planner.diagnostics().metrics.lastDecision.status, 'ok');
+  const source = 'Launch\nI will send the contract by Friday.';
+  const structured = new ModelRouter({
+    privacyGateway: new PrivacyGateway({ vault: new EntityVault() }),
+    localClient: { complete: async ({ schema }) => {
+      assert.equal(schema.required.includes('obligations'), true);
+      return { obligations: [{ summary: 'Send the contract', owner: 'self', blocker: 'counterparty', counterparty: 'client@example.com', dueDate: 'friday', dueDateBasis: 'message-text', confidence: 'high', evidenceText: 'I will send the contract by Friday.', evidenceStart: 7, evidenceEnd: source.length }] };
+    } },
+    mode: 'local',
+  });
+  const extracted = await structured.extractObligations({ subject: 'Launch', body: 'I will send the contract by Friday.', direction: 'outgoing' });
+  assert.equal(extracted.obligations.length, 1);
+  assert.deepEqual(validateObligations({ obligations: [{ summary: 'bad', owner: 'self', blocker: 'self', confidence: 'high', evidenceText: 'not present', evidenceStart: 0, evidenceEnd: 11 }] }, source).obligations, []);
   const frontier = new OpenAICompatibleClient({ model: 'frontier-test', apiKey: 'secret', fetchImpl: async (_url, options) => {
     const body = JSON.parse(options.body);
     assert.equal(body.response_format.type, 'json_schema');
