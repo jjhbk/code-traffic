@@ -35,4 +35,4 @@ The export verifies that the standalone React Native surface bundles independent
 
 Native release profiles are defined in `eas.json`: use `npx eas build --profile development`, `preview`, or `production` after configuring an Expo/EAS project and push credentials. The repository intentionally does not contain account-specific project IDs or signing secrets.
 
-When an EAS project is linked, its project ID is read from the Expo runtime configuration and supplied to push-token registration; without a linked project, push enablement remains unavailable until the build is configured.
+When an EAS project is linked, its project ID is read from the Expo runtime configuration and supplied to push-token registration. For a build without a checked-in account ID, provide `EXPO_PUBLIC_EAS_PROJECT_ID` (or `EAS_PROJECT_ID`) to Expo/EAS; the dynamic config injects it without storing account metadata in the repository.
