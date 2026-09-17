@@ -1,7 +1,7 @@
 # Signal Box: durable proactive assistant migration
 
 Date: 2026-09-16. Baseline: package version 1.0.16.
-Status: implementation plan; no application changes made by this audit.
+Status: implementation in progress. The durable runtime, reconciled task graph, context store, proactive decisions, reviewed follow-up workflow, unified desktop/Telegram conversation, workflow controls, and tray-backed background operation are implemented. The remaining deployment-level work is moving the host out of Electron into a separately packaged authenticated process after platform validation.
 
 ## Objective and boundaries
 
