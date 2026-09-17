@@ -30,5 +30,10 @@ store.saveObservation({ observationId: 'gmail-delete', messageId: 'gmail-delete'
 const deleted = store.deleteMailData();
 assert.equal(deleted.observations, 1);
 assert.equal(store.observations('fake').length, 3, 'non-Gmail adapters remain available');
+const multi = { observationId: 'multi', messageId: 'multi', threadId: 'multi-thread', subject: 'Launch plan', body: "I'll send the contract by Friday, and I'll schedule the review by Monday.", direction: 'outgoing', to: ['client@example.com'] };
+store.saveObservation(multi, 'fake');
+const extracted = service.processObservation(multi);
+assert.equal(extracted.length, 2, 'separate commitments in one message remain separate tasks');
+assert.notEqual(extracted[0].obligationKey, extracted[1].obligationKey);
 store.close();
 console.log('task store tests passed');

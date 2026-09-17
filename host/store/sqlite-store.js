@@ -660,6 +660,10 @@ class SqliteStore {
     const now = this.clock();
     const existing = this.db.prepare('SELECT task_id AS taskId, status, task_json AS taskJson FROM tasks WHERE candidate_id = ?').get(candidate.candidateId);
     if (existing) return { ...JSON.parse(existing.taskJson), taskId: existing.taskId, status: existing.status, preserved: true };
+    const evidenced = this.db.prepare(`SELECT t.task_id AS taskId, t.status, t.task_json AS taskJson
+      FROM task_evidence te JOIN tasks t ON t.task_id = te.task_id
+      WHERE te.observation_id = ? AND te.evidence_text = ? ORDER BY t.updated_at DESC LIMIT 1`).get(candidate.observationId, candidate.evidence?.text || '');
+    if (evidenced) return { ...JSON.parse(evidenced.taskJson), taskId: evidenced.taskId, status: evidenced.status, preserved: true };
     const reconciled = candidate.obligationKey
       ? this.db.prepare("SELECT task_id AS taskId, status, task_json AS taskJson FROM tasks WHERE obligation_key = ? AND status NOT IN ('done', 'dismissed') ORDER BY updated_at DESC LIMIT 1").get(candidate.obligationKey)
       : null;

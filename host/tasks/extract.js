@@ -1,29 +1,46 @@
 const crypto = require('crypto');
 
 function candidateFromObservation(observation, { filters = null, extractorVersion = 'local-1' } = {}) {
+  return candidatesFromObservation(observation, { filters, extractorVersion })[0] || null;
+}
+
+function candidatesFromObservation(observation, { filters = null, extractorVersion = 'local-1' } = {}) {
   const text = `${observation.subject}\n${observation.body}`.trim();
-  const dueMatch = /\b(by|before|due)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(text);
   const commitment = /\b(i['’]?ll|i will|we['’]?ll|we will|can do|will (?:send|share|follow up|review|provide|finish)|i can|we can|please (?:send|share|review|confirm|provide|finish|follow up)|could you|would you|can you|need you to)\b/i.test(text);
   const eligibleUpdate = Boolean(filters?.existingTaskUpdate);
-  if ((!commitment && !eligibleUpdate) || (filters && !filters.eligible)) return null;
-  const evidenceStart = dueMatch ? Math.max(0, dueMatch.index - 80) : 0;
-  const evidenceEnd = dueMatch ? Math.min(text.length, dueMatch.index + dueMatch[0].length + 80) : Math.min(text.length, 240);
-  const stableParts = [observation.provider || 'source', observation.threadId, observation.direction === 'outgoing' ? 'self' : 'counterparty', observation.direction === 'incoming' ? observation.from : observation.to?.[0] || '', String(observation.subject || text.slice(0, 120)).trim().toLowerCase()];
+  if ((!commitment && !eligibleUpdate) || (filters && !filters.eligible)) return [];
+  const clauses = splitObligationClauses(text);
+  const candidates = clauses.map((clause, index) => candidateForClause(observation, clause, {
+    eligibleUpdate, extractorVersion, index, fallbackText: text, clauseCount: clauses.length,
+  })).filter(Boolean);
+  return candidates.length ? candidates : [candidateForClause(observation, text, { eligibleUpdate, extractorVersion, index: 0, fallbackText: text, clauseCount: 1 })].filter(Boolean);
+}
+
+function splitObligationClauses(text) {
+  return String(text || '').split(/(?:\r?\n+|[.!?]+\s+|,\s+(?:and|then)\s+)/i).map((clause) => clause.trim()).filter((clause) => clause.length >= 8 && /\b(i['’]?ll|i will|we['’]?ll|we will|will|please|could you|would you|can you|need you to)\b/i.test(clause));
+}
+
+function candidateForClause(observation, clause, { eligibleUpdate, extractorVersion, index, fallbackText, clauseCount }) {
+  const text = String(clause || '').trim();
+  const dueMatch = /\b(by|before|due)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(text);
+  const evidenceText = text || fallbackText;
+  const identityText = evidenceText.replace(/\b(by|before|due)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/ig, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const stableParts = [observation.provider || 'source', observation.threadId, observation.direction === 'outgoing' ? 'self' : 'counterparty', observation.direction === 'incoming' ? observation.from : observation.to?.[0] || '', identityText];
   return {
-    candidateId: `${observation.observationId}:${extractorVersion}`,
+    candidateId: `${observation.observationId}:${extractorVersion}${clauseCount > 1 ? `:${index}` : ''}`,
     observationId: observation.observationId,
     threadId: observation.threadId,
-    summary: observation.subject || text.slice(0, 120),
+    summary: clauseCount === 1 && observation.subject ? observation.subject : `${observation.subject ? `${observation.subject}: ` : ''}${evidenceText}`.slice(0, 120),
     owner: observation.direction === 'outgoing' ? 'self' : 'counterparty',
     blocker: observation.direction === 'incoming' ? 'self' : 'counterparty',
     counterparty: observation.direction === 'incoming' ? observation.from : observation.to?.[0] || null,
     dueDate: dueMatch ? dueMatch[2].toLowerCase() : null,
     dueDateBasis: dueMatch ? 'message-text' : null,
-    confidence: eligibleUpdate && !commitment ? 'low' : (dueMatch ? 'medium' : 'low'),
-    evidence: { start: evidenceStart, end: evidenceEnd, text: text.slice(evidenceStart, evidenceEnd) },
+    confidence: eligibleUpdate && !dueMatch ? 'low' : (dueMatch ? 'medium' : 'low'),
+    evidence: { start: 0, end: evidenceText.length, text: evidenceText },
     extractorVersion,
     obligationKey: `ob_${crypto.createHash('sha256').update(stableParts.join('|')).digest('hex').slice(0, 24)}`,
   };
 }
 
-module.exports = { candidateFromObservation };
+module.exports = { candidateFromObservation, candidatesFromObservation, splitObligationClauses };

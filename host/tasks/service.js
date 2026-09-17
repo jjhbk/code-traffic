@@ -1,5 +1,5 @@
 const { candidateFilters } = require('../mail/normalize');
-const { candidateFromObservation } = require('./extract');
+const { candidatesFromObservation } = require('./extract');
 
 class TaskService {
   constructor({ store, extractorVersion = 'local-1' } = {}) {
@@ -10,13 +10,13 @@ class TaskService {
 
   processObservation(observation) {
     const filters = candidateFilters(observation, { existingTaskThreadIds: new Set(this.store.taskThreadIds()) });
-    const candidate = candidateFromObservation(observation, { filters, extractorVersion: this.extractorVersion });
-    if (!candidate) return null;
-    return this.store.saveTaskCandidate(candidate);
+    const candidates = candidatesFromObservation(observation, { filters, extractorVersion: this.extractorVersion });
+    if (!candidates.length) return [];
+    return candidates.map((candidate) => this.store.saveTaskCandidate(candidate));
   }
 
   processAll(adapterId = null) {
-    return this.store.observations(adapterId).map((observation) => this.processObservation(observation)).filter(Boolean);
+    return this.store.observations(adapterId).flatMap((observation) => this.processObservation(observation));
   }
 }
 
