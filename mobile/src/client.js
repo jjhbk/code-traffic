@@ -31,6 +31,12 @@ class MobileApiError extends Error {
 class MobileCoreClient {
   constructor({ baseUrl, token, fetchImpl = globalThis.fetch, storage = null, clock = () => Date.now() } = {}) {
     if (!baseUrl || !token || typeof fetchImpl !== 'function') throw new Error('Mobile core client requires base URL, token, and fetch implementation.');
+    let parsed;
+    try { parsed = new URL(String(baseUrl)); } catch (_) { throw new Error('Mobile core URL must be a valid HTTP(S) URL.'); }
+    const hostname = parsed.hostname.toLowerCase();
+    const loopback = hostname === 'localhost' || hostname === '::1' || hostname === '127.0.0.1' || hostname.startsWith('127.');
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('Mobile core URL must be a valid HTTP(S) URL without embedded credentials.');
+    if (parsed.protocol === 'http:' && !loopback) throw new Error('Remote mobile connections require HTTPS.');
     this.baseUrl = String(baseUrl).replace(/\/$/, ''); this.token = token; this.fetchImpl = fetchImpl; this.storage = storage; this.clock = clock;
   }
 

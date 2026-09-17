@@ -965,8 +965,9 @@ class SqliteStore {
           if (!task) continue;
           const taskJson = JSON.parse(task.taskJson);
           if (taskJson.sourceUnavailable !== true) {
+            const version = this._nextTaskVersion(taskRow.taskId, now);
             this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?')
-              .run(JSON.stringify({ ...taskJson, sourceUnavailable: true, sourceUnavailableAt: now }), now, taskRow.taskId);
+              .run(JSON.stringify({ ...taskJson, sourceUnavailable: true, sourceUnavailableAt: now }), version, taskRow.taskId);
             this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'source-removed\', ?, ?)')
               .run(taskRow.taskId, JSON.stringify({ observationId: row.observationId, adapterId, messageId: String(messageId) }), now);
           }
@@ -1175,10 +1176,11 @@ class SqliteStore {
       const corrected = this.db.prepare('SELECT field_name AS fieldName, value_json AS valueJson FROM task_corrections WHERE task_id = ?').all(reconciled.taskId);
       const next = { ...prior, ...candidate, sourceUnavailable: false, taskId: reconciled.taskId, obligationKey: candidate.obligationKey };
       for (const row of corrected) next[row.fieldName] = JSON.parse(row.valueJson);
+      const version = this._nextTaskVersion(reconciled.taskId, now);
       this.db.exec('BEGIN');
       try {
         this.db.prepare('UPDATE tasks SET task_json = ?, obligation_key = ?, updated_at = ? WHERE task_id = ?')
-          .run(JSON.stringify(next), candidate.obligationKey, now, reconciled.taskId);
+          .run(JSON.stringify(next), candidate.obligationKey, version, reconciled.taskId);
         this.db.prepare(`INSERT INTO task_evidence(task_id, observation_id, start_offset, end_offset, evidence_text)
           VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, observation_id, start_offset, end_offset) DO NOTHING`)
           .run(reconciled.taskId, candidate.observationId, candidate.evidence.start, candidate.evidence.end, candidate.evidence.text);
@@ -1207,6 +1209,11 @@ class SqliteStore {
       ? 'SELECT task_id AS taskId, task_json AS taskJson, status, created_at AS createdAt, updated_at AS updatedAt FROM tasks ORDER BY updated_at DESC'
       : `SELECT task_id AS taskId, task_json AS taskJson, status, created_at AS createdAt, updated_at AS updatedAt FROM tasks WHERE status NOT IN ('dismissed', 'done') ORDER BY updated_at DESC`).all();
     return rows.map((row) => ({ ...JSON.parse(row.taskJson), taskId: row.taskId, status: row.status, createdAt: row.createdAt, updatedAt: row.updatedAt }));
+  }
+
+  _nextTaskVersion(taskId, now = this.clock()) {
+    const row = this.db.prepare('SELECT updated_at AS updatedAt FROM tasks WHERE task_id = ?').get(taskId);
+    return Math.max(Number(now) || 0, Number(row?.updatedAt || 0) + 1);
   }
 
   taskGraph({ includeDismissed = true, taskId = null, depth = null, limit = 500 } = {}) {
@@ -1330,7 +1337,8 @@ class SqliteStore {
     const task = this.db.prepare('SELECT task_id FROM tasks WHERE task_id = ?').get(taskId);
     if (!task) throw new Error('Task not found.');
     const now = this.clock();
-    this.db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?').run(status, now, taskId);
+    const version = this._nextTaskVersion(taskId, now);
+    this.db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?').run(status, version, taskId);
     this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, ?, ?, ?)')
       .run(taskId, `status-${status}`, JSON.stringify(details), now);
     return this.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
@@ -1342,7 +1350,8 @@ class SqliteStore {
     if (!row) throw new Error('Task not found.');
     const task = { ...JSON.parse(row.taskJson), snoozedUntil: untilAt };
     const now = this.clock();
-    this.db.prepare('UPDATE tasks SET task_json = ?, status = \'snoozed\', updated_at = ? WHERE task_id = ?').run(JSON.stringify(task), now, taskId);
+    const version = this._nextTaskVersion(taskId, now);
+    this.db.prepare('UPDATE tasks SET task_json = ?, status = \'snoozed\', updated_at = ? WHERE task_id = ?').run(JSON.stringify(task), version, taskId);
     this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'snoozed\', ?, ?)').run(taskId, JSON.stringify({ untilAt }), now);
     return { ...task, taskId, status: 'snoozed' };
   }
@@ -1352,7 +1361,8 @@ class SqliteStore {
       const task = JSON.parse(row.taskJson);
       if (Number(task.snoozedUntil) <= now) {
         delete task.snoozedUntil;
-        this.db.prepare('UPDATE tasks SET task_json = ?, status = \'active\', updated_at = ? WHERE task_id = ?').run(JSON.stringify(task), now, row.taskId);
+        const version = this._nextTaskVersion(row.taskId, now);
+        this.db.prepare('UPDATE tasks SET task_json = ?, status = \'active\', updated_at = ? WHERE task_id = ?').run(JSON.stringify(task), version, row.taskId);
       }
     }
   }
@@ -1458,7 +1468,8 @@ class SqliteStore {
     return this.transaction(() => {
       const next = { ...JSON.parse(row.taskJson), ...changes };
       const now = this.clock();
-      this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?').run(JSON.stringify(next), now, taskId);
+      const version = this._nextTaskVersion(taskId, now);
+      this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?').run(JSON.stringify(next), version, taskId);
       const correction = this.db.prepare(`INSERT INTO task_corrections(task_id, field_name, value_json, corrected_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(task_id, field_name) DO UPDATE SET value_json = excluded.value_json, corrected_at = excluded.corrected_at`);
       for (const [field, value] of Object.entries(changes)) correction.run(taskId, field, JSON.stringify(value), now);
