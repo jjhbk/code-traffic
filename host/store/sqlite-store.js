@@ -1452,6 +1452,7 @@ class SqliteStore {
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(from_task_id, to_task_id, relation_type) DO UPDATE SET details_json = excluded.details_json`).run(fromTaskId, toTaskId, relationType, JSON.stringify(details), this.clock());
     this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, ?, ?, ?)')
       .run(fromTaskId, `relation-${relationType}`, JSON.stringify({ toTaskId, ...details }), this.clock());
+    this._enqueueRelationDependents(fromTaskId, this.clock());
     return { fromTaskId, toTaskId, relationType, details };
   }
 
@@ -1470,6 +1471,24 @@ class SqliteStore {
     return rows.map((row) => ({ ...row, details: JSON.parse(row.detailsJson) }));
   }
 
+  _enqueueRelationDependents(changedTaskId, runAt = this.clock()) {
+    const changedTask = this.listTasks({ includeDismissed: true }).find((item) => item.taskId === changedTaskId);
+    const rows = this.db.prepare(`SELECT DISTINCT from_task_id AS taskId FROM task_relations
+      WHERE (to_task_id = ? AND relation_type IN ('depends_on', 'waiting_on'))
+         OR (from_task_id = ? AND relation_type = 'blocks')`).all(changedTaskId, changedTaskId);
+    for (const row of rows) {
+      const task = this.listTasks({ includeDismissed: true }).find((item) => item.taskId === row.taskId);
+      if (task && !['done', 'dismissed'].includes(task.status)) {
+        this.enqueueJob({
+          kind: 'assistant.proactive-actions',
+          payload: { taskId: task.taskId, taskVersion: Number(task.updatedAt), dependencyTaskId: changedTaskId, dependencyVersion: Number(changedTask?.updatedAt || 0), reason: 'dependency-updated' },
+          runAt,
+          dedupeKey: `assistant.proactive-actions:${task.taskId}:dependency:${changedTaskId}:${Number(changedTask?.updatedAt || runAt)}`,
+        });
+      }
+    }
+  }
+
   setTaskStatus(taskId, status, details = {}) {
     if (!['active', 'done', 'snoozed', 'dismissed'].includes(status)) throw new Error('Invalid task status.');
     const task = this.db.prepare('SELECT task_id FROM tasks WHERE task_id = ?').get(taskId);
@@ -1479,6 +1498,7 @@ class SqliteStore {
     this.db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?').run(status, version, taskId);
     this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, ?, ?, ?)')
       .run(taskId, `status-${status}`, JSON.stringify(details), now);
+    this._enqueueRelationDependents(taskId, now);
     return this.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
   }
 
