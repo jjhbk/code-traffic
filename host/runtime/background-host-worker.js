@@ -6,6 +6,7 @@ const { replanTask } = require('../proactivity/replan');
 const { TaskService } = require('../tasks/service');
 const { WorkflowService } = require('../workflows/service');
 const { MeetingPrepWorkflow } = require('../workflows/meeting-prep');
+const { DigestScheduler } = require('../scheduling/digest');
 
 const token = process.env.SIGNAL_BOX_BACKGROUND_TOKEN || '';
 const databasePath = process.argv[2];
@@ -20,6 +21,9 @@ const proactivity = new ProactivityService({ store });
 const taskService = new TaskService({ store });
 const workflows = new WorkflowService({ store });
 const meetingPrep = new MeetingPrepWorkflow({ store, workflows });
+let digestSettings = {};
+try { digestSettings = JSON.parse(process.env.SIGNAL_BOX_DIGEST_SETTINGS || '{}'); } catch (_) { digestSettings = {}; }
+const digestScheduler = new DigestScheduler({ store, timeZone: digestSettings.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone, dailyCap: Number(digestSettings.dailyCap) || 5, digestAt: digestSettings.digestAt || '08:30', cadenceMinutes: Number(digestSettings.cadenceMinutes) || 60, quietStart: digestSettings.quietStart || null, quietEnd: digestSettings.quietEnd || null });
 const parentCalls = new Map();
 let parentSequence = 0;
 function callParent(kind, payload) {
@@ -29,7 +33,7 @@ function callParent(kind, payload) {
     send({ type: 'job', id, token, kind, payload });
   });
 }
-const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'tasks.reconcile', 'assistant.replan', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest', 'assistant.mobile-push'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
+const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'tasks.reconcile', 'assistant.replan', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest', 'assistant.digest.plan', 'assistant.mobile-push'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
 runtime.register('workflow.resume', async (payload) => workflows.resume(payload.workflowId));
 runtime.register('browser.availability.check', async (payload) => {
   delegate('browser.availability.check', payload);
@@ -42,14 +46,24 @@ for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['ass
   });
 }
 runtime.register('assistant.replan', async (payload) => replanTask({ store, proactivity, taskId: payload.taskId, reason: payload.reason }));
+runtime.register('assistant.digest.plan', runIndependent('assistant.digest.plan', () => planBackgroundDigest(), 30 * 1000));
 runtime.register('assistant.mobile-push', runIndependent('assistant.mobile-push', () => mobilePushService.deliverPending(), 30 * 1000));
 runtime.start();
-for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000], ['assistant.mobile-push', 30 * 1000]]) {
+for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000], ['assistant.digest.plan', 30 * 1000], ['assistant.mobile-push', 30 * 1000]]) {
   runtime.schedule(kind, {}, Date.now(), `${kind}:${Math.floor(Date.now() / intervalMs)}`);
 }
 
 function reply(id, result, error = null) {
   send({ type: 'response', id, result, error: error ? error.message : null });
+}
+
+function planBackgroundDigest() {
+  const tasks = store.listTasks();
+  const decisions = proactivity.evaluate(tasks);
+  proactivity.enqueueAttentionNotifications(tasks, decisions);
+  const types = new Map(decisions.map((decision) => [decision.taskId, decision.type]));
+  const actionable = tasks.filter((task) => types.get(task.taskId) !== 'wait');
+  return digestScheduler.prepareScheduled(actionable, null);
 }
 
 function scheduleLater(kind, payload, runAt, dedupeKey, delayMs = 0) {

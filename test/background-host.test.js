@@ -17,6 +17,7 @@ const { WorkflowService } = require('../host/workflows/service');
   store.enqueueJob({ kind: 'workflow.resume', payload: { workflowId: workflow.workflowId }, runAt: Date.now(), dedupeKey: 'background-fixture' });
   store.enqueueJob({ kind: 'assistant.replan', payload: { taskId: 'background-replan-task', reason: 'source-removed' }, runAt: Date.now(), dedupeKey: 'background-replan-fixture' });
   store.enqueueJob({ kind: 'tasks.reconcile', payload: { adapterId: 'background-fixture' }, runAt: Date.now(), dedupeKey: 'background-reconcile-fixture' });
+  store.enqueueJob({ kind: 'assistant.digest.plan', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest-plan-fixture' });
   store.enqueueJob({ kind: 'assistant.digest', payload: {}, runAt: Date.now(), dedupeKey: 'background-digest' });
   store.close();
 
@@ -56,6 +57,7 @@ const { WorkflowService } = require('../host/workflows/service');
   const reconciled = new SqliteStore({ filename: databasePath });
   assert.equal(reconciled.getWorkflow(workflow.workflowId).state, 'needs_attention');
   assert.equal(reconciled.listTasks().some((task) => task.summary === 'Background task'), true, 'background host reconciles tasks without Electron');
+  assert.equal(reconciled.listPendingNotifications({ notificationClass: 'digest' }).length, 1, 'background host plans digests without Electron');
   reconciled.close();
   assert.deepEqual(await host.stop(), { stopped: true });
   liveStore.close();

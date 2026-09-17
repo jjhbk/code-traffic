@@ -3,7 +3,7 @@ const path = require('path');
 const { fork } = require('child_process');
 
 class BackgroundHost {
-  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false, supervise = true, restartDelayMs = 250 } = {}) {
+  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false, supervise = true, restartDelayMs = 250, digestSettings = {} } = {}) {
     if (!databasePath) throw new Error('A background host database path is required.');
     this.databasePath = databasePath;
     this.workerPath = workerPath;
@@ -13,6 +13,7 @@ class BackgroundHost {
     this.paused = Boolean(paused);
     this.supervise = Boolean(supervise);
     this.restartDelayMs = Math.max(10, Number(restartDelayMs) || 250);
+    this.digestSettings = digestSettings && typeof digestSettings === 'object' ? digestSettings : {};
     this.child = null;
     this.pending = new Map();
     this.sequence = 0;
@@ -28,7 +29,7 @@ class BackgroundHost {
       let readySettled = false;
       const resolveReady = (health) => { if (!readySettled) { readySettled = true; this.restartAttempts = 0; resolve(health); } };
       const rejectReady = (error) => { if (!readySettled) { readySettled = true; reject(error); } };
-      const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0' } });
+      const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0', SIGNAL_BOX_DIGEST_SETTINGS: JSON.stringify(this.digestSettings) } });
       this.child = child;
       child.on('message', (message) => {
         if (message.type === 'ready') resolveReady(message.health);

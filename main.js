@@ -1129,6 +1129,14 @@ async function start() {
           databasePath: path.join(app.getPath('userData'), 'signal-box.db'),
           forkImpl: forkBackgroundUtility,
           paused: appSettings.assistantPaused === true,
+          digestSettings: {
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            dailyCap: Number.isInteger(appSettings.dailyDigestCap) ? appSettings.dailyDigestCap : 5,
+            digestAt: appSettings.digestAt || '08:30',
+            cadenceMinutes: Number(appSettings.digestCadenceMinutes) || 60,
+            quietStart: appSettings.quietHoursStart || null,
+            quietEnd: appSettings.quietHoursEnd || null,
+          },
           onJob: async (kind, payload) => {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
             if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
