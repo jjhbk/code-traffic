@@ -85,6 +85,8 @@ if (process.platform === 'linux' && process.env.WSL_INTEROP) {
   app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
   // WSLg's Wayland path can lose the native cursor in Electron windows.
   // X11 is the stable WSLg backend for Signal Box's desktop window.
+  process.env.XCURSOR_THEME ||= 'Adwaita';
+  process.env.XCURSOR_SIZE ||= '24';
   app.commandLine.appendSwitch('ozone-platform', 'x11');
 }
 
