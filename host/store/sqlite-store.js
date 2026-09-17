@@ -384,10 +384,20 @@ class SqliteStore {
   constructor({ filename = ':memory:', clock = () => Date.now() } = {}) {
     const { DatabaseSync } = loadSqlite();
     if (filename !== ':memory:') fs.mkdirSync(path.dirname(filename), { recursive: true });
+    const existingDatabase = filename !== ':memory:' && fs.existsSync(filename) && fs.statSync(filename).size > 0;
     this.db = new DatabaseSync(filename);
     this.clock = clock;
     this.db.exec('PRAGMA foreign_keys = ON; CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);');
+    const currentVersion = Number(this.db.prepare('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations').get().version);
+    if (existingDatabase && currentVersion < MIGRATIONS.length) this.migrationBackupPath = this.createMigrationBackup(filename);
     this.migrate();
+  }
+
+  createMigrationBackup(filename) {
+    const stamp = Number(this.clock()); let backupPath = `${filename}.pre-migration-${stamp}.bak`; let suffix = 1;
+    while (fs.existsSync(backupPath)) backupPath = `${filename}.pre-migration-${stamp}-${suffix += 1}.bak`;
+    fs.copyFileSync(filename, backupPath);
+    return backupPath;
   }
 
   migrate() {
