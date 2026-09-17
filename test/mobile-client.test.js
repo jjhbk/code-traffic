@@ -35,6 +35,9 @@ assert.equal(assistantHealthStatus({ core: { running: true, jobs: { queued: 3 } 
   const runs = await client.autonomousRuns(3);
   assert.equal(calls.at(-1).url, 'http://core/api/v1/mobile/assistant/autonomous-runs?limit=3');
   assert.deepEqual(runs, { accepted: true });
+  const graph = await client.taskGraph({ depth: 1, limit: 10 });
+  assert.equal(calls.at(-1).url, 'http://core/api/v1/mobile/graph?taskId=&depth=1&limit=10');
+  assert.deepEqual(graph, { accepted: true });
   const confirmed = await client.confirmAutonomousRun('run-1', 'Verified provider confirmation.');
   assert.equal(calls.at(-1).url, 'http://core/api/v1/mobile/assistant/autonomous-runs/run-1/confirm');
   assert.deepEqual(JSON.parse(calls.at(-1).options.body), { evidence: 'Verified provider confirmation.' });
