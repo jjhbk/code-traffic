@@ -316,6 +316,7 @@ h1 { font-size: 30px; font-weight: 730; letter-spacing: -.045em; background: lin
 .graph-edge { stroke: rgba(110, 231, 245, .34); stroke-width: 2; }
 .graph-task rect { fill: rgba(110, 231, 245, .11); stroke: rgba(110, 231, 245, .42); }
 .graph-observation rect { fill: rgba(169, 155, 255, .11); stroke: rgba(169, 155, 255, .42); }
+.graph-context rect { fill: rgba(193, 242, 202, .11); stroke: rgba(193, 242, 202, .42); }
 .graph-label { fill: #e9ffff; font-size: 14px; font-weight: 650; }
 .graph-meta { fill: #8ea8ad; font-size: 11px; }
 #model-diagnostics { white-space: pre-wrap; line-height: 1.5; }

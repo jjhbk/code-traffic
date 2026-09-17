@@ -452,7 +452,7 @@ async function loadTaskGraph() {
     if (!graph.nodes.length) { empty.hidden = false; svg.hidden = true; return; }
     empty.hidden = true; svg.hidden = false;
     const taskNodes = graph.nodes.filter((node) => node.type === 'task');
-    const sourceNodes = graph.nodes.filter((node) => node.type === 'observation');
+    const sourceNodes = graph.nodes.filter((node) => node.type === 'observation' || node.type === 'context');
     const positions = new Map();
     const height = Math.max(300, Math.max(taskNodes.length, sourceNodes.length) * 88 + 50);
     svg.setAttribute('viewBox', `0 0 900 ${height}`);
@@ -468,7 +468,7 @@ async function loadTaskGraph() {
       const group = document.createElementNS('http://www.w3.org/2000/svg', 'g'); group.setAttribute('class', `graph-node graph-${node.type}`);
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); rect.setAttribute('x', position.x - 155); rect.setAttribute('y', position.y - 25); rect.setAttribute('width', 310); rect.setAttribute('height', 50); rect.setAttribute('rx', 12); group.append(rect);
       graphText(group, position.x - 140, position.y - 3, node.label, 'graph-label');
-      graphText(group, position.x - 140, position.y + 16, node.type === 'task' ? `${node.status || 'active'}${node.dueDate ? ` · due ${node.dueDate}` : ''}` : (node.source || 'source observation'), 'graph-meta');
+      graphText(group, position.x - 140, position.y + 16, node.type === 'task' ? `${node.status || 'active'}${node.dueDate ? ` · due ${node.dueDate}` : ''}` : (node.type === 'context' ? `${node.contextType || 'context'}${node.expired ? ' · expired' : ''}` : (node.source || 'source observation')), 'graph-meta');
       svg.append(group);
     }
   } catch (caught) { empty.hidden = false; empty.textContent = caught.message || 'Task graph unavailable.'; svg.hidden = true; }

@@ -1172,6 +1172,38 @@ class SqliteStore {
       FROM task_evidence te JOIN observations o ON o.observation_id = te.observation_id`).all();
     const nodes = tasks.map((task) => ({ id: `task:${task.taskId}`, type: 'task', label: task.summary || 'Untitled task', status: task.status, owner: task.owner || null, dueDate: task.dueDate || null, dueAt: task.dueAt || null, timeZone: task.timeZone || null, sourceUnavailable: task.sourceUnavailable === true }));
     const edges = [];
+    const contextRecords = this.listContext({ includeExpired: true });
+    const contextByKey = new Map(contextRecords.map((record) => [`${record.recordType}:${record.recordKey}`.toLowerCase(), record]));
+    const linkedContext = new Set();
+    const contextReference = (recordType, recordKey) => {
+      if (!recordKey) return null;
+      const record = contextByKey.get(`${recordType}:${String(recordKey)}`.toLowerCase());
+      if (!record) return null;
+      const nodeId = `context:${record.recordType}:${encodeURIComponent(record.recordKey)}`;
+      if (!linkedContext.has(nodeId)) {
+        const value = record.value && typeof record.value === 'object' ? (record.value.label || record.value.name || record.value.title) : record.value;
+        nodes.push({ id: nodeId, type: 'context', contextType: record.recordType, label: value ? `${record.recordKey}: ${value}` : record.recordKey, source: record.source?.channel || record.recordType, expired: record.validUntil !== null && Number(record.validUntil) <= this.clock() });
+        linkedContext.add(nodeId);
+      }
+      return nodeId;
+    };
+    for (const task of tasks) {
+      const references = [
+        ['person', task.counterparty],
+        ['project', task.project],
+        ['goal', task.goal],
+        ['place', task.contextTrigger?.placeKey || task.locationTrigger?.placeKey],
+      ];
+      for (const [recordType, recordKey] of references) {
+        const nodeId = contextReference(recordType, recordKey);
+        if (nodeId) edges.push({ from: `task:${task.taskId}`, to: nodeId, type: 'context', contextType: recordType });
+      }
+      for (const reference of Array.isArray(task.contextKeys) ? task.contextKeys : []) {
+        if (!reference || typeof reference !== 'object') continue;
+        const nodeId = contextReference(reference.recordType, reference.recordKey);
+        if (nodeId) edges.push({ from: `task:${task.taskId}`, to: nodeId, type: 'context', contextType: reference.recordType });
+      }
+    }
     const seenObservations = new Set();
     for (const row of evidenceRows) {
       if (!taskIds.has(row.taskId)) continue;
