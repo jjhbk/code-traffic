@@ -36,7 +36,13 @@ class FollowUpWorkflow {
     const waiting = this.store.listWorkflows({ activeOnly: true }).filter((workflow) => workflow.workflowType === 'gmail-follow-up' && workflow.state === 'waiting_event');
     const changed = [];
     for (const workflow of waiting) {
-      const reply = observations.find((observation) => observation.threadId === workflow.payload.threadId && observation.direction === 'incoming');
+      const sentAt = Number(workflow.payload.sentAt || 0);
+      const reply = observations.find((observation) => {
+        if (observation.threadId !== workflow.payload.threadId || observation.direction !== 'incoming') return false;
+        if (!sentAt) return true;
+        const observedAt = Number(observation.timestamp || observation.internalDate || observation.createdAt || 0);
+        return observedAt > sentAt;
+      });
       if (!reply) continue;
       changed.push(this.store.updateWorkflow(workflow.workflowId, {
         state: 'verifying',

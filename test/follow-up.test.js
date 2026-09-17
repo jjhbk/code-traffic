@@ -14,10 +14,14 @@ assert.equal(result.workflow.state, 'awaiting_approval');
 assert.equal(result.approval.action.capability, 'gmail.send');
 assert.equal(result.approval.action.workflowId, result.workflow.workflowId);
 assert.equal(result.workflow.payload.requestId, result.approval.request_id || result.approval.requestId);
-store.updateWorkflow(result.workflow.workflowId, { state: 'waiting_event', payload: { ...result.workflow.payload, threadId: 'thread-1' } });
-const verifying = followUp.observeReplies([{ observationId: 'reply-1', threadId: 'thread-1', direction: 'incoming', body: 'The handoff is ready.' }]);
+store.updateWorkflow(result.workflow.workflowId, { state: 'waiting_event', payload: { ...result.workflow.payload, threadId: 'thread-1', sentAt: 1000 } });
+const verifying = followUp.observeReplies([
+  { observationId: 'old-reply', threadId: 'thread-1', direction: 'incoming', timestamp: 900, body: 'An older message.' },
+  { observationId: 'reply-1', threadId: 'thread-1', direction: 'incoming', timestamp: 1100, body: 'The handoff is ready.' },
+]);
 assert.equal(verifying[0].state, 'verifying');
 assert.equal(verifying[0].payload.responseObservationId, 'reply-1');
+assert.equal(followUp.observeReplies([{ observationId: 'old-only', threadId: 'thread-1', direction: 'incoming', timestamp: 950, body: 'Still old.' }]).length, 0);
 assert.throws(() => followUp.prepare({ taskId: 'task-2', status: 'done', counterparty: 'alex@example.com', threadId: 'thread-2' }, { body: 'No' }), /active tasks/);
 followUp.cancel(result.workflow.workflowId);
 assert.equal(store.getWorkflow(result.workflow.workflowId).state, 'cancelled');

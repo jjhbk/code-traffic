@@ -326,6 +326,16 @@ class SqliteStore {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
 
+  renewJob(jobId, leaseToken, leaseMs = 60_000, now = this.clock()) {
+    if (!jobId || !leaseToken || !Number.isFinite(leaseMs) || leaseMs <= 0 || !Number.isFinite(now)) throw new Error('Invalid job lease renewal.');
+    const result = this.db.prepare(`UPDATE jobs SET lease_until = ?, updated_at = ?
+      WHERE job_id = ? AND status = 'running' AND lease_token = ? AND lease_until >= ?`)
+      .run(now + leaseMs, now, jobId, leaseToken, now);
+    if (Number(result.changes) !== 1) throw new Error('Job lease is missing or expired.');
+    this.audit('job-lease-renewed', null, null, { jobId, leaseUntil: now + leaseMs });
+    return true;
+  }
+
   completeJob(jobId, leaseToken, { status = 'completed', runAt = null, error = null } = {}) {
     if (!['completed', 'queued', 'failed'].includes(status)) throw new Error('Invalid job completion status.');
     const now = this.clock();

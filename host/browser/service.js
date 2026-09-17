@@ -28,7 +28,8 @@ class BrowserActionService {
       const saved = this.approvals.receipt({ attemptId: attempt.attemptId, receipt: { ...receipt, requestId, actionDigest: digest(action) } });
       return { attemptId: attempt.attemptId, receiptId: saved.receiptId, receipt };
     } catch (error) {
-      this.approvals.execution({ attemptId: attempt.attemptId, requestId, status: 'failed', details: { error: error.message, surface } });
+      const outcomeStatus = error.outcomeStatus === 'unknown' ? 'unknown' : 'failed';
+      this.approvals.execution({ attemptId: attempt.attemptId, requestId, status: outcomeStatus, details: { error: error.message, surface } });
       throw error;
     }
   }

@@ -693,7 +693,7 @@ async function dispatchApprovedReply(requestId, principal, surface) {
     approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId, destination: action.destination } });
     if (action.workflowId) {
       const wakeAt = Date.now() + 48 * 60 * 60 * 1000;
-      hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: sent.id || null, outcome: 'confirmed' }, details: { attemptId: attempt.attemptId } });
+      hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: sent.id || null, sentAt: Date.now(), outcome: 'confirmed' }, details: { attemptId: attempt.attemptId } });
       followUpWorkflow?.workflows.scheduleResume(action.workflowId, wakeAt);
     }
     return { status: 'confirmed', attemptId: attempt.attemptId, messageId: sent.id || null };

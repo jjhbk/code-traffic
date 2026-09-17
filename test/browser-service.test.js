@@ -17,6 +17,13 @@ const { uberCabBooking } = require('../host/browser/recipes');
   assert.equal(result.receipt.status, 'confirmed');
   assert.equal(store.getExecutionAttempt(result.attemptId).status, 'confirmed');
   assert.equal(store.getDecision(requestId).optionId, 'allow');
+  const uncertain = service.prepare(uberCabBooking, { pickup: 'Home', destination: 'Airport', rideType: 'UberX', maxFare: 40 });
+  const uncertainId = uncertain.request_id || uncertain.requestId;
+  approvals.decide(uncertainId, 'allow', { principal: 'signal-box-user', surface: 'desktop' });
+  await assert.rejects(() => service.executeApproved(uncertainId, {
+    executor: { run: async () => { const error = new Error('network timeout after request'); error.outcomeStatus = 'unknown'; throw error; } },
+  }), /network timeout/);
+  assert.equal(store.getExecutionAttempts(uncertainId)[0].status, 'unknown');
   store.close();
   console.log('browser action service tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

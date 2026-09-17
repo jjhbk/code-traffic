@@ -10,13 +10,15 @@ assert.equal(duplicate.deduplicated, true);
 assert.equal(store.claimJobs({ workerId: 'worker', now }).length, 1);
 const claimed = store.getJob(first.jobId);
 assert.equal(claimed.attempts, 1);
+assert.equal(store.renewJob(first.jobId, claimed.leaseToken, 120_000, now), true);
+assert.equal(store.getJob(first.jobId).leaseUntil, now + 120_000);
 assert.throws(() => store.completeJob(first.jobId, 'wrong', { status: 'completed' }), /lease/);
 
 (async () => {
   const runner = new JobRunner({ store, workerId: 'runner', clock: () => now });
   runner.register('test', async (payload) => { assert.equal(payload.value, 1); });
   // Reclaim the lease after its deadline to exercise restart recovery.
-  now += 61_000;
+  now += 121_000;
   const results = await runner.runOnce();
   assert.equal(results[0].status, 'completed');
   assert.equal(store.getJob(first.jobId).status, 'completed');

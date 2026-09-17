@@ -24,7 +24,10 @@ class JobRunner {
         continue;
       }
       try {
-        const result = await handler(job.payload, job);
+        const result = await handler(job.payload, {
+          ...job,
+          renewLease: (leaseMs = this.leaseMs) => this.store.renewJob(job.jobId, job.leaseToken, leaseMs, this.clock()),
+        });
         results.push(await this.store.completeJob(job.jobId, job.leaseToken, { status: 'completed', error: result?.error || null }));
       } catch (error) {
         const retry = job.attempts < job.maxAttempts;
