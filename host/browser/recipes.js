@@ -8,11 +8,34 @@ function digest(value) {
 
 function validateRecipe(recipe = {}) {
   if (!recipe.id || !recipe.origin || !EFFECTS.has(recipe.effects) || !Array.isArray(recipe.steps) || !recipe.steps.length) throw new Error('Browser recipes require an id, origin, effects class, and steps.');
+  let origin;
+  try { origin = new URL(recipe.origin).origin; }
+  catch (_) { throw new Error('Browser recipes require a valid origin URL.'); }
+  if (!['http:', 'https:'].includes(new URL(recipe.origin).protocol)) throw new Error('Browser recipes require an HTTP or HTTPS origin.');
+  const allowedOrigins = recipe.allowedOrigins === undefined ? [origin] : recipe.allowedOrigins;
+  if (!Array.isArray(allowedOrigins) || !allowedOrigins.length) throw new Error('Browser recipes require at least one allowed origin.');
+  const normalizedOrigins = allowedOrigins.map((value) => {
+    try {
+      const parsed = new URL(value);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.pathname !== '/' || parsed.search || parsed.hash) throw new Error('invalid');
+      return parsed.origin;
+    } catch (_) { throw new Error('Browser recipe allowed origins must be absolute HTTP or HTTPS origins.'); }
+  });
+  if (!normalizedOrigins.includes(origin)) throw new Error('A browser recipe origin must be included in its allowed origins.');
+  const originSet = new Set(normalizedOrigins);
+  let commitCount = 0;
   for (const step of recipe.steps) {
     if (!step.id || !['navigate', 'fill', 'select', 'read', 'click', 'assert'].includes(step.kind)) throw new Error('Browser recipe contains an invalid step.');
     if (step.kind === 'click' && step.commit === true && recipe.effects !== 'commit') throw new Error('A committing step requires a commit recipe.');
+    if (step.commit === true) commitCount += 1;
+    if (step.kind === 'navigate') {
+      let stepOrigin;
+      try { stepOrigin = new URL(step.url, origin).origin; } catch (_) { throw new Error('Browser recipe navigation URLs must be valid.'); }
+      if (!originSet.has(stepOrigin)) throw new Error('Browser recipe navigation is outside its allowed origins.');
+    }
   }
-  return { ...recipe, version: recipe.version || 1, digest: digest({ ...recipe, digest: undefined }) };
+  if (commitCount > 1) throw new Error('Browser recipes may contain only one committing step.');
+  return { ...recipe, origin, allowedOrigins: normalizedOrigins, version: recipe.version || 1, digest: digest({ ...recipe, origin, allowedOrigins: normalizedOrigins, digest: undefined }) };
 }
 
 const uberCabBooking = validateRecipe({

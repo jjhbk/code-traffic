@@ -3,6 +3,7 @@ const { BrowserRecipeExecutor } = require('../host/browser/executor');
 const { uberCabBooking, uberCabQuote } = require('../host/browser/recipes');
 const { BrowserAdapter } = require('../host/browser/adapter');
 const { PolicyEngine } = require('../host/policy/engine');
+const { validateRecipe } = require('../host/browser/recipes');
 
 (async () => {
   const calls = [];
@@ -32,5 +33,9 @@ const { PolicyEngine } = require('../host/policy/engine');
   adapter.page.url = () => 'https://evil.example/changed';
   await assert.rejects(() => adapter.perform({ kind: 'click', target: 'requestRide' }), /outside the recipe origin/);
   assert.throws(() => adapter.assertAllowed('https://evil.example/'), /outside the recipe origin/);
+  const multiOrigin = validateRecipe({ id: 'fixture.allowed-origins.v1', origin: 'https://example.com', allowedOrigins: ['https://example.com', 'https://cdn.example.com'], effects: 'read', steps: [{ id: 'open', kind: 'navigate', url: 'https://cdn.example.com/asset' }] });
+  assert.deepEqual(multiOrigin.allowedOrigins, ['https://example.com', 'https://cdn.example.com']);
+  assert.throws(() => validateRecipe({ id: 'fixture.bad-navigation.v1', origin: 'https://example.com', effects: 'read', steps: [{ id: 'open', kind: 'navigate', url: 'https://evil.example/' }] }), /outside its allowed origins/);
+  assert.throws(() => validateRecipe({ id: 'fixture.bad-commit.v1', origin: 'https://example.com', effects: 'commit', steps: [{ id: 'one', kind: 'click', commit: true }, { id: 'two', kind: 'click', commit: true }] }), /only one committing step/);
   console.log('browser recipe tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

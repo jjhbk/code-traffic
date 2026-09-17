@@ -8,7 +8,7 @@ class BrowserActionService {
 
   prepare(recipe, inputs, { principal = 'signal-box-user', surfaces = ['desktop', 'telegram'], expiresAt = this.clock() + 10 * 60 * 1000, sessionId = null } = {}) {
     const checked = validateRecipe(recipe);
-    const action = { capability: `browser.${checked.effects}`, autonomous: false, recipeId: checked.id, recipeDigest: checked.digest, recipe: checked, sessionId, origin: checked.origin, inputs: { ...inputs }, consequences: `Run the ${checked.id} browser recipe at ${checked.origin}.`, options: [{ optionId: 'allow', label: 'Run once' }, { optionId: 'deny', label: 'Cancel' }] };
+    const action = { capability: `browser.${checked.effects}`, autonomous: false, recipeId: checked.id, recipeDigest: checked.digest, recipe: checked, sessionId, origin: checked.origin, allowedOrigins: checked.allowedOrigins, inputs: { ...inputs }, consequences: `Run the ${checked.id} browser recipe at ${checked.origin}.`, options: [{ optionId: 'allow', label: 'Run once' }, { optionId: 'deny', label: 'Cancel' }] };
     return this.approvals.request(action, { principal, surfaces, expiresAt });
   }
 
@@ -41,7 +41,7 @@ class BrowserActionService {
   async executeWithStandingGrant(recipe, inputs, { grantId, principal = 'signal-box-user', surface = 'desktop', taskId = null, taskVersion = null, executor = this.executor } = {}) {
     if (!grantId || !executor) throw new Error('A standing grant and browser executor are required.');
     const checked = validateRecipe(recipe);
-    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects, taskId, taskVersion };
+    const action = { capability: `browser.${checked.effects}`, autonomous: true, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, allowedOrigins: checked.allowedOrigins, inputs: { ...inputs }, effects: checked.effects, taskId, taskVersion };
     if (taskId && taskVersion != null) {
       const currentTask = this.store.listTasks({ includeDismissed: true }).find((task) => task.taskId === taskId);
       if (!currentTask || currentTask.status !== 'active' || Number(currentTask.updatedAt) !== Number(taskVersion)) throw new Error('This browser action is stale because the task changed.');

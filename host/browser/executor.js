@@ -41,7 +41,7 @@ class BrowserRecipeExecutor {
     for (const [name, type] of Object.entries(checked.inputs || {})) {
       if (typeof inputs[name] !== type) throw new Error(`Missing or invalid browser input: ${name}.`);
     }
-    const action = { capability: `browser.${checked.effects}`, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, inputs: { ...inputs }, effects: checked.effects, autonomous: false };
+    const action = { capability: `browser.${checked.effects}`, recipeId: checked.id, recipeDigest: checked.digest, origin: checked.origin, allowedOrigins: checked.allowedOrigins, inputs: { ...inputs }, effects: checked.effects, autonomous: false };
     const receipt = { actionDigest: digest(action), recipeId: checked.id, status: 'prepared', steps: [], startedAt: this.clock() };
     const context = {};
     let commitStarted = false;
