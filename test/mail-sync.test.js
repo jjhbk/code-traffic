@@ -27,6 +27,22 @@ const sync = new MailSync({ store, provider, clock: () => 1770000000000 });
   const removedSync = new MailSync({ store, provider: removedProvider, clock: () => 1770000000000 });
   assert.equal((await removedSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' })).removed, 1);
   assert.equal(store.observations('gmail:me').length, 1);
+  let concurrentCalls = 0;
+  let releaseConcurrent;
+  const concurrentProvider = {
+    sync: async () => {
+      concurrentCalls += 1;
+      await new Promise((resolve) => { releaseConcurrent = resolve; });
+      return { messages: [], nextCursor: 'c4' };
+    },
+  };
+  const concurrentSync = new MailSync({ store, provider: concurrentProvider, clock: () => 1770000000000 });
+  const firstRun = concurrentSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' });
+  const secondRun = concurrentSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(concurrentCalls, 1, 'one account has one in-flight provider sync');
+  releaseConcurrent();
+  assert.strictEqual(await firstRun, await secondRun, 'concurrent callers share one sync result');
   store.close();
   console.log('mail sync tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

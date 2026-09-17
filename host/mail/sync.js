@@ -6,9 +6,18 @@ class MailSync {
     this.store = store;
     this.provider = provider;
     this.clock = clock;
+    this.inFlight = new Map();
   }
 
   async run({ adapterId, accountAddress, boundedWindow = 100 } = {}) {
+    if (this.inFlight.has(adapterId)) return this.inFlight.get(adapterId);
+    const operation = this._run({ adapterId, accountAddress, boundedWindow });
+    this.inFlight.set(adapterId, operation);
+    try { return await operation; }
+    finally { if (this.inFlight.get(adapterId) === operation) this.inFlight.delete(adapterId); }
+  }
+
+  async _run({ adapterId, accountAddress, boundedWindow = 100 } = {}) {
     if (!adapterId) throw new Error('A mail adapter id is required.');
     let cursor = this.store.getConnectorCursor(adapterId);
     let reset = false;
