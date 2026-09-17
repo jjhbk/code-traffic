@@ -35,6 +35,7 @@ const { ConversationService } = require('./host/conversation/service');
 const { WorkflowService } = require('./host/workflows/service');
 const { FollowUpWorkflow } = require('./host/workflows/follow-up');
 const { AvailabilityWorkflow } = require('./host/workflows/availability');
+const { MeetingPrepWorkflow } = require('./host/workflows/meeting-prep');
 const { MobileApi, PROTOCOL_VERSION } = require('./host/mobile/api');
 const { MobilePairingService } = require('./host/mobile/pairing');
 const { MobileContextService } = require('./host/mobile/context');
@@ -109,6 +110,7 @@ let conversationService;
 let followUpWorkflow;
 let planningService;
 let availabilityWorkflow;
+let meetingPrepWorkflow;
 let mobileConversationService;
 let mobileApi;
 let mobilePairing;
@@ -1096,6 +1098,7 @@ async function start() {
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
             if (kind === 'assistant.digest') return runScheduledDigest(payload);
             if (kind === 'browser.availability.check') return runBrowserAvailabilityCheck(payload);
+            if (kind === 'meeting.prep') return runMeetingPrep(payload);
             throw new Error(`Unsupported background job ${kind}.`);
           },
         });
@@ -1149,6 +1152,7 @@ async function start() {
     followUpWorkflow = new FollowUpWorkflow({ store: hostStore, approvals: approvalService, workflows });
     planningService = new PlanningService({ workflows, browserActions: new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null }) });
     availabilityWorkflow = new AvailabilityWorkflow({ store: hostStore, workflows });
+    meetingPrepWorkflow = new MeetingPrepWorkflow({ store: hostStore, workflows });
   }
   digestScheduler = hostStore ? new DigestScheduler({
     store: hostStore,
@@ -1174,6 +1178,7 @@ async function start() {
       if (workflowId && hostStore) new WorkflowService({ store: hostStore }).resume(workflowId);
     });
     assistantRuntime.register('browser.availability.check', async (payload) => runBrowserAvailabilityCheck(payload));
+    assistantRuntime.register('meeting.prep', async (payload) => runMeetingPrep(payload));
     assistantRuntime.register('assistant.digest', async () => {
       await runScheduledDigest();
       return { completed: true };
@@ -1335,7 +1340,9 @@ async function runCalendarSync() {
   try {
     const result = await calendarSync.run({ adapterId, accountAddress: account });
     const tasks = taskService?.processAllAsync ? await taskService.processAllAsync(adapterId) : (taskService?.processAll(adapterId) || []);
-    const syncResult = { ...result, taskCandidates: tasks.length };
+    const calendarObservations = hostStore.observations(adapterId);
+    const meetingPrep = meetingPrepWorkflow?.scheduleUpcoming(calendarObservations, { sourceObservations: hostStore.observations() }) || null;
+    const syncResult = { ...result, taskCandidates: tasks.length, meetingPrep };
     hostStore.setConnectorHealth(adapterId, 'healthy', syncResult);
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send('calendar:status-changed', { status: 'healthy', result: syncResult });
     return syncResult;
@@ -1419,6 +1426,11 @@ async function runBrowserAvailabilityCheck({ workflowId } = {}) {
   } catch (error) {
     return availabilityWorkflow.check(workflowId, { available: false, evidence: `Availability check failed: ${error.message}` });
   }
+}
+
+async function runMeetingPrep({ workflowId } = {}) {
+  if (!meetingPrepWorkflow || !hostStore || !workflowId) throw new Error('Meeting preparation is unavailable.');
+  return meetingPrepWorkflow.prepare(workflowId, { observations: hostStore.observations() });
 }
 
 async function executeAutomaticBrowserDecisions(tasks, decisions) {
