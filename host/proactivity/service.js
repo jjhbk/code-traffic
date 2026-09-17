@@ -35,6 +35,25 @@ class ProactivityService {
     return tasks.map((task) => this.decide(task, options));
   }
 
+  enqueueAttentionNotifications(tasks = [], decisions = this.evaluate(tasks)) {
+    const taskById = new Map(tasks.map((task) => [task.taskId, task]));
+    const enqueued = [];
+    for (const decision of decisions.filter((item) => item.type === 'suggest_resolution')) {
+      const task = taskById.get(decision.taskId);
+      if (!task) continue;
+      const unknownRun = this.store.listAutonomousRuns().find((run) => run.action?.taskId === task.taskId && run.status === 'unknown');
+      const notificationId = `assistant-attention:${task.taskId}:${unknownRun?.runId || decision.reason}`;
+      const notification = this.store.enqueueNotification({
+        notificationId,
+        dateKey: notificationId,
+        notificationClass: 'assistant-attention',
+        items: [{ taskId: task.taskId, summary: task.summary, reason: 'An automatic action needs your verification.', evidence: { runId: unknownRun?.runId || null, decisionReason: decision.reason } }],
+      });
+      if (notification) enqueued.push(notification);
+    }
+    return enqueued;
+  }
+
   _blockingTasks(task) {
     const relations = this.store.taskRelations(task.taskId);
     const tasks = new Map(this.store.listTasks({ includeDismissed: true }).map((item) => [item.taskId, item]));

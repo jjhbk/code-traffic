@@ -40,5 +40,9 @@ const unknownGrant = store.createStandingGrant({ principal: 'signal-box-user', c
 store.createAutonomousRun({ grantId: unknownGrant.grantId, action: { taskId: unknownTask.taskId, capability: 'browser.commit', recipeId: 'fixture.reserve.v1' }, actionDigest: 'digest-unknown', status: 'unknown' });
 assert.equal(decide(unknownTask).type, 'suggest_resolution');
 assert.equal(decide(unknownTask).reason, 'automation-outcome-unknown');
+const attention = service.enqueueAttentionNotifications([unknownTask], [decide(unknownTask)]);
+assert.equal(attention.length, 1);
+assert.equal(attention[0].notificationClass, 'assistant-attention');
+assert.equal(service.enqueueAttentionNotifications([unknownTask], [decide(unknownTask)]).length, 0, 'attention notifications are deduplicated');
 store.close();
 console.log('proactivity tests passed');
