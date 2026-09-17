@@ -83,6 +83,10 @@ const { BACKGROUND_PROTOCOL_VERSION } = require('../host/runtime/protocol');
   failedChild.emit('error', new Error('spawn failed'));
   await assert.rejects(startup, /spawn failed/);
   assert.equal((await failedHost.health()).lifecycle, 'unavailable');
+  const hangingChild = new EventEmitter(); hangingChild.connected = true; hangingChild.kill = () => { hangingChild.emit('exit', null, 'SIGTERM'); };
+  const hangingHost = new BackgroundHost({ databasePath, startupTimeoutMs: 100, forkImpl: () => hangingChild });
+  await assert.rejects(hangingHost.start(), /did not become ready within 100ms/);
+  assert.equal((await hangingHost.health()).lifecycle, 'unavailable');
   const retryChild = new EventEmitter();
   retryChild.connected = true;
   retryChild.send = (message) => {

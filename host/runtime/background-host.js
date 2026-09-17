@@ -4,7 +4,7 @@ const { fork } = require('child_process');
 const { BACKGROUND_PROTOCOL_VERSION } = require('./protocol');
 
 class BackgroundHost {
-  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false, supervise = true, restartDelayMs = 250, digestSettings = {}, connectorAccounts = {} } = {}) {
+  constructor({ databasePath, workerPath = path.join(__dirname, 'background-host-worker.js'), forkImpl = fork, token = crypto.randomBytes(32).toString('hex'), onJob = null, paused = false, supervise = true, restartDelayMs = 250, startupTimeoutMs = 10_000, digestSettings = {}, connectorAccounts = {} } = {}) {
     if (!databasePath) throw new Error('A background host database path is required.');
     this.databasePath = databasePath;
     this.workerPath = workerPath;
@@ -14,6 +14,7 @@ class BackgroundHost {
     this.paused = Boolean(paused);
     this.supervise = Boolean(supervise);
     this.restartDelayMs = Math.max(10, Number(restartDelayMs) || 250);
+    this.startupTimeoutMs = Math.max(100, Number(startupTimeoutMs) || 10_000);
     this.digestSettings = digestSettings && typeof digestSettings === 'object' ? digestSettings : {};
     this.connectorAccounts = connectorAccounts && typeof connectorAccounts === 'object' ? connectorAccounts : {};
     this.child = null;
@@ -34,6 +35,7 @@ class BackgroundHost {
     this.ready = new Promise((resolve, reject) => {
       let readySettled = false;
       let startupFailed = false;
+      let startupTimer;
       const resolveReady = (health) => {
         if (Number(health?.protocolVersion) !== BACKGROUND_PROTOCOL_VERSION) {
           startupFailed = true;
@@ -43,11 +45,21 @@ class BackgroundHost {
           child.kill?.();
           return;
         }
-        if (!readySettled) { readySettled = true; this.lifecycle = 'running'; resolve({ ...health, lifecycle: this.lifecycle, lastExitAt: this.lastExitAt, restartCount: this.restartCount }); }
+        if (!readySettled) { readySettled = true; clearTimeout(startupTimer); this.lifecycle = 'running'; resolve({ ...health, lifecycle: this.lifecycle, lastExitAt: this.lastExitAt, restartCount: this.restartCount }); }
       };
-      const rejectReady = (error) => { if (!readySettled) { readySettled = true; reject(error); } };
+      const rejectReady = (error) => { if (!readySettled) { readySettled = true; clearTimeout(startupTimer); reject(error); } };
       const child = this.forkImpl(this.workerPath, [this.databasePath], { env: { ...process.env, SIGNAL_BOX_BACKGROUND_TOKEN: this.token, SIGNAL_BOX_BACKGROUND_PAUSED: this.paused ? '1' : '0', SIGNAL_BOX_DIGEST_SETTINGS: JSON.stringify(this.digestSettings), SIGNAL_BOX_CONNECTOR_ACCOUNTS: JSON.stringify(this.connectorAccounts) } });
       this.child = child;
+      startupTimer = setTimeout(() => {
+        if (readySettled) return;
+        startupFailed = true;
+        const error = new Error(`Background host did not become ready within ${this.startupTimeoutMs}ms.`);
+        rejectReady(error);
+        this._failPending(error);
+        if (this.child === child) this.child = null;
+        this.lifecycle = 'unavailable';
+        child.kill?.();
+      }, this.startupTimeoutMs);
       child.on('message', (message) => {
         if (message.type === 'ready') resolveReady(message.health);
         if (message.type === 'job') {
@@ -76,6 +88,7 @@ class BackgroundHost {
       child.once('exit', (code, signal) => {
         this.child = null;
         this.lastExitAt = Date.now();
+        clearTimeout(startupTimer);
         const error = new Error(`Background host exited${signal ? ` with ${signal}` : ` with code ${code}`}.`);
         if (!readySettled) rejectReady(error);
         this._failPending(error);
