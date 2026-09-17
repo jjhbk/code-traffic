@@ -24,6 +24,7 @@ const { SqliteStore } = require('./host/store/sqlite-store');
 const { ApprovalService } = require('./host/approvals/service');
 const { GoogleOAuth, GmailProvider, GoogleCalendarProvider, GoogleDriveProvider } = require('./host/mail/google');
 const { ProtectedCredentialStore } = require('./host/mail/credentials');
+const { GoogleProviderHost } = require('./host/mail/provider-host');
 const { createOAuthState, waitForOAuthCallback } = require('./host/mail/oauth-callback');
 const { MailSync } = require('./host/mail/sync');
 const { TaskService } = require('./host/tasks/service');
@@ -102,6 +103,7 @@ let livenessTimer;
 let hostStore;
 let approvalService;
 let mailCredentials;
+let googleProviderHost;
 let mailSync;
 let calendarSync;
 let driveSync;
@@ -670,6 +672,7 @@ function wireIpc() {
       throw error;
     }
     for (const name of ['gmail-refresh-token', 'gmail-client-id', 'gmail-client-secret', 'gmail-account']) mailCredentials.delete(name);
+    googleProviderHost?.clear();
     mailSync = null;
     calendarSync = null;
     driveSync = null;
@@ -1049,6 +1052,7 @@ async function start() {
     privacyGateway = new PrivacyGateway({ localOnly: true });
     console.error(`[mail] protected credential storage unavailable: ${error.message}; backend=${safeStorage.getSelectedStorageBackend?.() || 'unknown'}`);
   }
+  googleProviderHost = mailCredentials ? new GoogleProviderHost({ credentialStore: mailCredentials, clientId: GOOGLE_CLIENT_ID }) : null;
   configureModelRouter();
   const hookAuth = ensureHookToken();
   const mobileAuth = ensureMobileToken();
@@ -1376,30 +1380,18 @@ function wireMailSync() {
 }
 
 function createGmailProvider() {
-  if (!mailCredentials) throw new Error('Protected credential storage is unavailable.');
-  const refreshToken = mailCredentials.load('gmail-refresh-token');
-  const clientId = mailCredentials.load('gmail-client-id');
-  const clientSecret = mailCredentials.load('gmail-client-secret');
-  if (!refreshToken || !clientId) throw new Error('Connect Gmail before sending a reply.');
-  return new GmailProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret: clientSecret || null }) });
+  if (!googleProviderHost) throw new Error('Protected credential storage is unavailable.');
+  return googleProviderHost.provider('gmail');
 }
 
 function createCalendarProvider() {
-  if (!mailCredentials) throw new Error('Protected credential storage is unavailable.');
-  const refreshToken = mailCredentials.load('gmail-refresh-token');
-  const clientId = mailCredentials.load('gmail-client-id') || GOOGLE_CLIENT_ID || '';
-  const clientSecret = mailCredentials.load('gmail-client-secret') || null;
-  if (!refreshToken || !clientId) throw new Error('Connect Google before editing Calendar.');
-  return new GoogleCalendarProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
+  if (!googleProviderHost) throw new Error('Protected credential storage is unavailable.');
+  return googleProviderHost.provider('calendar');
 }
 
 function createDriveProvider() {
-  if (!mailCredentials) throw new Error('Protected credential storage is unavailable.');
-  const refreshToken = mailCredentials.load('gmail-refresh-token');
-  const clientId = mailCredentials.load('gmail-client-id') || GOOGLE_CLIENT_ID || '';
-  const clientSecret = mailCredentials.load('gmail-client-secret') || null;
-  if (!refreshToken || !clientId) throw new Error('Connect Google before syncing Drive.');
-  return new GoogleDriveProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
+  if (!googleProviderHost) throw new Error('Protected credential storage is unavailable.');
+  return googleProviderHost.provider('drive');
 }
 
 async function runMailSync() {
