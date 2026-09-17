@@ -22,4 +22,13 @@ The client sends an `Idempotency-Key` for every command, uses stable event IDs f
 
 Run the client contract test from this directory with `npm run test:client`. It exercises offline queueing, replay, idempotency, and notification cursor persistence without requiring a device or live Electron process.
 
+Before a mobile release, run both local gates:
+
+```sh
+npm run test:client
+npx expo export --platform android
+```
+
+The export verifies that the standalone React Native surface bundles independently of the Electron application. A successful export is not a substitute for installing on a physical Android/iOS device and validating pairing, trusted TLS, background-location permissions, push delivery, and reconnect behavior.
+
 Native release profiles are defined in `eas.json`: use `npx eas build --profile development`, `preview`, or `production` after configuring an Expo/EAS project and push credentials. The repository intentionally does not contain account-specific project IDs or signing secrets.
