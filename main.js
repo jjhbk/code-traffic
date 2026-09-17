@@ -425,6 +425,18 @@ function wireIpc() {
     return new WorkflowService({ store: hostStore }).cancel(workflowId);
   });
   ipcMain.handle('assistant:context', () => hostStore?.listContext() || []);
+  ipcMain.handle('assistant:standing-grants', () => hostStore?.listStandingGrants({ principal: 'signal-box-user' }) || []);
+  ipcMain.handle('assistant:create-standing-grant', (_event, { capability, surface = 'desktop', constraints = {}, expiresAt, maxUses = null, cooldownMs = 0 } = {}) => {
+    if (!hostStore || !approvalService) throw new Error('Standing permission storage is unavailable.');
+    return approvalService.createStandingGrant({ capability }, { principal: 'signal-box-user', surface, constraints, expiresAt, maxUses, cooldownMs });
+  });
+  ipcMain.handle('assistant:revoke-standing-grant', (_event, { grantId } = {}) => {
+    if (!hostStore || !grantId) throw new Error('Standing permission is required.');
+    const grant = hostStore.getStandingGrant(grantId);
+    if (!grant || grant.principal !== 'signal-box-user') throw new Error('Standing permission was not found.');
+    return hostStore.revokeStandingGrant(grantId);
+  });
+  ipcMain.handle('assistant:autonomous-runs', (_event, { grantId = null, limit = 100 } = {}) => hostStore?.listAutonomousRuns({ grantId, limit }) || []);
   ipcMain.handle('activity:list', () => {
     const entries = hostStore?.recentAudit(60) || [];
     const diagnostics = modelRouter?.diagnostics();

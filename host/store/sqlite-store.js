@@ -532,6 +532,15 @@ class SqliteStore {
     return row ? { ...row, constraints: JSON.parse(row.constraintsJson) } : null;
   }
 
+  listStandingGrants({ principal = null, includeInactive = true } = {}) {
+    const clauses = [];
+    const params = [];
+    if (principal) { clauses.push('principal = ?'); params.push(principal); }
+    if (!includeInactive) clauses.push("status = 'active'");
+    const rows = this.db.prepare(`SELECT grant_id AS grantId FROM standing_grants ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY created_at DESC`).all(...params);
+    return rows.map((row) => this.getStandingGrant(row.grantId));
+  }
+
   revokeStandingGrant(grantId, reason = 'user-revoked') {
     const result = this.db.prepare("UPDATE standing_grants SET status = 'revoked', updated_at = ? WHERE grant_id = ? AND status = 'active'").run(this.clock(), grantId);
     if (!Number(result.changes)) throw new Error('Standing grant not found or already inactive.');
@@ -580,6 +589,14 @@ class SqliteStore {
   getAutonomousRun(runId) {
     const row = this.db.prepare('SELECT run_id AS runId, grant_id AS grantId, action_json AS actionJson, action_digest AS actionDigest, status, details_json AS detailsJson, receipt_json AS receiptJson, created_at AS createdAt, updated_at AS updatedAt FROM autonomous_runs WHERE run_id = ?').get(runId);
     return row ? { ...row, action: JSON.parse(row.actionJson), details: JSON.parse(row.detailsJson), receipt: row.receiptJson ? JSON.parse(row.receiptJson) : null } : null;
+  }
+
+  listAutonomousRuns({ grantId = null, limit = 100 } = {}) {
+    const safeLimit = Math.min(500, Math.max(1, Number(limit) || 100));
+    const rows = grantId
+      ? this.db.prepare('SELECT run_id AS runId FROM autonomous_runs WHERE grant_id = ? ORDER BY created_at DESC LIMIT ?').all(grantId, safeLimit)
+      : this.db.prepare('SELECT run_id AS runId FROM autonomous_runs ORDER BY created_at DESC LIMIT ?').all(safeLimit);
+    return rows.map((row) => this.getAutonomousRun(row.runId));
   }
 
   recordReceipt({ receiptId = crypto.randomUUID(), attemptId, receipt }) {

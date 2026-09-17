@@ -24,6 +24,8 @@ const { BrowserActionService } = require('../host/browser/service');
   assert.equal(result.receipt.status, 'confirmed');
   assert.equal(store.getAutonomousRun(result.runId).status, 'confirmed');
   assert.equal(executions, 1);
+  assert.equal(store.listStandingGrants({ principal: 'signal-box-user' }).length, 1);
+  assert.equal(store.listAutonomousRuns({ grantId: grant.grantId }).length, 1);
   await assert.rejects(() => service.executeWithStandingGrant(recipe, {}, { grantId: grant.grantId }), /usage limit/);
   const revoked = approvals.createStandingGrant({ capability: 'browser.read' }, { principal: 'signal-box-user', surface: 'desktop', constraints: {}, expiresAt: Date.now() + 60_000 });
   store.revokeStandingGrant(revoked.grantId);
