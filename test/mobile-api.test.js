@@ -61,6 +61,11 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal(place.status, 200); assert.equal(place.body.place.recordType, 'place');
   const notifications = await request(port, '/api/v1/mobile/notifications');
   assert.equal(notifications.status, 200); assert.ok(Array.isArray(notifications.body.notifications));
+  const approval = approvals.request({ capability: 'browser.read', recipeId: 'fixture.read.v1', options: [{ optionId: 'allow', label: 'Allow once' }, { optionId: 'deny', label: 'Deny' }] }, { principal: 'signal-box-user', surfaces: ['mobile'], expiresAt: Date.now() + 60_000 });
+  const pendingApprovals = await request(port, '/api/v1/mobile/approvals');
+  assert.equal(pendingApprovals.body.approvals.some((item) => item.request_id === approval.request_id), true);
+  const decision = await request(port, `/api/v1/mobile/approvals/${approval.request_id}/decide`, { method: 'POST', body: { optionId: 'allow' } });
+  assert.equal(decision.status, 200); assert.equal(store.getDecision(approval.request_id).surface, 'mobile');
 
   await board.closeServer(); store.close(); console.log('mobile API tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

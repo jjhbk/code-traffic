@@ -1,15 +1,15 @@
 const CAPABILITIES = new Map([
   ['agent.input', { effects: 'reversible', surfaces: ['desktop', 'telegram'] }],
   ['desk.prompt', { effects: 'reversible', surfaces: ['desktop', 'telegram'] }],
-  ['gmail.send', { effects: 'commit', surfaces: ['desktop', 'telegram'] }],
+  ['gmail.send', { effects: 'commit', surfaces: ['desktop', 'telegram', 'mobile'] }],
   ['gmail.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
   ['calendar.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
-  ['calendar.update', { effects: 'commit', surfaces: ['desktop', 'telegram'] }],
+  ['calendar.update', { effects: 'commit', surfaces: ['desktop', 'telegram', 'mobile'] }],
   ['drive.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
   ['files.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
-  ['browser.read', { effects: 'read', surfaces: ['desktop', 'telegram'] }],
-  ['browser.reversible', { effects: 'reversible', surfaces: ['desktop', 'telegram'] }],
-  ['browser.commit', { effects: 'commit', surfaces: ['desktop', 'telegram'] }],
+  ['browser.read', { effects: 'read', surfaces: ['desktop', 'telegram', 'mobile'] }],
+  ['browser.reversible', { effects: 'reversible', surfaces: ['desktop', 'telegram', 'mobile'] }],
+  ['browser.commit', { effects: 'commit', surfaces: ['desktop', 'telegram', 'mobile'] }],
   ['terminal.exec', { effects: 'commit', surfaces: ['desktop'] }],
 ]);
 

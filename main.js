@@ -514,7 +514,7 @@ function wireIpc() {
     if (!hostStore || !approvalService) throw new Error('Durable browser action storage is unavailable.');
     const service = new BrowserActionService({ approvals: approvalService, store: hostStore, executor: null });
     const recipe = preflight ? uberCabQuote : uberCabBooking;
-    const request = service.prepare(recipe, { pickup, destination, rideType, maxFare }, { principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], sessionId: sessionId || appSettings.browserSessionId });
+    const request = service.prepare(recipe, { pickup, destination, rideType, maxFare }, { principal: 'signal-box-user', surfaces: ['desktop', 'telegram', 'mobile'], sessionId: sessionId || appSettings.browserSessionId });
     try { await telegram?.sendBrowserApproval(request); } catch (error) { console.error(`[telegram] browser approval notification failed: ${error.message}`); }
     return request;
   });
@@ -599,7 +599,7 @@ function wireIpc() {
     const sanitized = Object.fromEntries(Object.entries(changes).filter(([key, value]) => allowed.includes(key) && typeof value === 'string'));
     if (!Object.keys(sanitized).length || !sanitized.summary?.trim() || !sanitized.start || !sanitized.end) throw new Error('Calendar title, start, and end are required.');
     const action = { capability: 'calendar.update', autonomous: false, eventId: String(eventId), etag: etag || null, changes: sanitized, consequences: 'Update this Google Calendar event and notify its guests according to Google Calendar settings.', options: [{ optionId: 'update', label: 'Save calendar edit' }, { optionId: 'deny', label: 'Cancel' }] };
-    return approvalService.request(action, { principal: 'signal-box-user', surfaces: ['desktop'], expiresAt: Date.now() + 10 * 60 * 1000 });
+    return approvalService.request(action, { principal: 'signal-box-user', surfaces: ['desktop', 'mobile'], expiresAt: Date.now() + 10 * 60 * 1000 });
   });
   ipcMain.handle('calendar:execute-update', async (_event, { requestId } = {}) => dispatchCalendarUpdate(requestId, 'signal-box-user', 'desktop'));
   ipcMain.handle('drive:sync', async () => runDriveSync());
@@ -623,7 +623,7 @@ function wireIpc() {
     const task = hostStore.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
     if (!task) throw new Error('Task not found.');
     if (!followUpWorkflow) throw new Error('Follow-up workflows are unavailable.');
-    const { approval } = followUpWorkflow.prepare(task, { subject, body, principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], expiresAt: Date.now() + 10 * 60 * 1000 });
+    const { approval } = followUpWorkflow.prepare(task, { subject, body, principal: 'signal-box-user', surfaces: ['desktop', 'telegram', 'mobile'], expiresAt: Date.now() + 10 * 60 * 1000 });
     try { await telegram?.sendReplyApproval(approval); } catch (error) { console.error(`[telegram] reply approval notification failed: ${error.message}`); }
     return approval;
   });
@@ -736,7 +736,19 @@ function wireIpc() {
   });
 }
 
-async function dispatchApprovedReply(requestId, principal, surface) {
+async function executeMobileApproval({ requestId, optionId } = {}) {
+  if (!hostStore || !approvalService) throw new Error('Durable approval storage is unavailable.');
+  const request = hostStore.getApproval(requestId);
+  if (!request || request.principal !== 'signal-box-user' || !request.surfaces.includes('mobile')) throw new Error('Mobile approval was not found or is not available on this surface.');
+  const decision = approvalService.decide(requestId, optionId, { principal: 'signal-box-user', surface: 'mobile' });
+  if (!['allow', 'send', 'update'].includes(optionId)) return decision;
+  if (request.action?.capability === 'gmail.send') return dispatchApprovedReply(requestId, 'signal-box-user', 'mobile', { decision });
+  if (request.action?.capability === 'calendar.update') return dispatchCalendarUpdate(requestId, 'signal-box-user', 'mobile', { decision });
+  if (String(request.action?.capability || '').startsWith('browser.')) return { decision, ...(await dispatchBrowserAction(requestId, appSettings.browserSessionId, 'mobile')) };
+  return decision;
+}
+
+async function dispatchApprovedReply(requestId, principal, surface, { decision = null } = {}) {
   if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
   const request = hostStore.getApproval(requestId);
   if (!request || request.action?.capability !== 'gmail.send') throw new Error('Reply approval not found.');
@@ -745,9 +757,9 @@ async function dispatchApprovedReply(requestId, principal, surface) {
   if (action.taskId && (!currentTask || currentTask.status !== 'active')) throw new Error('This follow-up is no longer attached to an active task.');
   if (action.taskVersion != null && currentTask && Number(currentTask.updatedAt) !== Number(action.taskVersion)) throw new Error('This follow-up is stale because the task changed.');
   const provider = createGmailProvider();
-  const decision = approvalService.decide(requestId, 'send', { principal, surface });
+  const resolvedDecision = decision || approvalService.decide(requestId, 'send', { principal, surface });
   const attempt = approvalService.execution({ requestId, status: 'prepared', details: { capability: action.capability, destination: action.destination, surface } });
-  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: decision.decisionId, surface } });
+  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: resolvedDecision.decisionId, surface } });
   try {
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'gmail', surface } });
     const sent = await provider.sendReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId, inReplyTo: action.inReplyTo, references: action.references });
@@ -772,7 +784,7 @@ async function dispatchApprovedReply(requestId, principal, surface) {
   }
 }
 
-async function dispatchCalendarUpdate(requestId, principal, surface) {
+async function dispatchCalendarUpdate(requestId, principal, surface, { decision = null } = {}) {
   if (!hostStore || !approvalService) throw new Error('Durable action storage is unavailable.');
   const request = hostStore.getApproval(requestId);
   if (!request || request.action?.capability !== 'calendar.update') throw new Error('Calendar edit approval not found.');
@@ -783,9 +795,9 @@ async function dispatchCalendarUpdate(requestId, principal, surface) {
   const clientSecret = mailCredentials?.load('gmail-client-secret') || null;
   if (!account || !refreshToken || !clientId) throw new Error('Connect Google before editing Calendar.');
   const provider = new GoogleCalendarProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
-  const decision = approvalService.decide(requestId, 'update', { principal, surface });
+  const resolvedDecision = decision || approvalService.decide(requestId, 'update', { principal, surface });
   const attempt = approvalService.execution({ requestId, status: 'prepared', details: { capability: action.capability, eventId: action.eventId, surface } });
-  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: decision.decisionId, surface } });
+  approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'authorized', details: { decisionId: resolvedDecision.decisionId, surface } });
   try {
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'dispatched', details: { provider: 'google-calendar', eventId: action.eventId, surface } });
     const changes = { ...action.changes };
@@ -1144,6 +1156,7 @@ async function start() {
     approvals: approvalService,
     pairing: mobilePairing,
     context: mobileContext,
+    onApproval: executeMobileApproval,
     getStatus: async () => ({ ...(assistantRuntime?.health() || { running: false, paused: false }), background: backgroundHost ? await backgroundHost.health() : null }),
   }) : null;
   board.mobileApi = mobileApi;
@@ -1469,7 +1482,7 @@ async function prepareProactiveFollowUps(tasks, decisions) {
       const context = hostStore.listContext().filter((record) => record.confirmed || ['preference', 'goal'].includes(record.recordType));
       const draft = await modelRouter?.draftReply(task, decision.evidence ? [{ sourceId: task.taskId, summary: task.summary, status: task.status }, ...context] : context)
         || { subject: `Re: ${task.summary || 'Follow up'}`, body: `Following up on ${task.summary || 'this request'}.` };
-      const { approval } = followUpWorkflow.prepare(task, { subject: draft.subject, body: draft.body, principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], expiresAt: Date.now() + 10 * 60 * 1000 });
+      const { approval } = followUpWorkflow.prepare(task, { subject: draft.subject, body: draft.body, principal: 'signal-box-user', surfaces: ['desktop', 'telegram', 'mobile'], expiresAt: Date.now() + 10 * 60 * 1000 });
       await telegram.sendReplyApproval(approval);
       prepared.push({ taskId: task.taskId, requestId: approval.request_id || approval.requestId });
     } catch (error) {

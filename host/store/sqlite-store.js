@@ -1196,6 +1196,13 @@ class SqliteStore {
     return { ...request, action: JSON.parse(request.action_json), surfaces: JSON.parse(request.surfaces_json), options };
   }
 
+  listPendingApprovals({ principal = null, surface = null, now = this.clock() } = {}) {
+    const clauses = ["status = 'pending'"]; const params = [];
+    if (principal) { clauses.push('principal = ?'); params.push(principal); }
+    const rows = this.db.prepare(`SELECT request_id AS requestId, expires_at AS expiresAt FROM approval_requests WHERE ${clauses.join(' AND ')} ORDER BY created_at DESC`).all(...params);
+    return rows.map((row) => this.getApproval(row.requestId)).filter((request) => request && Number(request.expires_at || request.expiresAt) > now && (!surface || request.surfaces.includes(surface)));
+  }
+
   getDecision(requestId) {
     const row = this.db.prepare('SELECT decision_id AS decisionId, request_id AS requestId, option_id AS optionId, principal, surface, decided_at AS decidedAt FROM decisions WHERE request_id = ?').get(requestId);
     return row || null;

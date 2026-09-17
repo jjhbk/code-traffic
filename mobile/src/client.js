@@ -40,6 +40,7 @@ class MobileCoreClient {
   workflows() { return this.request('/api/v1/mobile/workflows'); }
   context() { return this.request('/api/v1/mobile/context'); }
   permissions() { return this.request('/api/v1/mobile/permissions'); }
+  approvals() { return this.request('/api/v1/mobile/approvals'); }
   notifications() { return this.request('/api/v1/mobile/notifications'); }
   pairDevice(code, deviceName = 'Signal Box mobile') { return this.request('/api/v1/mobile/pair', { method: 'POST', body: { code, deviceName }, idempotencyKey: `pair:${code}` }); }
 
@@ -51,6 +52,7 @@ class MobileCoreClient {
   async cancelWorkflow(workflowId) { return this.command(`/api/v1/mobile/workflows/${encodeURIComponent(workflowId)}/cancel`, {}); }
   async createPermission(body) { return this.command('/api/v1/mobile/permissions', body); }
   async revokePermission(grantId) { return this.command(`/api/v1/mobile/permissions/${encodeURIComponent(grantId)}/revoke`, {}); }
+  async decideApproval(requestId, optionId) { return this.command(`/api/v1/mobile/approvals/${encodeURIComponent(requestId)}/decide`, { optionId }); }
   async sendLocation(body) { return this.command('/api/v1/mobile/context/location', body); }
   async savePlace(body) { return this.command('/api/v1/mobile/context/place', body); }
   async sendSensor(body) { return this.command('/api/v1/mobile/context/sensor', body); }

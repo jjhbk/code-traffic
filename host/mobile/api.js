@@ -4,12 +4,12 @@ const PROTOCOL_VERSION = '1';
 const MOBILE_CONVERSATION_ID = 'mobile:default';
 
 class MobileApi {
-  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, getStatus = null, clock = () => Date.now() } = {}) {
+  constructor({ store, conversation, proactivity, approvals = null, pairing = null, context = null, onApproval = null, getStatus = null, clock = () => Date.now() } = {}) {
     if (!store || !conversation || !proactivity) throw new Error('Mobile API requires store, conversation, and proactivity services.');
     this.store = store;
     this.conversation = conversation;
     this.proactivity = proactivity;
-    this.approvals = approvals; this.pairing = pairing; this.context = context;
+    this.approvals = approvals; this.pairing = pairing; this.context = context; this.onApproval = onApproval;
     this.getStatus = getStatus || (() => ({ running: true }));
     this.clock = clock;
   }
@@ -23,10 +23,12 @@ class MobileApi {
       if (method === 'GET' && resource === 'health') return { protocolVersion: PROTOCOL_VERSION, core: await this.getStatus() };
       if (method === 'GET' && resource === 'today') return this.today();
       if (method === 'GET' && resource === 'notifications') return { notifications: this.store.listPendingNotifications({ limit: 50 }) };
+      if (method === 'GET' && resource === 'approvals') return { approvals: this.store.listPendingApprovals({ principal: 'signal-box-user', surface: 'mobile', now: this.clock() }) };
       if (method === 'GET' && resource === 'conversation') return { conversationId: this.conversationId(query.conversationId), messages: this.conversation.history(this.conversationId(query.conversationId)) };
       if (method === 'POST' && resource === 'conversation' && parts[4] === 'messages') return this.sendMessage(body);
       if (method === 'GET' && resource === 'workflows') return { workflows: this.store.listWorkflows({ activeOnly: query.activeOnly !== 'false' }) };
       if (method === 'POST' && resource === 'workflows' && parts[4] && parts[5] === 'cancel') return { workflow: this.store.updateWorkflow(parts[4], { state: 'cancelled', details: { reason: 'mobile-user-cancelled' } }) };
+      if (method === 'POST' && resource === 'approvals' && parts[4] && parts[5] === 'decide') return this.decideApproval(parts[4], body);
       if (method === 'GET' && resource === 'context') return { context: this.store.listContext() };
       if (method === 'GET' && resource === 'permissions') return { permissions: this.store.listStandingGrants({ principal: 'signal-box-user' }) };
       if (method === 'POST' && resource === 'permissions' && parts[4] && parts[5] === 'revoke') return { permission: this.revokePermission(parts[4]) };
@@ -51,6 +53,18 @@ class MobileApi {
     if (!this.pairing) throw this._error(503, 'Mobile pairing is unavailable.');
     try { return this.pairing.pair({ code: body.code, deviceName: body.deviceName }); }
     catch (error) { throw this._error(400, error.message); }
+  }
+
+  async decideApproval(requestId, body = {}) {
+    if (!this.approvals) throw this._error(503, 'Approval controls are unavailable.');
+    const optionId = String(body.optionId || '').trim();
+    if (!optionId) throw this._error(400, 'An approval option is required.');
+    try {
+      const result = this.onApproval
+        ? await this.onApproval({ requestId, optionId })
+        : this.approvals.decide(requestId, optionId, { principal: 'signal-box-user', surface: 'mobile' });
+      return { requestId, optionId, result };
+    } catch (error) { throw this._error(error.status || 409, error.message); }
   }
 
   authenticate(token) { return this.pairing?.authenticate(token) || null; }
