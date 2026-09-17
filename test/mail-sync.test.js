@@ -31,6 +31,13 @@ const sync = new MailSync({ store, provider, clock: () => 1770000000000 });
   const removedSync = new MailSync({ store, provider: removedProvider, clock: () => 1770000000000 });
   assert.equal((await removedSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' })).removed, 1);
   assert.equal(store.observations('gmail:me').length, 1);
+  const heldLease = store.acquireConnectorLease('gmail:me', 'desktop-sync', 60_000, 1770000000000);
+  let blockedCalls = 0;
+  const blockedSync = new MailSync({ store, ownerId: 'background-sync', provider: { async sync() { blockedCalls += 1; return { messages: [], nextCursor: 'should-not-run' }; } }, clock: () => 1770000000000 });
+  const blockedResult = await blockedSync.run({ adapterId: 'gmail:me', accountAddress: 'me@example.com' });
+  assert.equal(blockedResult.skipped, true);
+  assert.equal(blockedCalls, 0, 'a second process must not call the provider while the connector lease is held');
+  assert.equal(store.releaseConnectorLease('gmail:me', heldLease.leaseToken), true);
   let concurrentCalls = 0;
   let releaseConcurrent;
   const concurrentProvider = {

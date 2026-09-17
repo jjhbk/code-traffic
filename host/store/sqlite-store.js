@@ -371,6 +371,13 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL,
     PRIMARY KEY(notification_id, device_id)
   );`,
+  `CREATE TABLE IF NOT EXISTS connector_leases (
+    adapter_id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    lease_token TEXT NOT NULL,
+    lease_until INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`,
 ];
 
 class SqliteStore {
@@ -936,6 +943,25 @@ class SqliteStore {
       .run(adapterId, cursor, this.clock());
   }
 
+  acquireConnectorLease(adapterId, ownerId, leaseMs = 10 * 60 * 1000, now = this.clock()) {
+    if (!adapterId || !ownerId || !Number.isFinite(leaseMs) || leaseMs <= 0 || !Number.isFinite(now)) throw new Error('Invalid connector lease.');
+    return this.transaction(() => {
+      const existing = this.db.prepare('SELECT owner_id AS ownerId, lease_token AS leaseToken, lease_until AS leaseUntil FROM connector_leases WHERE adapter_id = ?').get(adapterId);
+      if (existing && existing.leaseUntil >= now && existing.ownerId !== ownerId) return null;
+      const token = `${ownerId}:${crypto.randomUUID()}`;
+      this.db.prepare(`INSERT INTO connector_leases(adapter_id, owner_id, lease_token, lease_until, updated_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(adapter_id) DO UPDATE SET owner_id = excluded.owner_id, lease_token = excluded.lease_token, lease_until = excluded.lease_until, updated_at = excluded.updated_at`)
+        .run(adapterId, ownerId, token, now + leaseMs, now);
+      return { adapterId, ownerId, leaseToken: token, leaseUntil: now + leaseMs };
+    });
+  }
+
+  releaseConnectorLease(adapterId, leaseToken) {
+    if (!adapterId || !leaseToken) return false;
+    const result = this.db.prepare('DELETE FROM connector_leases WHERE adapter_id = ? AND lease_token = ?').run(adapterId, leaseToken);
+    return Number(result.changes) === 1;
+  }
+
   saveObservation(observation, adapterId) {
     if (!observation?.observationId || !observation.messageId || !observation.threadId) throw new Error('Invalid mail observation.');
     const result = this.db.prepare(`INSERT INTO observations(observation_id, adapter_id, message_id, thread_id, observation_json, observed_at)
@@ -1409,7 +1435,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'telegram_callbacks', 'telegram_updates', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens', 'mobile_push_deliveries'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'connector_leases', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'telegram_callbacks', 'telegram_updates', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens', 'mobile_push_deliveries'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
@@ -1432,6 +1458,7 @@ class SqliteStore {
         ['tasks', 'DELETE FROM tasks'],
         ['observations', "DELETE FROM observations WHERE adapter_id LIKE 'gmail:%'"],
         ['connector_cursors', "DELETE FROM connector_cursors WHERE adapter_id LIKE 'gmail:%'"],
+        ['connector_leases', "DELETE FROM connector_leases WHERE adapter_id LIKE 'gmail:%'"],
         ['connector_health', "DELETE FROM connector_health WHERE adapter_id LIKE 'gmail:%'"],
         ['notification_feedback', "DELETE FROM notification_feedback WHERE notification_id IN (SELECT notification_id FROM notification_outbox WHERE notification_class = 'digest')"],
         ['notification_outbox', "DELETE FROM notification_outbox WHERE notification_class = 'digest'"],
