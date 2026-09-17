@@ -542,6 +542,7 @@ async function loadAssistantConversation() {
   workflowsTarget.replaceChildren();
   notificationsTarget.replaceChildren();
   target.replaceChildren();
+  let statusResolved = false;
   try {
     const status = await Promise.race([
       window.signalBox.getAssistantStatus(),
@@ -554,6 +555,7 @@ async function loadAssistantConversation() {
     const health = document.getElementById('assistant-health');
     health.textContent = status.paused ? 'Assistant paused' : status.running || status.background?.running ? 'Assistant active' : 'Assistant offline';
     health.dataset.state = status.paused ? 'paused' : status.running || status.background?.running ? 'active' : 'unavailable';
+    statusResolved = true;
     const [messages, decisions, workflows, assistantTasks, notifications] = await Promise.all([
       window.signalBox.getAssistantConversation(), window.signalBox.getAssistantDecisions(), window.signalBox.getAssistantWorkflows(), window.signalBox.listTasks(), window.signalBox.getAssistantNotifications(),
     ]);
@@ -605,8 +607,10 @@ async function loadAssistantConversation() {
     }
   } catch (caught) {
     const health = document.getElementById('assistant-health');
-    health.textContent = 'Assistant unavailable';
-    health.dataset.state = 'unavailable';
+    if (!statusResolved) {
+      health.textContent = 'Assistant unavailable';
+      health.dataset.state = 'unavailable';
+    }
     showError(caught.message || 'Assistant conversation unavailable.');
     window.setTimeout(() => {
       if (health.dataset.state === 'unavailable' && !document.getElementById('assistant-view').hidden) loadAssistantConversation();
