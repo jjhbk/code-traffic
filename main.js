@@ -660,6 +660,7 @@ function wireIpc() {
     mailSync = null;
     calendarSync = null;
     driveSync = null;
+    backgroundHost?.setConnectorAccounts({ gmail: null, calendar: null, drive: null }).catch((error) => console.error(`[assistant] connector account update failed: ${error.message}`));
     return { paired: false, provider: 'gmail' };
   });
   ipcMain.handle('mail:pair', async (_event, { clientId: submittedClientId = '', clientSecret: submittedClientSecret = '' } = {}) => {
@@ -704,6 +705,7 @@ function wireIpc() {
       if (account) mailCredentials.save('gmail-account', account);
     } catch (error) { console.error(`[mail] could not read Gmail profile: ${error.message}`); }
     wireMailSync();
+    await backgroundHost?.setConnectorAccounts({ gmail: account || null, calendar: account || null, drive: account || null });
     return { paired: true, provider: 'gmail', account };
   });
   ipcMain.handle('session:create', async (_event, { cwd, agent = 'claude' } = {}) => {
@@ -1054,6 +1056,11 @@ async function start() {
           databasePath: path.join(app.getPath('userData'), 'signal-box.db'),
           forkImpl: forkBackgroundUtility,
           paused: appSettings.assistantPaused === true,
+          connectorAccounts: {
+            gmail: mailCredentials?.load('gmail-account') || null,
+            calendar: mailCredentials?.load('gmail-account') || null,
+            drive: mailCredentials?.load('gmail-account') || null,
+          },
           digestSettings: {
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             dailyCap: Number.isInteger(appSettings.dailyDigestCap) ? appSettings.dailyDigestCap : 5,
@@ -1067,6 +1074,9 @@ async function start() {
             if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
             if (kind === 'assistant.replan') return runTaskReplan(payload);
             if (kind === 'assistant.proactive-actions') return runProactiveActions(payload);
+            if (kind === 'connector.gmail.fetch') return createGmailProvider().sync(payload);
+            if (kind === 'connector.calendar.fetch') return createCalendarProvider().sync(payload);
+            if (kind === 'connector.drive.fetch') return createDriveProvider().sync(payload);
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
@@ -1354,6 +1364,15 @@ function createCalendarProvider() {
   const clientSecret = mailCredentials.load('gmail-client-secret') || null;
   if (!refreshToken || !clientId) throw new Error('Connect Google before editing Calendar.');
   return new GoogleCalendarProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
+}
+
+function createDriveProvider() {
+  if (!mailCredentials) throw new Error('Protected credential storage is unavailable.');
+  const refreshToken = mailCredentials.load('gmail-refresh-token');
+  const clientId = mailCredentials.load('gmail-client-id') || GOOGLE_CLIENT_ID || '';
+  const clientSecret = mailCredentials.load('gmail-client-secret') || null;
+  if (!refreshToken || !clientId) throw new Error('Connect Google before syncing Drive.');
+  return new GoogleDriveProvider({ refreshToken, oauth: new GoogleOAuth({ clientId, clientSecret }) });
 }
 
 async function runMailSync() {

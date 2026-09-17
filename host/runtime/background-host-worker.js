@@ -6,6 +6,10 @@ const { replanTask } = require('../proactivity/replan');
 const { TaskService } = require('../tasks/service');
 const { WorkflowService } = require('../workflows/service');
 const { MeetingPrepWorkflow } = require('../workflows/meeting-prep');
+const { FollowUpWorkflow } = require('../workflows/follow-up');
+const { ApprovalService } = require('../approvals/service');
+const { RemoteProvider } = require('../mail/remote-provider');
+const { MailSync } = require('../mail/sync');
 const { DigestScheduler } = require('../scheduling/digest');
 
 const token = process.env.SIGNAL_BOX_BACKGROUND_TOKEN || '';
@@ -23,6 +27,10 @@ const workflows = new WorkflowService({ store });
 const meetingPrep = new MeetingPrepWorkflow({ store, workflows });
 let digestSettings = {};
 try { digestSettings = JSON.parse(process.env.SIGNAL_BOX_DIGEST_SETTINGS || '{}'); } catch (_) { digestSettings = {}; }
+let connectorAccounts = {};
+try { connectorAccounts = JSON.parse(process.env.SIGNAL_BOX_CONNECTOR_ACCOUNTS || '{}'); } catch (_) { connectorAccounts = {}; }
+const approvals = new ApprovalService({ store });
+const followUp = new FollowUpWorkflow({ store, approvals, workflows });
 const digestScheduler = new DigestScheduler({ store, timeZone: digestSettings.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone, dailyCap: Number(digestSettings.dailyCap) || 5, digestAt: digestSettings.digestAt || '08:30', cadenceMinutes: Number(digestSettings.cadenceMinutes) || 60, quietStart: digestSettings.quietStart || null, quietEnd: digestSettings.quietEnd || null });
 const parentCalls = new Map();
 let parentSequence = 0;
@@ -40,22 +48,19 @@ runtime.register('browser.availability.check', async (payload) => {
 });
 runtime.register('meeting.prep', async (payload) => meetingPrep.prepare(payload.workflowId, { observations: store.observations() }));
 runtime.register('tasks.reconcile', async (payload) => taskService.processAllAsync(payload.adapterId));
-for (const [kind, intervalMs] of [['assistant.proactive-actions', 30 * 1000], ['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000]]) {
+runtime.register('assistant.proactive-actions', async () => {
+  const tasks = store.listTasks();
+  const decisions = proactivity.evaluate(tasks).map((decision) => {
+    const task = tasks.find((item) => item.taskId === decision.taskId);
+    return { ...decision, taskVersion: task?.updatedAt || null };
+  });
+  proactivity.enqueueAttentionNotifications(tasks, decisions);
+  delegate('assistant.proactive-actions', { decisions }, { nextKind: 'assistant.proactive-actions', intervalMs: 30 * 1000 });
+  return { tasks: tasks.length, decisions: decisions.length, decisionsDelegated: true };
+});
+for (const [kind, providerKey, intervalMs] of [['assistant.sync.gmail', 'gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 'calendar', 5 * 60 * 1000], ['assistant.sync.drive', 'drive', 10 * 60 * 1000]]) {
   runtime.register(kind, async (payload) => {
-    if (kind === 'assistant.proactive-actions') {
-      // The worker owns deterministic eligibility and durable attention
-      // notifications. Only execution requiring Electron credentials,
-      // Telegram, or the browser bridge returns to the parent.
-      const tasks = store.listTasks();
-      const decisions = proactivity.evaluate(tasks).map((decision) => {
-        const task = tasks.find((item) => item.taskId === decision.taskId);
-        return { ...decision, taskVersion: task?.updatedAt || null };
-      });
-      proactivity.enqueueAttentionNotifications(tasks, decisions);
-      delegate(kind, { decisions }, { nextKind: kind, intervalMs });
-      return { tasks: tasks.length, decisions: decisions.length, decisionsDelegated: true };
-    }
-    delegate(kind, payload, { nextKind: kind, intervalMs });
+    return runConnectorSync(providerKey, payload, { nextKind: kind, intervalMs });
   });
 }
 runtime.register('assistant.replan', async (payload) => replanTask({ store, proactivity, taskId: payload.taskId, reason: payload.reason }));
@@ -90,22 +95,47 @@ function scheduleLater(kind, payload, runAt, dedupeKey, delayMs = 0) {
   timer.unref?.();
 }
 
+async function runConnectorSync(providerKey, payload = {}, { nextKind, intervalMs }) {
+  const account = connectorAccounts[providerKey];
+  const adapterId = account ? `${providerKey}:${account}` : null;
+  scheduleNext(nextKind, {}, intervalMs);
+  if (!account) return { paired: false, provider: providerKey, reason: `${providerKey} is not connected.` };
+  const provider = new RemoteProvider({ kind: `connector.${providerKey}.fetch`, request: callParent });
+  const sync = new MailSync({ store, provider });
+  try {
+    const result = await sync.run({ adapterId, accountAddress: account, boundedWindow: providerKey === 'drive' ? 100 : undefined });
+    const tasks = await taskService.processObservationsAsync(result.observations || []);
+    let followUps = null;
+    let meetingPrepResult = null;
+    if (providerKey === 'gmail') followUps = followUp.reconcileReplies(store.observations(adapterId));
+    if (providerKey === 'calendar') meetingPrepResult = meetingPrep.scheduleUpcoming(store.observations(adapterId), { sourceObservations: store.observations() });
+    const syncResult = { ...result, taskCandidates: tasks.length, followUps: followUps?.length || 0, meetingPrep: meetingPrepResult };
+    store.setConnectorHealth(adapterId, 'healthy', syncResult);
+    return syncResult;
+  } catch (error) {
+    store.setConnectorHealth(adapterId, 'error', { message: error.message, code: error.code || null });
+    throw error;
+  }
+}
+
+function scheduleNext(kind, payload, intervalMs) {
+  if (!kind || !Number.isFinite(intervalMs)) return;
+  const nextRunAt = Date.now() + intervalMs;
+  const nextKey = `${kind}:${Math.floor(nextRunAt / intervalMs)}`;
+  try { runtime.schedule(kind, payload, nextRunAt, nextKey); }
+  catch (error) {
+    console.error(`[background] schedule ${kind} failed: ${error.message}`);
+    scheduleLater(kind, payload, nextRunAt, nextKey, 250);
+  }
+}
+
 function delegate(kind, payload, { nextKind = null, nextPayload = {}, intervalMs = null } = {}) {
   // Persist the next cadence before handing the current job to the Electron
   // process. The worker may exit while the parent call is in flight; the
   // cadence must not depend on that IPC round trip completing.
-  if (nextKind && Number.isFinite(intervalMs)) {
-    const nextRunAt = Date.now() + intervalMs;
-    const nextKey = `${nextKind}:${Math.floor(nextRunAt / intervalMs)}`;
-    try { runtime.schedule(nextKind, nextPayload, nextRunAt, nextKey); }
-    catch (error) {
-      console.error(`[background] schedule ${nextKind} failed: ${error.message}`);
-      scheduleLater(nextKind, nextPayload, nextRunAt, nextKey, 250);
-    }
-  }
+  scheduleNext(nextKind, nextPayload, intervalMs);
   // Let JobRunner complete the claimed scheduler row before the parent opens a
-  // write transaction on the shared database. The parent remains the only
-  // owner of provider/workflow mutations; failed delegates are re-enqueued.
+  // provider call. Failed delegates are re-enqueued.
   setImmediate(async () => {
     try { await callParent(kind, payload); }
     catch (error) {
@@ -138,7 +168,10 @@ listen((message) => {
       if (message.error) pending.reject(new Error(message.error)); else pending.resolve(message.result);
       return;
     }
-    if (message.method === 'health') reply(message.id, runtime.health());
+    if (message.method === 'set-connector-accounts') {
+      connectorAccounts = message.accounts && typeof message.accounts === 'object' ? message.accounts : {};
+      reply(message.id, { updated: true });
+    } else if (message.method === 'health') reply(message.id, runtime.health());
     else if (message.method === 'pause') reply(message.id, runtime.setPaused(message.paused));
     else if (message.method === 'shutdown') {
       runtime.stop(); store.close(); reply(message.id, { stopped: true });
