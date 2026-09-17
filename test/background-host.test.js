@@ -18,7 +18,16 @@ const { WorkflowService } = require('../host/workflows/service');
 
   const liveStore = new SqliteStore({ filename: databasePath });
   let jobs = 0;
-  const host = new BackgroundHost({ databasePath, onJob: async (kind, payload) => { if (kind === 'workflow.resume') return new WorkflowService({ store: liveStore }).resume(payload.workflowId); if (kind === 'assistant.digest') jobs += 1; } });
+  let cadenceObserved = false;
+  const host = new BackgroundHost({ databasePath, onJob: async (kind, payload) => {
+    if (kind === 'workflow.resume') return new WorkflowService({ store: liveStore }).resume(payload.workflowId);
+    if (kind === 'assistant.digest') {
+      jobs += 1;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      cadenceObserved = liveStore.exportData().data.jobs.some((job) => job.kind === 'assistant.digest'
+        && job.status === 'queued' && String(job.dedupe_key || '').startsWith('assistant.digest:'));
+    }
+  } });
   const initial = await host.start();
   assert.equal(initial.running, true);
   assert.equal((await host.health()).paused, false);
@@ -30,11 +39,12 @@ const { WorkflowService } = require('../host/workflows/service');
     const probe = new SqliteStore({ filename: databasePath });
     current = probe.getWorkflow(workflow.workflowId);
     probe.close();
-    if (current.state === 'needs_attention' && jobs === 1) break;
+    if (current.state === 'needs_attention' && jobs === 1 && cadenceObserved) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(current.state, 'needs_attention');
   assert.equal(jobs, 1);
+  assert.equal(cadenceObserved, true);
   assert.deepEqual(await host.stop(), { stopped: true });
   liveStore.close();
   const failedChild = new EventEmitter();

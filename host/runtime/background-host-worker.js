@@ -54,6 +54,18 @@ function scheduleLater(kind, payload, runAt, dedupeKey, delayMs = 0) {
 }
 
 function delegate(kind, payload, { nextKind = null, nextPayload = {}, intervalMs = null } = {}) {
+  // Persist the next cadence before handing the current job to the Electron
+  // process. The worker may exit while the parent call is in flight; the
+  // cadence must not depend on that IPC round trip completing.
+  if (nextKind && Number.isFinite(intervalMs)) {
+    const nextRunAt = Date.now() + intervalMs;
+    const nextKey = `${nextKind}:${Math.floor(nextRunAt / intervalMs)}`;
+    try { runtime.schedule(nextKind, nextPayload, nextRunAt, nextKey); }
+    catch (error) {
+      console.error(`[background] schedule ${nextKind} failed: ${error.message}`);
+      scheduleLater(nextKind, nextPayload, nextRunAt, nextKey, 250);
+    }
+  }
   // Let JobRunner complete the claimed scheduler row before the parent opens a
   // write transaction on the shared database. The parent remains the only
   // owner of provider/workflow mutations; failed delegates are re-enqueued.
@@ -62,9 +74,7 @@ function delegate(kind, payload, { nextKind = null, nextPayload = {}, intervalMs
     catch (error) {
       console.error(`[background] ${kind} delegation failed: ${error.message}`);
       scheduleLater(kind, payload, Date.now() + 1000, `retry:${kind}:${payload.workflowId || Date.now()}`);
-      return;
     }
-    if (nextKind && Number.isFinite(intervalMs)) scheduleLater(nextKind, nextPayload, Date.now() + intervalMs, `${nextKind}:${Math.floor((Date.now() + intervalMs) / intervalMs)}`, 100);
   });
 }
 
