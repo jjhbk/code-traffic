@@ -17,6 +17,13 @@ class WorkflowService {
 
   setStep(workflowId, step) { return this.store.upsertWorkflowStep(workflowId, step); }
 
+  resume(workflowId) {
+    const workflow = this.store.getWorkflow(workflowId);
+    if (!workflow) throw new Error('Workflow not found.');
+    if (workflow.state !== 'waiting_event') return workflow;
+    return this.store.updateWorkflow(workflowId, { state: 'needs_attention', payload: { ...workflow.payload, wakeReason: 'response-window-expired' }, details: { reason: 'response-window-expired' } });
+  }
+
   scheduleResume(workflowId, runAt, kind = 'workflow.resume') {
     if (!Number.isFinite(runAt)) throw new Error('Workflow resume time is required.');
     return this.store.enqueueJob({ kind, payload: { workflowId }, runAt, dedupeKey: `${kind}:${workflowId}:${runAt}` });

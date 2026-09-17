@@ -658,7 +658,11 @@ async function dispatchApprovedReply(requestId, principal, surface) {
     const sent = await provider.sendReply({ to: action.destination, subject: action.content.subject, body: action.content.body, threadId: action.threadId, inReplyTo: action.inReplyTo, references: action.references });
     approvalService.execution({ attemptId: attempt.attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId } });
     approvalService.receipt({ attemptId: attempt.attemptId, receipt: { provider: 'gmail', messageId: sent.id || null, threadId: sent.threadId || action.threadId, destination: action.destination } });
-    if (action.workflowId) hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt: Date.now() + 48 * 60 * 60 * 1000, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: sent.id || null, outcome: 'confirmed' }, details: { attemptId: attempt.attemptId } });
+    if (action.workflowId) {
+      const wakeAt = Date.now() + 48 * 60 * 60 * 1000;
+      hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: sent.id || null, outcome: 'confirmed' }, details: { attemptId: attempt.attemptId } });
+      followUpWorkflow?.workflows.scheduleResume(action.workflowId, wakeAt);
+    }
     return { status: 'confirmed', attemptId: attempt.attemptId, messageId: sent.id || null };
   } catch (error) {
     const status = error.name === 'AbortError' || /timeout|network|fetch/i.test(error.message) ? 'unknown' : 'failed';
@@ -715,7 +719,11 @@ async function reconcileApprovedReply(requestId, attemptId, surface) {
   if (!result.found) return { status: 'unknown', attemptId, reconciled: false };
   approvalService.execution({ attemptId, requestId, status: 'confirmed', details: { provider: 'gmail', surface, reconciled: true, messageId: result.messageId } });
   approvalService.receipt({ attemptId, receipt: { provider: 'gmail', messageId: result.messageId, threadId: result.threadId, destination: action.destination, reconciled: true } });
-  if (action.workflowId) hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt: Date.now() + 48 * 60 * 60 * 1000, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: result.messageId, outcome: 'reconciled' }, details: { attemptId, reconciled: true } });
+  if (action.workflowId) {
+    const wakeAt = Date.now() + 48 * 60 * 60 * 1000;
+    hostStore.updateWorkflow(action.workflowId, { state: 'waiting_event', wakeAt, payload: { ...hostStore.getWorkflow(action.workflowId).payload, sentMessageId: result.messageId, outcome: 'reconciled' }, details: { attemptId, reconciled: true } });
+    followUpWorkflow?.workflows.scheduleResume(action.workflowId, wakeAt);
+  }
   return { status: 'confirmed', attemptId, messageId: result.messageId, reconciled: true };
 }
 
@@ -1017,6 +1025,9 @@ async function start() {
     assistantRuntime.register('assistant.sync.gmail', async () => { await runMailSync(); scheduleNext('assistant.sync.gmail', 5 * 60 * 1000); });
     assistantRuntime.register('assistant.sync.calendar', async () => { await runCalendarSync(); scheduleNext('assistant.sync.calendar', 5 * 60 * 1000); });
     assistantRuntime.register('assistant.sync.drive', async () => { await runDriveSync(); scheduleNext('assistant.sync.drive', 10 * 60 * 1000); });
+    assistantRuntime.register('workflow.resume', async ({ workflowId }) => {
+      if (workflowId && hostStore) new WorkflowService({ store: hostStore }).resume(workflowId);
+    });
     assistantRuntime.register('assistant.digest', async () => {
       await runScheduledDigest();
       return { completed: true };
