@@ -986,9 +986,18 @@ class SqliteStore {
 
   saveObservation(observation, adapterId) {
     if (!observation?.observationId || !observation.messageId || !observation.threadId) throw new Error('Invalid mail observation.');
+    const serialized = JSON.stringify(observation);
+    const existing = this.db.prepare('SELECT observation_json AS observationJson FROM observations WHERE observation_id = ?').get(observation.observationId);
+    if (existing) {
+      if (existing.observationJson === serialized) return false;
+      this.db.prepare('UPDATE observations SET adapter_id = ?, message_id = ?, thread_id = ?, observation_json = ?, observed_at = ? WHERE observation_id = ?')
+        .run(adapterId, observation.messageId, observation.threadId, serialized, this.clock(), observation.observationId);
+      this.audit('observation-updated', null, null, { observationId: observation.observationId, adapterId, messageId: observation.messageId });
+      return true;
+    }
     const result = this.db.prepare(`INSERT INTO observations(observation_id, adapter_id, message_id, thread_id, observation_json, observed_at)
       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(observation_id) DO NOTHING`)
-      .run(observation.observationId, adapterId, observation.messageId, observation.threadId, JSON.stringify(observation), this.clock());
+      .run(observation.observationId, adapterId, observation.messageId, observation.threadId, serialized, this.clock());
     if (Number(result.changes) === 1) this.audit('observation-saved', null, null, { observationId: observation.observationId, adapterId, messageId: observation.messageId });
     return Number(result.changes) === 1;
   }
