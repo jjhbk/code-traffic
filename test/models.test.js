@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { EntityVault, PrivacyGateway } = require('../host/privacy/gateway');
-const { ModelRouter, validateRanking, validateNextStep } = require('../host/models/router');
+const { ModelRouter, validateRanking, validateNextStep, validateDraftReply } = require('../host/models/router');
 const { OllamaClient, OpenAICompatibleClient } = require('../host/models/clients');
 const { IsolatedFrontierClient } = require('../host/models/frontier-gateway');
 
@@ -19,6 +19,7 @@ const router = new ModelRouter({ privacyGateway: new PrivacyGateway({ vault: new
   assert.doesNotMatch(captured.messages[1].content, /alice@example.com/);
   assert.equal(validateRanking({ items: [{ taskId: 'unknown', score: 1, reason: 'bad' }, { taskId: 'task-2', score: 2, reason: 'bad' }] }, tasks).length, 0);
   assert.throws(() => validateNextStep({ decision: 'draft_follow_up', reason: 'send it', requiresApproval: false }), /requires approval/);
+  assert.equal(validateDraftReply({ subject: 'Re: Handoff', body: 'Checking in.' }).subject, 'Re: Handoff');
   const planner = new ModelRouter({
     privacyGateway: new PrivacyGateway({ vault: new EntityVault() }),
     localClient: { complete: async ({ schema, prompt }) => {

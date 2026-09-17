@@ -1194,6 +1194,7 @@ async function runScheduledDigest() {
   if (!digestScheduler || !hostStore || !telegram?.enabled || !telegram.configured) return null;
   const tasks = hostStore.listTasks();
   const decisions = proactivityService?.evaluate(tasks) || [];
+  await prepareProactiveFollowUps(tasks, decisions);
   const decisionTypes = new Map(decisions.map((decision) => [decision.taskId, decision.type]));
   const actionableTasks = tasks.filter((task) => decisionTypes.get(task.taskId) !== 'wait');
   let modelRanking = null;
@@ -1202,6 +1203,25 @@ async function runScheduledDigest() {
   if (!digest) return null;
   await deliverPendingDigest();
   return digest;
+}
+
+async function prepareProactiveFollowUps(tasks, decisions) {
+  if (!followUpWorkflow || !telegram?.enabled || !telegram.configured) return [];
+  const prepared = [];
+  for (const decision of decisions.filter((item) => item.type === 'draft_follow_up')) {
+    const task = tasks.find((item) => item.taskId === decision.taskId);
+    if (!task || hostStore.listWorkflows({ taskId: task.taskId, activeOnly: true }).some((workflow) => ['awaiting_approval', 'executing', 'waiting_event', 'verifying'].includes(workflow.state))) continue;
+    try {
+      const draft = await modelRouter?.draftReply(task, decision.evidence ? [{ sourceId: task.taskId, summary: task.summary, status: task.status }] : [])
+        || { subject: `Re: ${task.summary || 'Follow up'}`, body: `Following up on ${task.summary || 'this request'}.` };
+      const { approval } = followUpWorkflow.prepare(task, { subject: draft.subject, body: draft.body, principal: 'signal-box-user', surfaces: ['desktop', 'telegram'], expiresAt: Date.now() + 10 * 60 * 1000 });
+      await telegram.sendReplyApproval(approval);
+      prepared.push({ taskId: task.taskId, requestId: approval.request_id || approval.requestId });
+    } catch (error) {
+      console.error(`[assistant] follow-up preparation failed for ${task.taskId}: ${error.message}`);
+    }
+  }
+  return prepared;
 }
 
 async function deliverPendingDigest() {

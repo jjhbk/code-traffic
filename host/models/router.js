@@ -17,6 +17,11 @@ const NEXT_STEP_SCHEMA = {
   },
   required: ['decision', 'reason', 'requiresApproval'],
 };
+const DRAFT_REPLY_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: { subject: { type: 'string' }, body: { type: 'string' } },
+  required: ['subject', 'body'],
+};
 
 function validateRanking(result, tasks) {
   if (!result || !Array.isArray(result.items)) throw new Error('Model ranking must contain an items array.');
@@ -36,6 +41,11 @@ function validateNextStep(result) {
   if (!result || !decisions.has(result.decision) || typeof result.reason !== 'string' || !result.reason.trim() || typeof result.requiresApproval !== 'boolean') throw new Error('Invalid next-step proposal.');
   if (result.decision === 'draft_follow_up' && !result.requiresApproval) throw new Error('A follow-up proposal requires approval.');
   return { decision: result.decision, reason: result.reason.trim(), requiresApproval: result.requiresApproval };
+}
+
+function validateDraftReply(result) {
+  if (!result || typeof result.subject !== 'string' || !result.subject.trim() || typeof result.body !== 'string' || !result.body.trim() || result.body.length > 10_000) throw new Error('Invalid reply draft.');
+  return { subject: result.subject.replace(/[\r\n]/g, ' ').trim(), body: result.body.trim() };
 }
 
 class ModelRouter {
@@ -172,6 +182,27 @@ class ModelRouter {
     }
   }
 
+  async draftReply(task, context = []) {
+    if (!task?.taskId) throw new Error('A task is required for drafting.');
+    const fallback = { subject: String(task.summary || 'Follow up').startsWith('Re:') ? String(task.summary) : `Re: ${task.summary || 'Follow up'}`, body: `Hi,\n\nI’m following up on ${task.summary || 'this request'}. Could you share an update when you have a chance?\n\nThanks.` };
+    if (this.mode === 'off') return { ...fallback, source: 'deterministic' };
+    const client = this.mode === 'frontier' ? this.frontierClient : this.localClient;
+    if (!client) return { ...fallback, source: 'deterministic', reason: 'model-not-configured' };
+    const safeTask = this.privacyGateway.prepareRemotePayload({ taskId: task.taskId, summary: task.summary, counterparty: task.counterparty, dueDate: task.dueDate, evidence: task.evidence?.text });
+    const safeContext = context.slice(0, 12).map((item) => this.privacyGateway.prepareRemotePayload(item, ['sourceId', 'summary', 'status', 'dueDate']));
+    try {
+      if (this.mode === 'frontier') this.metrics.frontierCalls += 1; else this.metrics.localCalls += 1;
+      const draft = validateDraftReply(await client.complete({
+        system: 'Draft one concise, respectful follow-up email for a personal assistant. Return only JSON matching the schema. Do not claim work was completed. Do not add recipients or send the email.',
+        prompt: JSON.stringify({ task: safeTask, context: safeContext }),
+        schema: DRAFT_REPLY_SCHEMA,
+      }));
+      return { ...draft, source: this.mode };
+    } catch (error) {
+      return { ...fallback, source: 'deterministic', reason: error.message };
+    }
+  }
+
   async availability() {
     let localAvailable = null;
     let localError = null;
@@ -224,4 +255,4 @@ class ModelRouter {
   }
 }
 
-module.exports = { ModelRouter, RANK_SCHEMA, ENTITY_SCHEMA, NEXT_STEP_SCHEMA, validateRanking, validateNextStep };
+module.exports = { ModelRouter, RANK_SCHEMA, ENTITY_SCHEMA, NEXT_STEP_SCHEMA, DRAFT_REPLY_SCHEMA, validateRanking, validateNextStep, validateDraftReply };
