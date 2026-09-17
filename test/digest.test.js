@@ -13,6 +13,13 @@ const tasks = [
 const first = scheduler.prepare(tasks);
 assert.deepEqual(first.items.map((item) => item.taskId), ['today', 'tomorrow']);
 assert.equal(scheduler.prepare(tasks), null, 'daily cap prevents a second digest reservation');
+const deadlineStore = new SqliteStore();
+const deadlineNow = Date.parse('2026-09-16T13:00:00Z');
+const deadlineScheduler = new DigestScheduler({ store: deadlineStore, timeZone: 'America/New_York', dailyCap: 1, cadenceMinutes: 0, clock: () => deadlineNow });
+const deadlineDigest = deadlineScheduler.prepare([{ taskId: 'deadline', summary: 'Deadline', status: 'active', dueDate: 'friday', dueAt: deadlineNow + 2 * 60 * 60 * 1000 }]);
+assert.equal(deadlineDigest.items[0].taskId, 'deadline');
+assert.equal(deadlineDigest.items[0].reasons[0], 'due within 24 hours');
+deadlineStore.close();
 const quiet = new DigestScheduler({ store, timeZone: 'America/New_York', quietStart: '21:00', quietEnd: '07:00', clock: () => Date.parse('2026-09-16T02:00:00Z') });
 assert.equal(quiet.isQuiet(), true);
 assert.equal(quiet.prepare(tasks), null);

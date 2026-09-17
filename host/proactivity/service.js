@@ -20,6 +20,9 @@ class ProactivityService {
     const evidence = task.evidence?.text ? [task.evidence.text] : [];
     if (task.confidence === 'low' && !task.dueDate) return this._decision(task, 'clarify', 'low-confidence-obligation', evidence);
     if (task.dueDate === 'today' || task.dueDate === 'tomorrow') return this._decision(task, 'digest', `due-${task.dueDate}`, evidence);
+    if (Number.isFinite(Number(task.dueAt)) && Number(task.dueAt) <= now + 24 * 60 * 60 * 1000) {
+      return this._decision(task, 'digest', Number(task.dueAt) <= now ? 'deadline-passed' : 'deadline-within-24-hours', evidence);
+    }
     if (task.owner === 'counterparty' && task.blocker === 'self') {
       const observedAt = Number(task.updatedAt || task.createdAt || 0);
       if (observedAt && now - observedAt >= this.followUpAfterMs) return this._decision(task, 'draft_follow_up', 'counterparty-response-overdue', evidence);

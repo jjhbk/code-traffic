@@ -2,11 +2,18 @@ function dateKey(now, timeZone = 'UTC') {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
 }
 
-function rankTask(task) {
+function rankTask(task, now = Date.now()) {
   let score = 0;
   const reasons = [];
   if (task.dueDate === 'today') { score += 100; reasons.push('due today'); }
   else if (task.dueDate === 'tomorrow') { score += 80; reasons.push('due tomorrow'); }
+  else if (Number.isFinite(Number(task.dueAt))) {
+    const remaining = Number(task.dueAt) - now;
+    if (remaining <= 0) { score += 120; reasons.push('deadline passed'); }
+    else if (remaining <= 24 * 60 * 60 * 1000) { score += 100; reasons.push('due within 24 hours'); }
+    else if (remaining <= 48 * 60 * 60 * 1000) { score += 80; reasons.push('due within 48 hours'); }
+    else { score += 40; reasons.push(`due ${task.dueDate || 'soon'}`); }
+  }
   else if (task.dueDate) { score += 40; reasons.push(`due ${task.dueDate}`); }
   if (task.owner === 'self') { score += 20; reasons.push('you owe this'); }
   if (task.blocker === 'self') { score += 10; reasons.push('blocking progress'); }
@@ -50,7 +57,7 @@ class DigestScheduler {
     this.store.wakeSnoozedTasks(this.clock());
     const modelById = new Map((modelRanking?.items || []).map((item) => [String(item.taskId), item]));
     const ranked = tasks.filter((task) => task.status === 'active' && !(task.counterparty && this.store.isSuppressed('counterparty', task.counterparty))).map((task) => {
-      const deterministic = rankTask(task);
+      const deterministic = rankTask(task, this.clock());
       const model = modelById.get(String(task.taskId));
       return model ? { task, score: model.score, reasons: [model.reason] } : deterministic;
     }).sort((a, b) => b.score - a.score || String(a.task.taskId).localeCompare(String(b.task.taskId)));
