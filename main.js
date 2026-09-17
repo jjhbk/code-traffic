@@ -479,8 +479,18 @@ function wireIpc() {
     return conversationService.handle({ conversationId: 'desktop:signal-box', text, externalId: `desktop:${crypto.randomUUID()}` });
   });
   ipcMain.handle('assistant:status', async () => {
-    const runtime = assistantRuntime?.health() || { running: false, busy: false, paused: false };
-    const background = backgroundHost ? await backgroundHost.health() : null;
+    let runtime = { running: false, busy: false, paused: false };
+    try {
+      runtime = assistantRuntime?.health() || runtime;
+    } catch (error) {
+      runtime = { ...runtime, lastError: error.message };
+    }
+    let background = null;
+    try {
+      background = backgroundHost ? await backgroundHost.health() : null;
+    } catch (error) {
+      background = { running: false, busy: false, paused: false, lifecycle: 'unavailable', lastError: error.message };
+    }
     return {
       ...runtime,
       running: Boolean(runtime.running || background?.running || background?.lifecycle === 'running'),
