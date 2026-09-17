@@ -34,5 +34,8 @@ assert.equal(store.deleteContext('place', 'home'), true);
 const replans = store.exportData().data.jobs.filter((job) => job.kind === 'assistant.replan');
 assert.equal(replans.length, 2);
 assert.equal(JSON.parse(replans.at(-1).payload_json).reason, 'context-deleted');
+const clearedTask = store.listTasks({ includeDismissed: true }).find((item) => item.taskId === task.taskId);
+assert.equal(clearedTask.contextTrigger, null, 'forgetting a place removes the task arrival dependency');
+assert.ok(store.exportData().data.jobs.some((job) => job.kind === 'assistant.proactive-actions' && JSON.parse(job.payload_json).taskId === task.taskId), 'forgetting context schedules immediate proactive reevaluation');
 store.close();
 console.log('context invalidation tests passed');

@@ -1105,8 +1105,19 @@ class SqliteStore {
       return searchable.includes(needle);
     });
     for (const task of affected) {
+      let nextTask = task;
+      const trigger = task.contextTrigger || task.locationTrigger;
+      if (reason === 'context-deleted' && recordType === 'place' && trigger?.placeKey && String(trigger.placeKey).toLowerCase() === needle) {
+        nextTask = { ...task, contextTrigger: null, locationTrigger: null, contextTriggerRemovedAt: now };
+      }
+      const version = this._nextTaskVersion(task.taskId, now);
+      this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?')
+        .run(JSON.stringify(nextTask), version, task.taskId);
+      this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'context-dependency-removed\', ?, ?)')
+        .run(task.taskId, JSON.stringify({ recordType, recordKey: String(recordKey), reason }), now);
       this._invalidateTaskActions(task.taskId, reason, now);
       this.enqueueJob({ kind: 'assistant.replan', payload: { taskId: task.taskId, reason }, runAt: now, dedupeKey: `assistant.replan:${task.taskId}:context:${recordType}:${needle}` });
+      this._enqueueTaskProactive(task.taskId, version, now);
     }
   }
 
