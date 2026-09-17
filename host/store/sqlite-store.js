@@ -378,6 +378,27 @@ const MIGRATIONS = [
     lease_until INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );`,
+  // Repair databases created before Telegram migrations were appended. Some
+  // historical migration versions were reused after the migration list was
+  // extended, so the version number alone cannot prove these tables exist.
+  `CREATE TABLE IF NOT EXISTS telegram_callbacks (
+    token TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    action_json TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    claimed_at INTEGER,
+    consumed_at INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS telegram_callbacks_expiry ON telegram_callbacks(expires_at, status);
+  CREATE TABLE IF NOT EXISTS telegram_updates (
+    update_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    payload_json TEXT
+  );`,
 ];
 
 class SqliteStore {
