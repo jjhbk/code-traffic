@@ -892,6 +892,7 @@ class SqliteStore {
               .run(taskRow.taskId, JSON.stringify({ observationId: row.observationId, adapterId, messageId: String(messageId) }), now);
           }
           this._invalidateTaskActions(taskRow.taskId, 'source-removed', now);
+          this.enqueueJob({ kind: 'assistant.replan', payload: { taskId: taskRow.taskId, reason: 'source-removed' }, runAt: now, dedupeKey: `assistant.replan:${taskRow.taskId}:${now}` });
         }
       } else {
         remove.run(row.observationId);
@@ -1328,6 +1329,7 @@ class SqliteStore {
       this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'corrected\', ?, ?)')
         .run(taskId, JSON.stringify(changes), now);
       this._invalidateTaskActions(taskId, 'task-corrected', now);
+      this.enqueueJob({ kind: 'assistant.replan', payload: { taskId, reason: 'task-corrected' }, runAt: now, dedupeKey: `assistant.replan:${taskId}:${now}` });
       return { ...next, taskId, status: this.db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId).status };
     });
   }

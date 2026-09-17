@@ -1131,6 +1131,7 @@ async function start() {
           onJob: async (kind, payload) => {
             if (kind === 'workflow.resume') return new WorkflowService({ store: hostStore }).resume(payload.workflowId);
             if (kind === 'tasks.reconcile') return taskService?.processAllAsync(payload.adapterId);
+            if (kind === 'assistant.replan') return runTaskReplan(payload);
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
             if (kind === 'assistant.sync.calendar') return runCalendarSync(payload);
             if (kind === 'assistant.sync.drive') return runDriveSync(payload);
@@ -1236,6 +1237,7 @@ async function start() {
       if (workflowId && hostStore) new WorkflowService({ store: hostStore }).resume(workflowId);
     });
     assistantRuntime.register('tasks.reconcile', async ({ adapterId }) => taskService?.processAllAsync(adapterId));
+    assistantRuntime.register('assistant.replan', async (payload) => runTaskReplan(payload));
     assistantRuntime.register('browser.availability.check', async (payload) => runBrowserAvailabilityCheck(payload));
     assistantRuntime.register('meeting.prep', async (payload) => runMeetingPrep(payload));
     assistantRuntime.register('assistant.digest', async () => {
@@ -1441,6 +1443,24 @@ async function runDriveSync() {
 async function runMobilePushDelivery() {
   if (!mobilePushService) return { attempted: 0, sent: 0, failed: 0, revoked: 0, skipped: true };
   return mobilePushService.deliverPending({ limit: 50 });
+}
+
+async function runTaskReplan({ taskId, reason = 'state-changed' } = {}) {
+  if (!hostStore || !proactivityService || !taskId) return { skipped: true };
+  const task = hostStore.listTasks({ includeDismissed: true }).find((item) => item.taskId === taskId);
+  if (!task) return { skipped: true, reason: 'task-not-found' };
+  const decisions = proactivityService.evaluateAsync
+    ? await proactivityService.evaluateAsync([task], { context: hostStore.listContext() })
+    : proactivityService.evaluate([task]);
+  const decision = decisions[0];
+  if (!decision || decision.type === 'wait') return { taskId, decision: decision?.type || 'wait', notified: false };
+  const notification = hostStore.enqueueNotification({
+    notificationId: `assistant-replan:${taskId}:${task.updatedAt}:${decision.type}`,
+    dateKey: `assistant-replan:${taskId}:${task.updatedAt}:${decision.type}`,
+    notificationClass: 'assistant-replan',
+    items: [{ taskId, summary: task.summary, reason: `The obligation changed (${reason.replaceAll('-', ' ')}); it now needs a fresh decision.`, decision: { type: decision.type, reason: decision.reason, evidence: decision.evidence || [] } }],
+  });
+  return { taskId, decision: decision.type, notified: Boolean(notification) };
 }
 
 async function runScheduledDigest() {

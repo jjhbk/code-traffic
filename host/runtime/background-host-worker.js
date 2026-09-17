@@ -20,7 +20,7 @@ function callParent(kind, payload) {
     send({ type: 'job', id, token, kind, payload });
   });
 }
-const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'tasks.reconcile', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest', 'assistant.mobile-push'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
+const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'browser.availability.check', 'meeting.prep', 'tasks.reconcile', 'assistant.replan', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest', 'assistant.mobile-push'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
 runtime.register('workflow.resume', async (payload) => {
   delegate('workflow.resume', payload);
 });
@@ -32,6 +32,9 @@ runtime.register('meeting.prep', async (payload) => {
 });
 runtime.register('tasks.reconcile', async (payload) => {
   delegate('tasks.reconcile', payload);
+});
+runtime.register('assistant.replan', async (payload) => {
+  delegate('assistant.replan', payload);
 });
 for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['assistant.sync.calendar', 5 * 60 * 1000], ['assistant.sync.drive', 10 * 60 * 1000], ['assistant.digest', 30 * 1000]]) {
   runtime.register(kind, async (payload) => {

@@ -20,6 +20,7 @@ const staleRequestId = pendingFollowUp.workflow.payload.requestId;
 store.correctTask('task-approval-stale', { summary: 'Corrected approval obligation' });
 assert.equal(store.getApproval(staleRequestId).status, 'cancelled', 'task corrections cancel pending approvals');
 assert.equal(store.getWorkflow(pendingFollowUp.workflow.workflowId).state, 'needs_attention', 'task corrections stop awaiting-approval workflows');
+assert.equal(store.claimJobs({ now: Date.now() + 1, workerId: 'replanner' }).some((job) => job.kind === 'assistant.replan' && job.payload.taskId === 'task-approval-stale'), true, 'task corrections enqueue a durable re-plan');
 const invalidated = followUp.observeReplies([{ observationId: 'newer-than-draft', threadId: 'thread-approval-stale', direction: 'incoming', timestamp: Date.now() + 1, body: 'Already handled.' }]);
 assert.equal(invalidated.length, 0, 'already-invalidated workflows are not reprocessed');
 assert.equal(store.getApproval(staleRequestId).status, 'cancelled');
