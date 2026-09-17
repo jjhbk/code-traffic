@@ -51,9 +51,11 @@ class ProactivityService {
     if (!automation || automation.type !== 'browser' || !automation.recipeId || !automation.capability) return null;
     const active = this.store.listWorkflows({ taskId: task.taskId, activeOnly: true });
     if (active.some((workflow) => workflow.workflowType === 'browser-action')) return this._decision(task, 'wait', 'automation-in-progress', []);
-    const priorRuns = this.store.listAutonomousRuns().filter((run) => run.action?.taskId === task.taskId && run.status === 'confirmed').sort((a, b) => b.createdAt - a.createdAt);
-    if (priorRuns.length && automation.repeat !== true) return this._decision(task, 'wait', 'automation-completed', []);
-    if (priorRuns.length && Number(automation.cooldownMs) > 0 && now - priorRuns[0].createdAt < Number(automation.cooldownMs)) return this._decision(task, 'wait', 'automation-cooldown', []);
+    const priorRuns = this.store.listAutonomousRuns().filter((run) => run.action?.taskId === task.taskId).sort((a, b) => b.createdAt - a.createdAt);
+    if (priorRuns.some((run) => run.status === 'unknown')) return this._decision(task, 'wait', 'automation-outcome-unknown', []);
+    const confirmedRuns = priorRuns.filter((run) => run.status === 'confirmed');
+    if (confirmedRuns.length && automation.repeat !== true) return this._decision(task, 'wait', 'automation-completed', []);
+    if (confirmedRuns.length && Number(automation.cooldownMs) > 0 && now - confirmedRuns[0].createdAt < Number(automation.cooldownMs)) return this._decision(task, 'wait', 'automation-cooldown', []);
     const action = { capability: automation.capability, recipeId: automation.recipeId, origin: automation.origin || null, inputs: automation.inputs || {} };
     const grant = this.store.listStandingGrants({ principal: 'signal-box-user', includeInactive: false }).find((candidate) => candidate.status === 'active'
       && candidate.capability === action.capability
