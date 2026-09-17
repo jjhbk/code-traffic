@@ -34,6 +34,8 @@ function request(port, pathname, { method = 'GET', token = 'mobile-secret', body
   assert.equal((await request(port, '/api/v1/mobile/health', { token: 'wrong' })).status, 401);
   const health = await request(port, '/api/v1/mobile/health');
   assert.equal(health.status, 200); assert.equal(health.body.protocolVersion, '1'); assert.equal(health.body.core.host, 'fixture');
+  const pushRegistration = await request(port, '/api/v1/mobile/devices/push-token', { method: 'POST', body: { pushToken: 'ExponentPushToken[fixture]', platform: 'expo' } });
+  assert.equal(pushRegistration.status, 200); assert.equal(store.listMobilePushTokens()[0].pushToken, 'ExponentPushToken[fixture]');
   const today = await request(port, '/api/v1/mobile/today');
   assert.equal(today.status, 200); assert.ok(Array.isArray(today.body.tasks)); assert.ok(Array.isArray(today.body.workflows));
 

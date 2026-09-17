@@ -335,6 +335,14 @@ const MIGRATIONS = [
     acknowledged_at INTEGER NOT NULL,
     PRIMARY KEY(notification_id, device_id)
   );`,
+  `CREATE TABLE IF NOT EXISTS mobile_push_tokens (
+    device_id TEXT PRIMARY KEY,
+    push_token TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    revoked_at INTEGER
+  );`,
 ];
 
 class SqliteStore {
@@ -421,6 +429,34 @@ class SqliteStore {
 
   listMobileDevices() {
     return this.db.prepare('SELECT device_id AS deviceId, device_name AS deviceName, created_at AS createdAt, last_seen_at AS lastSeenAt, revoked_at AS revokedAt FROM mobile_devices ORDER BY created_at DESC').all();
+  }
+
+  registerMobilePushToken({ deviceId, pushToken, platform = 'expo' } = {}) {
+    if (!deviceId || !pushToken || !['expo', 'ios', 'android', 'fcm'].includes(platform)) throw new Error('Invalid mobile push registration.');
+    if (String(pushToken).length > 512) throw new Error('Mobile push token is too long.');
+    const now = this.clock();
+    this.db.prepare(`INSERT INTO mobile_push_tokens(device_id, push_token, platform, created_at, updated_at, revoked_at)
+      VALUES (?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(device_id) DO UPDATE SET push_token = excluded.push_token, platform = excluded.platform, updated_at = excluded.updated_at, revoked_at = NULL`)
+      .run(String(deviceId), String(pushToken), platform, now, now);
+    this.audit('mobile-push-registered', null, null, { deviceId: String(deviceId), platform });
+    return { deviceId: String(deviceId), platform, registered: true };
+  }
+
+  listMobilePushTokens({ deviceId = null, includeRevoked = false } = {}) {
+    const clauses = [];
+    const params = [];
+    if (deviceId) { clauses.push('device_id = ?'); params.push(String(deviceId)); }
+    if (!includeRevoked) clauses.push('revoked_at IS NULL');
+    return this.db.prepare(`SELECT device_id AS deviceId, push_token AS pushToken, platform, created_at AS createdAt, updated_at AS updatedAt, revoked_at AS revokedAt
+      FROM mobile_push_tokens ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY updated_at DESC`).all(...params);
+  }
+
+  revokeMobilePushToken(deviceId) {
+    if (!deviceId) throw new Error('A mobile device is required.');
+    const result = this.db.prepare('UPDATE mobile_push_tokens SET revoked_at = ?, updated_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(this.clock(), this.clock(), String(deviceId));
+    if (Number(result.changes)) this.audit('mobile-push-revoked', null, null, { deviceId: String(deviceId) });
+    return { deviceId: String(deviceId), revoked: Number(result.changes) === 1 };
   }
 
   recordLocationTrigger({ triggerKey, taskId, placeKey, eventId, triggeredAt = this.clock() } = {}) {
@@ -1117,7 +1153,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
