@@ -1452,7 +1452,7 @@ class SqliteStore {
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(from_task_id, to_task_id, relation_type) DO UPDATE SET details_json = excluded.details_json`).run(fromTaskId, toTaskId, relationType, JSON.stringify(details), this.clock());
     this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, ?, ?, ?)')
       .run(fromTaskId, `relation-${relationType}`, JSON.stringify({ toTaskId, ...details }), this.clock());
-    this._enqueueRelationDependents(fromTaskId, this.clock());
+    this._enqueueRelationDependents(relationType === 'blocks' ? fromTaskId : toTaskId, this.clock());
     return { fromTaskId, toTaskId, relationType, details };
   }
 

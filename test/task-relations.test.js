@@ -6,7 +6,10 @@ const add = (id, summary) => store.saveTaskCandidate({ candidateId: id, observat
 add('task-a', 'Prepare proposal');
 add('task-b', 'Get pricing');
 add('task-c', 'Confirm budget');
+const beforeRelationWake = store.exportData().data.jobs.filter((job) => job.kind === 'assistant.proactive-actions' && JSON.parse(job.payload_json).taskId === 'task-a').length;
 store.addTaskRelation('task-a', 'task-b', 'depends_on', { reason: 'pricing is required' });
+const afterRelationWake = store.exportData().data.jobs.filter((job) => job.kind === 'assistant.proactive-actions' && JSON.parse(job.payload_json).taskId === 'task-a').length;
+assert.equal(afterRelationWake, beforeRelationWake + 1, 'adding a dependency wakes the dependent task');
 store.addTaskRelation('task-a', 'task-b', 'waiting_on', { reason: 'awaiting pricing' });
 store.addTaskRelation('task-b', 'task-c', 'depends_on', { reason: 'budget is required' });
 const beforeDependencyWake = store.exportData().data.jobs.filter((job) => job.kind === 'assistant.proactive-actions' && JSON.parse(job.payload_json).taskId === 'task-a').length;
