@@ -332,6 +332,21 @@ assert.match(sessionListText(sessions, 'one'), /utilities · Terminal/);
   assert.deepStrictEqual(resumedRequests, [11]);
   assert.deepStrictEqual(resumedOffsets, []);
   resumedControl.stop();
+
+  const updateStore = new SqliteStore();
+  const delivered = [];
+  const updateFetch = (control) => async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    if (payload.offset !== 0) { control.stopped = true; return { ok: true, json: async () => ({ ok: true, result: [] }) }; }
+    control.stopped = true;
+    return { ok: true, json: async () => ({ ok: true, result: [{ update_id: 900, message: { chat: { id: 42 }, text: '/assistant durable once' } }] }) };
+  };
+  const firstUpdateControl = new TelegramControl({ token: 'test-token', chatId: '42', listSessions: () => [], getHistory: () => ({ pendingQuestions: [] }), callbackStore: updateStore, assistantMessage: async (text) => delivered.push(text), getOffset: () => 0, fetchImpl: null });
+  firstUpdateControl.fetch = updateFetch(firstUpdateControl); firstUpdateControl.stopped = false; await firstUpdateControl.poll();
+  const secondUpdateControl = new TelegramControl({ token: 'test-token', chatId: '42', listSessions: () => [], getHistory: () => ({ pendingQuestions: [] }), callbackStore: updateStore, assistantMessage: async (text) => delivered.push(`duplicate:${text}`), getOffset: () => 0, fetchImpl: null });
+  secondUpdateControl.fetch = updateFetch(secondUpdateControl); secondUpdateControl.stopped = false; await secondUpdateControl.poll();
+  assert.deepStrictEqual(delivered, ['durable once']);
+  updateStore.close();
   callbackStore.close();
   console.log('telegram tests passed');
 })().catch((error) => {

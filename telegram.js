@@ -249,11 +249,11 @@ class TelegramControl {
     try {
       if (this.configured && !this.hasPersistedOffset) {
         const queued = await this.request('getUpdates', { offset: -1, timeout: 0, allowed_updates: ['message', 'callback_query'] });
-        if (queued.length) {
-          const latest = queued[queued.length - 1];
-          this.offset = latest.update_id + 1;
-          if (parseCommand(latest.message?.text)?.name === 'start') await this.handleUpdate(latest);
-          this.persistOffset();
+          if (queued.length) {
+            const latest = queued[queued.length - 1];
+            this.offset = latest.update_id + 1;
+            if (parseCommand(latest.message?.text)?.name === 'start') await this.processUpdate(latest);
+            this.persistOffset();
         }
       }
     } catch (error) {
@@ -269,7 +269,7 @@ class TelegramControl {
           allowed_updates: ['message', 'callback_query'],
         });
         for (const update of updates) {
-          await this.handleUpdate(update);
+          await this.processUpdate(update);
           this.offset = update.update_id + 1;
           this.persistOffset();
         }
@@ -279,6 +279,14 @@ class TelegramControl {
         await delay(3000);
       }
     }
+  }
+
+  async processUpdate(update) {
+    const updateId = update?.update_id;
+    if (this.callbackStore?.claimTelegramUpdate && !this.callbackStore.claimTelegramUpdate(updateId)) return { duplicate: true };
+    await this.handleUpdate(update);
+    this.callbackStore?.completeTelegramUpdate?.(updateId);
+    return { duplicate: false };
   }
 
   async handleUpdate(update) {

@@ -318,6 +318,12 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS telegram_callbacks_expiry ON telegram_callbacks(expires_at, status);`,
+  `CREATE TABLE IF NOT EXISTS telegram_updates (
+    update_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    completed_at INTEGER
+  );`,
   `CREATE TABLE IF NOT EXISTS mobile_pairing_codes (
     code_id TEXT PRIMARY KEY,
     code_hash TEXT NOT NULL UNIQUE,
@@ -449,6 +455,18 @@ class SqliteStore {
 
   releaseTelegramCallback(token, chatId) {
     const result = this.db.prepare("UPDATE telegram_callbacks SET status = 'pending', claimed_at = NULL WHERE token = ? AND chat_id = ? AND status = 'claimed'").run(String(token), String(chatId));
+    return Number(result.changes) > 0;
+  }
+
+  claimTelegramUpdate(updateId) {
+    if (!Number.isInteger(Number(updateId)) || Number(updateId) < 0) return false;
+    const result = this.db.prepare("INSERT INTO telegram_updates(update_id, status, received_at, completed_at) VALUES (?, 'processing', ?, NULL) ON CONFLICT(update_id) DO NOTHING").run(Number(updateId), this.clock());
+    return Number(result.changes) > 0;
+  }
+
+  completeTelegramUpdate(updateId) {
+    if (!Number.isInteger(Number(updateId)) || Number(updateId) < 0) return false;
+    const result = this.db.prepare("UPDATE telegram_updates SET status = 'completed', completed_at = ? WHERE update_id = ? AND status = 'processing'").run(this.clock(), Number(updateId));
     return Number(result.changes) > 0;
   }
 
@@ -1373,7 +1391,7 @@ class SqliteStore {
   }
 
   exportData() {
-    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'telegram_callbacks', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens', 'mobile_push_deliveries'];
+    const tables = ['sessions', 'events', 'approval_requests', 'approval_options', 'decisions', 'audit_entries', 'execution_attempts', 'receipts', 'connector_cursors', 'observations', 'connector_health', 'tasks', 'task_evidence', 'task_history', 'task_corrections', 'task_relations', 'context_records', 'workflows', 'workflow_steps', 'conversations', 'conversation_messages', 'notification_ledger', 'notification_outbox', 'suppressions', 'notification_feedback', 'jobs', 'mobile_commands', 'telegram_callbacks', 'telegram_updates', 'mobile_pairing_codes', 'mobile_devices', 'location_triggers', 'mobile_notification_receipts', 'mobile_push_tokens', 'mobile_push_deliveries'];
     return {
       exportedAt: new Date(this.clock()).toISOString(),
       formatVersion: 1,
