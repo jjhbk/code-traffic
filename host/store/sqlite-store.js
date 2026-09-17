@@ -885,11 +885,13 @@ class SqliteStore {
           const task = this.db.prepare('SELECT task_json AS taskJson FROM tasks WHERE task_id = ?').get(taskRow.taskId);
           if (!task) continue;
           const taskJson = JSON.parse(task.taskJson);
-          if (taskJson.sourceUnavailable === true) continue;
-          this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?')
-            .run(JSON.stringify({ ...taskJson, sourceUnavailable: true, sourceUnavailableAt: now }), now, taskRow.taskId);
-          this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'source-removed\', ?, ?)')
-            .run(taskRow.taskId, JSON.stringify({ observationId: row.observationId, adapterId, messageId: String(messageId) }), now);
+          if (taskJson.sourceUnavailable !== true) {
+            this.db.prepare('UPDATE tasks SET task_json = ?, updated_at = ? WHERE task_id = ?')
+              .run(JSON.stringify({ ...taskJson, sourceUnavailable: true, sourceUnavailableAt: now }), now, taskRow.taskId);
+            this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'source-removed\', ?, ?)')
+              .run(taskRow.taskId, JSON.stringify({ observationId: row.observationId, adapterId, messageId: String(messageId) }), now);
+          }
+          this._invalidateTaskActions(taskRow.taskId, 'source-removed', now);
         }
       } else {
         remove.run(row.observationId);
@@ -1296,6 +1298,23 @@ class SqliteStore {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
 
+  _invalidateTaskActions(taskId, reason, now = this.clock()) {
+    const approvals = this.db.prepare("SELECT request_id AS requestId, action_json AS actionJson, action_digest AS actionDigest FROM approval_requests WHERE status = 'pending'").all();
+    for (const approval of approvals) {
+      const action = JSON.parse(approval.actionJson);
+      if (action.taskId !== taskId) continue;
+      this.db.prepare("UPDATE approval_requests SET status = 'cancelled', resolved_at = ? WHERE request_id = ? AND status = 'pending'").run(now, approval.requestId);
+      this.audit('approval-cancelled', approval.requestId, approval.actionDigest, { reason, taskId });
+    }
+    const workflows = this.db.prepare("SELECT workflow_id AS workflowId, payload_json AS payloadJson FROM workflows WHERE task_id = ? AND state = 'awaiting_approval'").all(taskId);
+    for (const workflow of workflows) {
+      const payload = JSON.parse(workflow.payloadJson);
+      this.db.prepare("UPDATE workflows SET state = 'needs_attention', payload_json = ?, updated_at = ? WHERE workflow_id = ? AND state = 'awaiting_approval'")
+        .run(JSON.stringify({ ...payload, invalidationReason: reason, invalidatedAt: now }), now, workflow.workflowId);
+      this.audit('workflow-invalidated', null, null, { workflowId: workflow.workflowId, taskId, reason });
+    }
+  }
+
   correctTask(taskId, changes) {
     const row = this.db.prepare('SELECT task_json AS taskJson FROM tasks WHERE task_id = ?').get(taskId);
     if (!row || !changes || typeof changes !== 'object') throw new Error('Task correction is invalid.');
@@ -1308,20 +1327,7 @@ class SqliteStore {
       for (const [field, value] of Object.entries(changes)) correction.run(taskId, field, JSON.stringify(value), now);
       this.db.prepare('INSERT INTO task_history(task_id, kind, details_json, created_at) VALUES (?, \'corrected\', ?, ?)')
         .run(taskId, JSON.stringify(changes), now);
-      const approvals = this.db.prepare("SELECT request_id AS requestId, action_json AS actionJson, action_digest AS actionDigest FROM approval_requests WHERE status = 'pending'").all();
-      for (const approval of approvals) {
-        const action = JSON.parse(approval.actionJson);
-        if (action.taskId !== taskId) continue;
-        this.db.prepare("UPDATE approval_requests SET status = 'cancelled', resolved_at = ? WHERE request_id = ? AND status = 'pending'").run(now, approval.requestId);
-        this.audit('approval-cancelled', approval.requestId, approval.actionDigest, { reason: 'task-corrected', taskId });
-      }
-      const workflows = this.db.prepare("SELECT workflow_id AS workflowId, payload_json AS payloadJson FROM workflows WHERE task_id = ? AND state = 'awaiting_approval'").all(taskId);
-      for (const workflow of workflows) {
-        const payload = JSON.parse(workflow.payloadJson);
-        this.db.prepare("UPDATE workflows SET state = 'needs_attention', payload_json = ?, updated_at = ? WHERE workflow_id = ? AND state = 'awaiting_approval'")
-          .run(JSON.stringify({ ...payload, invalidationReason: 'task-corrected', invalidatedAt: now }), now, workflow.workflowId);
-        this.audit('workflow-invalidated', null, null, { workflowId: workflow.workflowId, taskId, reason: 'task-corrected' });
-      }
+      this._invalidateTaskActions(taskId, 'task-corrected', now);
       return { ...next, taskId, status: this.db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId).status };
     });
   }

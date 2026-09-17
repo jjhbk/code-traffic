@@ -23,6 +23,13 @@ assert.equal(store.getWorkflow(pendingFollowUp.workflow.workflowId).state, 'need
 const invalidated = followUp.observeReplies([{ observationId: 'newer-than-draft', threadId: 'thread-approval-stale', direction: 'incoming', timestamp: Date.now() + 1, body: 'Already handled.' }]);
 assert.equal(invalidated.length, 0, 'already-invalidated workflows are not reprocessed');
 assert.equal(store.getApproval(staleRequestId).status, 'cancelled');
+store.saveObservation({ observationId: 'obs-source-removal', messageId: 'msg-source-removal', threadId: 'thread-source-removal', subject: 'Review', body: 'Please review.', direction: 'incoming' }, 'gmail:source-removal');
+store.saveTaskCandidate({ candidateId: 'task-source-removal', observationId: 'obs-source-removal', summary: 'Review source', counterparty: 'alex@example.com', threadId: 'thread-source-removal', evidence: { start: 0, end: 7, text: 'Review' }, extractorVersion: 'test' });
+const sourceTask = store.listTasks({ includeDismissed: true }).find((task) => task.taskId === 'task-source-removal');
+const sourceFollowUp = followUp.prepare(sourceTask, { body: 'Checking the source task.' });
+store.removeObservation('gmail:source-removal', 'msg-source-removal');
+assert.equal(store.getApproval(sourceFollowUp.workflow.payload.requestId).status, 'cancelled', 'source deletion cancels pending approvals');
+assert.equal(store.getWorkflow(sourceFollowUp.workflow.workflowId).state, 'needs_attention', 'source deletion stops awaiting-approval workflows');
 store.updateWorkflow(result.workflow.workflowId, { state: 'waiting_event', payload: { ...result.workflow.payload, threadId: 'thread-1', sentAt: Date.parse('2026-09-17T10:00:00Z') } });
 const verifying = followUp.observeReplies([
   { observationId: 'old-reply', threadId: 'thread-1', direction: 'incoming', timestamp: '2026-09-17T09:59:00Z', body: 'An older message.' },
