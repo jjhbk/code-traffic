@@ -11,6 +11,7 @@ const { MobilePushService } = require('../host/mobile/push');
   assert.deepEqual(await service.deliverPending(), { attempted: 1, sent: 1, failed: 0, revoked: 0 });
   assert.equal(requests[0][0].data.notificationId, 'push-1');
   assert.equal(requests[0][0].body, 'A new signal is ready.');
+  assert.equal(requests[0][0].channelId, 'default');
   assert.equal(store.listMobilePushWork().length, 0);
   assert.deepEqual(await service.deliverPending(), { attempted: 0, sent: 0, failed: 0, revoked: 0 });
   store.close();

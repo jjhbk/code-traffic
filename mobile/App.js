@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityIndicator, AppState, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MobileCoreClient } from './src/client';
 
 const CONFIG_KEY = 'signal-box.mobile.config.v1';
@@ -29,6 +29,16 @@ export default function App() {
   useEffect(() => { AsyncStorage.getItem(CONFIG_KEY).then((value) => { if (!value) return; const saved = JSON.parse(value); setConfig(saved); setBaseUrl(saved.baseUrl); setToken(saved.token); setClient(new MobileCoreClient({ ...saved, storage: AsyncStorage })); }); }, []);
   useEffect(() => { refresh(); }, [client]);
   useEffect(() => { if (!client) return; registerPush(client, false); }, [client]);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    Notifications.setNotificationChannelAsync('default', { name: 'Signal Box', importance: Notifications.AndroidImportance.DEFAULT, sound: 'default' });
+    return undefined;
+  }, []);
+  useEffect(() => {
+    if (!client) return undefined;
+    const subscription = Notifications.addNotificationResponseReceivedListener(() => refresh(client));
+    return () => subscription.remove();
+  }, [client]);
   useEffect(() => {
     if (!client) return undefined;
     const refreshIfActive = () => { if (AppState.currentState === 'active') refresh(client); };

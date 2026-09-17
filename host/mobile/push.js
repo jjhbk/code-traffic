@@ -16,7 +16,7 @@ class MobilePushService {
         const response = await this.fetchImpl(this.endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify([{ to: item.pushToken, title: 'Signal Box', body: 'A new signal is ready.', data: { notificationId: item.notificationId }, sound: 'default', priority: 'high' }]),
+          body: JSON.stringify([{ to: item.pushToken, title: 'Signal Box', body: 'A new signal is ready.', data: { notificationId: item.notificationId }, channelId: 'default', sound: 'default', priority: 'high' }]),
         });
         const payload = await response.json();
         const ticket = payload?.data?.[0] || payload?.data || {};
