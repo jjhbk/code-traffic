@@ -87,6 +87,16 @@ const { BACKGROUND_PROTOCOL_VERSION } = require('../host/runtime/protocol');
   const hangingHost = new BackgroundHost({ databasePath, startupTimeoutMs: 100, forkImpl: () => hangingChild });
   await assert.rejects(hangingHost.start(), /did not become ready within 100ms/);
   assert.equal((await hangingHost.health()).lifecycle, 'unavailable');
+
+  const unresponsiveChild = new EventEmitter();
+  unresponsiveChild.send = () => {};
+  const unresponsiveHost = new BackgroundHost({ databasePath, forkImpl: () => unresponsiveChild });
+  unresponsiveHost.child = unresponsiveChild;
+  unresponsiveChild.connected = true;
+  const healthStartedAt = Date.now();
+  const unresponsiveHealth = await unresponsiveHost.health();
+  assert.equal(unresponsiveHealth.lifecycle, 'unavailable');
+  assert.ok(Date.now() - healthStartedAt < 2500, 'health should have a bounded response time');
   const retryChild = new EventEmitter();
   retryChild.connected = true;
   retryChild.send = (message) => {

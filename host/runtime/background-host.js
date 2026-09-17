@@ -99,11 +99,23 @@ class BackgroundHost {
     return this.ready;
   }
 
-  request(method, payload = {}) {
+  request(method, payload = {}, { timeoutMs = 0 } = {}) {
     if (!this.child || !this.child.connected) return Promise.reject(new Error('Background host is not running.'));
     const id = `background-request-${++this.sequence}`;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      let timer = null;
+      const settle = (callback) => (value) => {
+        if (timer) clearTimeout(timer);
+        callback(value);
+      };
+      this.pending.set(id, { resolve: settle(resolve), reject: settle(reject) });
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`Background host request timed out after ${timeoutMs}ms.`));
+        }, timeoutMs);
+        timer.unref?.();
+      }
       this.child.send({ ...payload, method, id, token: this.token });
     });
   }
@@ -111,7 +123,7 @@ class BackgroundHost {
   async health() {
     if (!this.child || !this.child.connected) return { running: false, busy: false, paused: this.paused, lifecycle: this.stopping ? 'stopped' : (this.restartTimer ? 'recovering' : 'unavailable'), lastExitAt: this.lastExitAt, restartCount: this.restartCount };
     try {
-      const health = await this.request('health');
+      const health = await this.request('health', {}, { timeoutMs: 1500 });
       return { ...health, lifecycle: this.lifecycle, lastExitAt: this.lastExitAt, restartCount: this.restartCount };
     } catch (error) {
       return { running: false, busy: false, paused: this.paused, lifecycle: this.restartTimer ? 'recovering' : 'unavailable', lastExitAt: this.lastExitAt, restartCount: this.restartCount, lastError: error.message };
