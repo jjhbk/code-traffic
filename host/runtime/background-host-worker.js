@@ -4,7 +4,10 @@ const { WorkflowService } = require('../workflows/service');
 
 const token = process.env.SIGNAL_BOX_BACKGROUND_TOKEN || '';
 const databasePath = process.argv[2];
-if (!databasePath || !token || typeof process.send !== 'function') throw new Error('Background host requires a database path, token, and IPC parent.');
+const parentPort = process.parentPort || null;
+const send = (message) => parentPort ? parentPort.postMessage(message) : process.send(message);
+const listen = (handler) => parentPort ? parentPort.on('message', handler) : process.on('message', handler);
+if (!databasePath || !token || (typeof process.send !== 'function' && !parentPort)) throw new Error('Background host requires a database path, token, and IPC parent.');
 
 const store = new SqliteStore({ filename: databasePath });
 const parentCalls = new Map();
@@ -13,7 +16,7 @@ function callParent(kind, payload) {
   const id = `background-job-${++parentSequence}`;
   return new Promise((resolve, reject) => {
     parentCalls.set(id, { resolve, reject });
-    process.send({ type: 'job', id, token, kind, payload });
+    send({ type: 'job', id, token, kind, payload });
   });
 }
 const runtime = new AssistantRuntime({ store, workerId: `background-${process.pid}`, kinds: ['workflow.resume', 'assistant.sync.gmail', 'assistant.sync.calendar', 'assistant.sync.drive', 'assistant.digest'], paused: process.env.SIGNAL_BOX_BACKGROUND_PAUSED === '1' });
@@ -32,10 +35,10 @@ for (const [kind, intervalMs] of [['assistant.sync.gmail', 5 * 60 * 1000], ['ass
 }
 
 function reply(id, result, error = null) {
-  if (process.connected) process.send({ type: 'response', id, result, error: error ? error.message : null });
+  send({ type: 'response', id, result, error: error ? error.message : null });
 }
 
-process.on('message', (message) => {
+listen((message) => {
   if (!message || message.token !== token || !message.id) return;
   try {
     if (message.type === 'job-response') {
@@ -54,5 +57,6 @@ process.on('message', (message) => {
   } catch (error) { reply(message.id, null, error); }
 });
 
-process.on('disconnect', () => { runtime.stop(); store.close(); process.exit(0); });
-process.send({ type: 'ready', health: runtime.health() });
+if (parentPort) parentPort.on('close', () => { runtime.stop(); store.close(); process.exit(0); });
+else process.on('disconnect', () => { runtime.stop(); store.close(); process.exit(0); });
+send({ type: 'ready', health: runtime.health() });

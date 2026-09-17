@@ -4,7 +4,7 @@ const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, Tray, nativeImage, safeStorage, screen, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, Tray, nativeImage, safeStorage, screen, shell, utilityProcess } = require('electron');
 const { Board } = require('./board');
 const { runningAgents } = require('./processes');
 const { sessionArgs } = require('./session-command');
@@ -119,6 +119,17 @@ const DELIVERY_ACK_TIMEOUT_MS = Number.parseInt(process.env.SIGNAL_BOX_DELIVERY_
 const boardPort = Number.parseInt(process.env.SIGNAL_BOX_PORT || '4747', 10);
 const desktopNotificationsEnabled = false;
 const SESSION_TYPES = new Set(['claude', 'codex', 'terminal']);
+
+function forkBackgroundUtility(modulePath, args, options) {
+  const child = utilityProcess.fork(modulePath, args, { ...options, serviceName: 'Signal Box Assistant Host' });
+  return {
+    connected: true,
+    on: child.on.bind(child),
+    once: child.once.bind(child),
+    send: (message) => child.postMessage(message),
+    disconnect: () => child.kill(),
+  };
+}
 
 try {
   pty = require('node-pty');
@@ -1009,6 +1020,7 @@ async function start() {
       try {
         backgroundHost = new BackgroundHost({
           databasePath: path.join(app.getPath('userData'), 'signal-box.db'),
+          forkImpl: forkBackgroundUtility,
           paused: appSettings.assistantPaused === true,
           onJob: async (kind, payload) => {
             if (kind === 'assistant.sync.gmail') return runMailSync(payload);
